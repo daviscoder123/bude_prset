@@ -1,0 +1,1730 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0A1017">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Bude pršet?">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Bude pršet? — srovnání modelů + radar</title>
+<style>
+:root{
+  --sans:system-ui,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,'Cascadia Mono','SF Mono',Menlo,Consolas,monospace;
+  --ink:#0A1017; --panel:#101A26; --panel2:#15212F; --line:#1E2C3D;
+  --rain:#5BB3E8; --rain-deep:#1E6FA8; --text:#E9F0F7; --muted:#7E90A6;
+  --dry:#3E4E61; --warn:#E8C15A; --nat:#8ED18F;
+  --cell-h: clamp(20px, 4.4vh, 38px);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{
+  background:radial-gradient(1200px 500px at 70% -10%, #14283C 0%, transparent 60%), var(--ink);
+  color:var(--text); font-family:var(--sans); 
+}
+#app{height:100vh;display:grid;grid-template-rows:auto 1fr auto;gap:clamp(6px,1.2vh,14px);padding:calc(clamp(8px,1.4vh,18px) + env(safe-area-inset-top,0px)) calc(clamp(12px,2vw,28px) + env(safe-area-inset-right,0px)) clamp(8px,1.4vh,18px) calc(clamp(12px,2vw,28px) + env(safe-area-inset-left,0px))}
+
+/* ---------- HORNÍ PANEL ---------- */
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{display:flex;flex-direction:column;line-height:1}
+.brand .t{font-weight:850;font-size:clamp(16px,2.1vh,23px);letter-spacing:-.02em}
+.brand .s{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;margin-top:4px}
+.loc{flex:1;min-width:260px;max-width:640px;position:relative;overflow:visible;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;padding:5px;cursor:text}
+.loc:focus-within{border-color:var(--rain)}
+.pinBtn{background:none;border:none;color:var(--rain);flex:none;padding:0 6px 0 10px;cursor:pointer;display:flex;align-items:center}
+.pinBtn:active{transform:scale(.9)}
+.loc input{flex:1;min-width:0;width:100%;background:none;border:none;outline:none;color:var(--text);font-family:var(--sans);font-size:clamp(13px,1.8vh,16px);font-weight:600;padding:8px 10px;text-overflow:ellipsis}
+.loc input::placeholder{color:var(--muted);font-weight:400}
+.loc .coords{font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;padding:8px 10px;pointer-events:none}
+.locBtn{background:var(--rain-deep);border:none;color:#fff;padding:8px 16px;border-radius:7px;cursor:pointer;font-weight:800;font-family:var(--sans);font-size:clamp(12px,1.7vh,14px);flex:none;transition:background .2s}
+.locBtn:hover{background:var(--rain)}
+.locBtn:active{transform:scale(.97)}
+.locBtn .bmin{display:none;font-size:17px;font-weight:900;line-height:1}
+html.compact .locBtn .bfull{display:none}
+html.compact .locBtn .bmin{display:inline}
+.sugg{position:absolute;top:calc(100% + 8px);left:5px;right:5px;z-index:100;background:var(--panel);border:1px solid var(--rain);border-radius:10px;display:none;max-height:300px;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,.7);animation:slideDown .18s cubic-bezier(.16,.1,0,1)}
+.sugg.open{display:block}
+.sugg button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;background:none;border:none;border-bottom:1px solid var(--line);color:var(--text);font-family:var(--sans);font-size:clamp(12px,1.6vh,14px);padding:11px 12px;cursor:pointer;transition:background .12s}
+.sugg button:last-child{border-bottom:none}
+.sugg button:hover{background:rgba(91,179,232,.12)}
+.sugg button.sel{background:rgba(91,179,232,.22);border-left:2px solid var(--rain);padding-left:10px}
+.sugg .cc{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.sugg .src{font-size:9px;color:var(--rain);border:1px solid var(--rain-deep);border-radius:4px;padding:1px 4px;margin-left:4px}
+@keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.updated{font-family:var(--mono);font-size:10px;color:var(--muted);text-align:right;line-height:1.5}
+
+/* ---------- HLAVNÍ PLOCHA ---------- */
+main{display:grid;grid-template-columns:1fr clamp(210px,23vw,310px);gap:clamp(10px,1.4vw,18px);min-height:0}
+.matrix{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:clamp(8px,1.4vh,16px);display:flex;flex-direction:column;min-height:0}
+.mhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:clamp(4px,.8vh,10px)}
+.mhead h2{font-size:clamp(13px,1.8vh,16px);font-weight:800;letter-spacing:-.01em}
+.mhead .u{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.08em}
+table{width:100%;border-collapse:separate;border-spacing:3px;flex:1;table-layout:fixed}
+th{font-family:var(--mono);font-weight:500;font-size:clamp(9px,1.25vh,11px);color:var(--muted)}
+th.hr{text-align:center}
+th.model{text-align:left;width:clamp(118px,14vw,188px)}
+th.sum{width:clamp(44px,5vw,60px);text-align:right}
+td{height:var(--cell-h);border-radius:6px;text-align:center;font-family:var(--mono);font-size:clamp(9px,1.3vh,11px)}
+td.name{background:none;text-align:left;padding-right:6px;overflow:hidden}
+td.name .n{font-family:var(--sans);font-weight:700;font-size:clamp(10px,1.45vh,13px);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+td.name .a{font-family:var(--mono);font-size:8.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+td.name .flag{display:none;font-size:12px;line-height:1.1}
+td.cell{background:var(--panel2);color:var(--dry);transition:background .3s}
+td.cell.wet{color:#DFF0FC;font-weight:600}
+td.sumcell{background:none;text-align:right;font-weight:600}
+tr.national td.name .n{color:var(--nat)}
+tr.national td.cell{border:1px solid rgba(142,209,143,.3)}
+tr.national .badge{display:inline-block;font-size:8px;color:var(--nat);border:1px solid rgba(142,209,143,.5);border-radius:4px;padding:0 4px;margin-left:4px;vertical-align:1px}
+tr.consensus td.cell{border:1px solid var(--line)}
+tr.consensus td.name .n{color:var(--rain)}
+
+/* ---------- PRAVÝ PANEL ---------- */
+aside{display:flex;flex-direction:column;gap:clamp(8px,1.2vh,14px);min-height:0}
+.verdict,.when{overflow:hidden;overflow-wrap:anywhere;word-break:break-word;hyphens:auto}
+.verdict{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:clamp(10px,1.6vh,16px);display:flex;flex-direction:column;gap:4px}
+.verdict .label{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.verdict .pct{font-weight:900;font-size:clamp(26px,6.5vh,62px);letter-spacing:-.04em;line-height:.95;font-variation-settings:'wdth' 78}
+.verdict .word{font-size:clamp(13px,2vh,17px);font-weight:700}
+.verdict .expl{font-size:clamp(10px,1.5vh,12px);color:var(--muted);line-height:1.4}
+.gauge{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden;margin-top:6px}
+.gauge i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--rain-deep),var(--rain));transition:width .6s ease}
+
+.when{background:var(--panel);border:1px solid var(--rain-deep);border-radius:14px;padding:clamp(10px,1.6vh,16px);display:flex;flex-direction:column;gap:3px}
+.when .label{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.when .big{font-weight:900;font-size:clamp(22px,5.8vh,54px);max-width:100%;overflow-wrap:anywhere;letter-spacing:-.04em;line-height:1;color:var(--rain)}
+.when .big.none{color:var(--muted);font-size:clamp(20px,3.6vh,32px)}
+.when .big small{font-size:.42em;font-weight:700;color:var(--text);letter-spacing:0}
+.when .sub{font-size:clamp(10px,1.5vh,12px);color:var(--muted);line-height:1.4}
+.when .sub b{color:var(--text)}
+.when .src{font-family:var(--mono);font-size:8.5px;color:var(--rain);margin-top:2px}
+
+.stats{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:clamp(8px,1.4vh,14px);display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat .k{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.stat .v{font-weight:800;font-size:clamp(13px,2.1vh,18px);margin-top:2px}
+.stat .v small{font-size:.6em;font-weight:500;color:var(--muted)}
+.tzhint{display:block;font-family:var(--mono);font-size:8.5px;color:var(--rain);margin-top:1px;font-weight:500}
+
+footer{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.05em;flex-wrap:wrap;gap:6px}
+.madeby{display:flex;align-items:center;gap:7px;padding:4px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel)}
+.mb-drop{flex:none;filter:drop-shadow(0 1px 3px rgba(91,179,232,.4))}
+.mb-name{font-family:var(--sans);font-weight:900;font-size:10px;letter-spacing:.12em;color:var(--text)}
+.mb-sep{color:var(--dry)}
+.mb-slogan{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--rain);white-space:nowrap;text-transform:uppercase}
+.legend{display:flex;gap:12px;align-items:center}
+.legend span{display:flex;gap:5px;align-items:center}
+.sw{width:14px;height:10px;border-radius:3px;display:inline-block}
+
+#status{position:fixed;inset:0;display:none;place-items:center;background:rgba(10,16,23,.82);z-index:50;font-family:var(--mono);font-size:13px;color:var(--muted);text-align:center;line-height:1.8;padding:20px}
+#status.show{display:grid}
+.pulse{color:var(--rain);animation:pl 1.2s infinite}
+@keyframes pl{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* kompaktní (mobilní) režim — řízeno JS třídou na <html> */
+html.compact , html.compact body{overflow-y:auto;overflow-x:hidden}
+html.compact #app{height:auto;min-height:100dvh;padding:calc(10px + env(safe-area-inset-top,0px)) calc(6px + env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) calc(6px + env(safe-area-inset-left,0px));max-width:100vw}
+html.compact #app>*, html.compact main>*, html.compact aside>*{min-width:0}
+html.compact header{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center}
+html.compact .loc{min-width:0;max-width:none;margin-left:6px;padding:3px 3px 3px 0;border-radius:9px}
+html.compact .pinBtn{padding:0 4px 0 7px}
+html.compact .pinBtn svg{width:13px;height:13px}
+html.compact .loc input{font-size:13px;padding:7px 6px}
+html.compact .locBtn{padding:7px 11px;border-radius:7px;margin-left:2px}
+html.compact .sugg{left:0;right:0}
+html.compact .brand .s{display:none}
+html.compact .brand .t{font-size:15px}
+html.compact .updated{display:none}
+html.compact .loc{min-width:0;max-width:none}
+html.compact .loc .coords{display:none}
+html.compact .locBtn{padding:8px 12px}
+html.compact main{grid-template-columns:1fr;gap:8px}
+html.compact aside{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+html.compact .verdict{grid-column:1}
+html.compact .when{grid-column:2}
+html.compact .stats{grid-column:1/-1;grid-template-columns:repeat(4,1fr);gap:6px;padding:8px}
+html.compact .stat{min-width:0;overflow:hidden}
+html.compact .stat .k{font-size:7.5px;letter-spacing:.02em;white-space:nowrap}
+html.compact .stat .v{font-size:13px;white-space:nowrap}
+html.compact{--cell-h:22px}
+html.compact .matrix{padding:6px;border-radius:10px}
+html.compact .mhead h2{font-size:12px}
+html.compact .mhead .u{font-size:8px}
+html.compact table{border-spacing:2px}
+html.compact th{font-size:8.5px}
+html.compact th.model{width:60px}
+html.compact th.sum{width:30px}
+html.compact td{font-size:8.5px;border-radius:3px;overflow:hidden}
+html.compact td.name .n{font-size:9.5px}
+html.compact td.name .a{display:none}
+html.compact td.name .flag{display:block}
+html.compact tr.national .badge{display:none}
+html.compact td.sumcell{font-size:8.5px}
+html.compact .verdict, html.compact .when{padding:10px;border-radius:10px}
+html.compact .verdict .pct{font-size:32px}
+html.compact .verdict .word{font-size:12px}
+html.compact .verdict .expl{font-size:9.5px}
+html.compact .when .big{font-size:24px}
+html.compact .when .big.none{font-size:16px}
+html.compact .when .sub{font-size:9.5px}
+html.compact .when .src{font-size:7.5px}
+html.compact footer{display:flex;justify-content:center;padding:6px 0 2px}
+html.compact .legend{display:none}
+html.compact .srcnote{display:none}
+html.compact .madeby{gap:6px;padding:4px 11px}
+html.compact .mb-name{font-size:9px}
+html.compact .mb-slogan{font-size:8px}
+html.compact{--cell-h:20px;font-size:15px}
+html.compact body{overflow-x:hidden}
+html.compact #app{overflow-x:hidden}
+html.compact td{font-size:8px}
+html.compact th{font-size:8px}
+html.compact th.model{width:54px}
+html.compact th.sum{width:28px}
+html.compact td.name .n{font-size:9px}
+html.compact table{border-spacing:1.5px}
+
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">
+      <div class="t">Bude pršet?</div>
+      <div class="s">Modely + národní model + radar</div>
+    </div>
+    <div class="loc" id="locBox">
+      <button class="pinBtn" id="pinBtn" type="button" title="Použít moji polohu"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 21s-7-6.1-7-11a7 7 0 1 1 14 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.6"/></svg></button>
+      <input id="locInput" type="text" placeholder="Zjišťuji polohu… nebo napiš obec / adresu" autocomplete="off" spellcheck="false">
+      <span class="coords" id="coords"></span>
+      <button class="locBtn" id="locBtn" title="Potvrdit a načíst předpověď"><span class="bfull">Hledat</span><span class="bmin">⌕</span></button>
+      <div class="sugg" id="sugg"></div>
+    </div>
+    <div class="updated" id="updated"></div>
+  </header>
+
+  <main>
+    <section class="matrix">
+      <div class="mhead">
+        <h2>Předpověď srážek podle modelu</h2>
+        <span class="u">mm / hod · lokální čas</span>
+      </div>
+      <table id="tbl"><thead><tr id="hdr"></tr></thead><tbody id="body"></tbody></table>
+    </section>
+
+    <aside>
+      <div class="verdict">
+        <div class="label">Pravděpodobnost deště do 8 h</div>
+        <div class="pct" id="pct">–</div>
+        <div class="word" id="word"></div>
+        <div class="gauge"><i id="gaugeFill"></i></div>
+        <div class="expl" id="expl">Načítám data modelů…</div>
+      </div>
+
+      <div class="when">
+        <div class="label">Kdy začne pršet</div>
+        <div class="big" id="whenBig">–</div>
+        <div class="sub" id="whenSub">Počítám nejpravděpodobnější začátek…</div>
+        <div class="src" id="whenSrc"></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="k">Shoda modelů</div><div class="v" id="agree">–</div></div>
+        <div class="stat"><div class="k">Nejbližší déšť</div><div class="v" id="firstRain">–</div></div>
+        <div class="stat"><div class="k">Ø úhrn / 8 h</div><div class="v" id="avgSum">–</div></div>
+        <div class="stat"><div class="k">Max. intenzita</div><div class="v" id="maxInt">–</div></div>
+      </div>
+    </aside>
+  </main>
+
+  <footer>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--panel2)"></i> sucho</span>
+      <span><i class="sw" style="background:rgba(91,179,232,.28)"></i> slabý</span>
+      <span><i class="sw" style="background:rgba(91,179,232,.6)"></i> mírný</span>
+      <span><i class="sw" style="background:var(--rain)"></i> silný</span>
+      <span><i class="sw" style="background:rgba(142,209,143,.5)"></i> národní model</span>
+    </div>
+    <div class="madeby">
+      <svg class="mb-drop" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+        <path d="M12 2.5C12 2.5 5.5 10.2 5.5 14.7a6.5 6.5 0 0 0 13 0C18.5 10.2 12 2.5 12 2.5Z" fill="url(#mbg)"/>
+        <circle cx="9.8" cy="14.2" r="1.6" fill="#DFF0FC" opacity=".85"/>
+        <defs><linearGradient id="mbg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#5BB3E8"/><stop offset="1" stop-color="#1E6FA8"/>
+        </linearGradient></defs>
+      </svg>
+      <span class="mb-name">BUDE&nbsp;PRŠET?</span>
+      <span class="mb-sep">·</span>
+      <span class="mb-slogan">made by Skarka&nbsp;AI&nbsp;company</span>
+    </div>
+    <div class="srcnote">obce: GeoNames + Photon/OSM · předpovědi: open-meteo.com · radar: RainViewer (globální kompozit vč. ČHMÚ/OPERA) · práh ≥ 0,1 mm/h</div>
+  </footer>
+</div>
+
+<div id="status" class="show"><div><span class="pulse">●</span><br>Zjišťuji tvou polohu…</div></div>
+
+<script>
+"use strict";
+/* ===== 7 globálních modelů ===== */
+var MODEL_POOL = [
+  {id:"ecmwf_ifs025",         n:"ECMWF IFS",     a:"Evropské centrum (EU)",     hl:51.4, hg:-0.9,  fam:"ECMWF",      cc:"EU"},
+  {id:"gfs_seamless",         n:"NOAA GFS",      a:"Národní met. služba USA",   hl:38.9, hg:-77.0,  fam:"NOAA",       cc:"US"},
+  {id:"icon_seamless",        n:"DWD ICON",      a:"Německá met. služba",       hl:50.1, hg:8.7,    fam:"DWD",        cc:"DE"},
+  {id:"meteofrance_seamless", n:"Météo-France",  a:"ARPEGE / AROME",            hl:43.6, hg:1.4,    fam:"MeteoFrance",cc:"FR"},
+  {id:"ukmo_seamless",        n:"UK Met Office", a:"Britská met. služba",       hl:50.7, hg:-3.5,   fam:"UKMO",       cc:"GB"},
+  {id:"knmi_seamless",        n:"KNMI",          a:"Nizozemská met. služba",    hl:52.1, hg:5.2,    fam:"KNMI",       cc:"NL"},
+  {id:"dmi_seamless",         n:"DMI",           a:"Dánská met. služba",        hl:55.7, hg:12.6,   fam:"DMI",        cc:"DK"},
+  {id:"metno_lf", special:"metno", n:"MET Norway", a:"Norský met. institut · celosvětově", hl:59.9, hg:10.7, fam:"METNO", cc:"NO"},
+  {id:"gem_seamless",         n:"GEM",           a:"Environment Canada",        hl:45.5, hg:-73.6,  fam:"ECCC",       cc:"CA"},
+  {id:"jma_seamless",         n:"JMA",           a:"Japonská met. agentura",    hl:35.7, hg:139.7,  fam:"JMA",        cc:"JP"},
+  {id:"kma_seamless",         n:"KMA",           a:"Korejská met. správa",      hl:37.5, hg:127.0,  fam:"KMA",        cc:"KR"},
+  {id:"cma_grapes_global",    n:"CMA GRAPES",    a:"Čínská met. správa",        hl:39.9, hg:116.4,  fam:"CMA",        cc:"CN"},
+  {id:"bom_access_global",    n:"BOM ACCESS",    a:"Australský met. úřad",      hl:-37.8,hg:145.0,  fam:"BOM",        cc:"AU"}
+];
+var MODELS = MODEL_POOL.slice(0,7); /* nouzový základ */
+function pickModels(cc, lat, lon){
+  var reg = regionalFor(cc);
+  var chosen = [];
+  var usedFam = {};
+  if(reg){
+    chosen.push({id:reg.id, n:reg.n, a:reg.a, national:true, fam:reg.fam, cc:cc});
+    usedFam[reg.fam] = true;
+  }
+  var sorted = MODEL_POOL.slice().sort(function(a,b){
+    return distKm(lat,lon,a.hl,a.hg) - distKm(lat,lon,b.hl,b.hg);
+  });
+  for(var i=0;i<sorted.length;i++){
+    var m = sorted[i];
+    if(usedFam[m.fam]) continue;      /* jedna agentura = jeden řádek (národní má přednost) */
+    usedFam[m.fam] = true;
+    chosen.push(m);                    /* kandidátů víc než 8 — rezerva za modely bez dat */
+  }
+  return chosen;
+}function distKm(a1,o1,a2,o2){
+  var R=6371, dA=(a2-a1)*Math.PI/180, dO=(o2-o1)*Math.PI/180;
+  var s=Math.sin(dA/2)*Math.sin(dA/2)+Math.cos(a1*Math.PI/180)*Math.cos(a2*Math.PI/180)*Math.sin(dO/2)*Math.sin(dO/2);
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+
+/* ===== národní / regionální modely podle země ===== */
+var REGIONAL = {
+  CZ:{id:"icon_d2", n:"ICON-D2 · střední Evropa", a:"2,2 km — ČHMÚ ALADIN nemá veřejné API, toto je nejbližší náhrada", fam:"DWD"},
+  SK:{id:"icon_d2", n:"ICON-D2 · střední Evropa", a:"2,2 km · pokrývá SK (SHMÚ ALADIN bez API)", fam:"DWD"},
+  DE:{id:"icon_d2", n:"DWD ICON-D2", a:"národní model Německa · 2,2 km", fam:"DWD"},
+  AT:{id:"icon_d2", n:"ICON-D2", a:"2,2 km · pokrývá Rakousko", fam:"DWD"},
+  PL:{id:"icon_d2", n:"ICON-D2", a:"2,2 km · pokrývá Polsko", fam:"DWD"},
+  CH:{id:"icon_d2", n:"ICON-D2", a:"2,2 km · pokrývá Švýcarsko", fam:"DWD"},
+  FR:{id:"meteofrance_arome_france", n:"Météo-France AROME", a:"národní model Francie · 1,3 km", fam:"MeteoFrance"},
+  GB:{id:"ukmo_uk_deterministic_2km", n:"UKMO UKV", a:"národní model UK · 2 km", fam:"UKMO"},
+  IE:{id:"ukmo_uk_deterministic_2km", n:"UKMO UKV", a:"2 km · pokrývá Irsko", fam:"UKMO"},
+  NL:{id:"knmi_harmonie_arome_netherlands", n:"KNMI HARMONIE", a:"národní model Nizozemska", fam:"KNMI"},
+  BE:{id:"knmi_harmonie_arome_netherlands", n:"KNMI HARMONIE", a:"pokrývá Belgii", fam:"KNMI"},
+  DK:{id:"dmi_harmonie_arome_europe", n:"DMI HARMONIE", a:"národní model Dánska", fam:"DMI"},
+  NO:{id:"metno_nordic", n:"MET Norway Nordic", a:"národní model Norska · 1 km", fam:"METNO"},
+  SE:{id:"metno_nordic", n:"MET Norway Nordic", a:"pokrývá Švédsko", fam:"METNO"},
+  FI:{id:"metno_nordic", n:"MET Norway Nordic", a:"pokrývá Finsko", fam:"METNO"},
+  IT:{id:"italia_meteo_arpae_icon_2i", n:"ItaliaMeteo ICON-2I", a:"národní model Itálie", fam:"ItaliaMeteo"},
+  US:{id:"gfs_hrrr", n:"NOAA HRRR", a:"národní model USA · 3 km", fam:"NOAA"},
+  CA:{id:"gem_hrdps_continental", n:"GEM HRDPS", a:"národní model Kanady · 2,5 km", fam:"ECCC"},
+  JP:{id:"jma_msm", n:"JMA MSM", a:"národní model Japonska · 5 km", fam:"JMA"},
+  AU:{id:"bom_access_global", n:"BOM ACCESS", a:"národní model Austrálie", fam:"BOM"},
+  KR:{id:"kma_seamless", n:"KMA", a:"národní model Jižní Koreje", fam:"KMA"},
+  CN:{id:"cma_grapes_global", n:"CMA GRAPES", a:"národní model Číny", fam:"CMA"}
+};
+var EU_FALLBACK_CC = "ES PT GR HU RO BG HR SI RS BA ME MK AL LT LV EE LU IS UA MD".split(" ");
+function regionalFor(cc){
+  if(!cc) return null;
+  cc = cc.toUpperCase();
+  if(REGIONAL[cc]) return REGIONAL[cc];
+  if(EU_FALLBACK_CC.indexOf(cc) >= 0) return {id:"dmi_harmonie_arome_europe", n:"DMI HARMONIE Evropa", a:"regionální evropský model · 2 km", fam:"DMI"};
+  return null;
+}
+
+var THRESH = 0.1, HOURS = 8;
+function flagEmoji(cc){
+  if(!cc || cc.length !== 2) return "";
+  cc = cc.toUpperCase();
+  return String.fromCodePoint(0x1F1E6 + cc.charCodeAt(0) - 65, 0x1F1E6 + cc.charCodeAt(1) - 65);
+}
+var lastJ = null, lastModels = null;
+var placeUtcOffset = null;
+/* Když je lokalita v jiném pásmu než zařízení, ukázat čas i u tebe. */
+function tzHint(d){
+  if(placeUtcOffset == null) return "";
+  var devOff = -new Date().getTimezoneOffset()*60;
+  if(devOff === placeUtcOffset) return "";
+  var local = new Date(d.getTime() - (placeUtcOffset - devOff)*1000);
+  return "<span class=\"tzhint\">u tebe " + fmtHr(local) + "</span>";
+}
+var CACHE = {};
+function cachedJson(url, ttlMs){
+  var c = CACHE[url];
+  if(c && (Date.now()-c.t) < ttlMs) return Promise.resolve(c.d);
+  return fetch(url).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(function(j){ CACHE[url] = {t:Date.now(), d:j}; return j; });
+}
+function $(id){ return document.getElementById(id); }
+var cur = null, debounceT = null, selIdx = -1, suggData = [], lastQuery = "";
+
+function status(msg){
+  var s = $("status");
+  if(!msg){ s.classList.remove("show"); return; }
+  s.firstElementChild.innerHTML = '<span class="pulse">●</span><br>' + msg;
+  s.classList.add("show");
+}
+function fmtMM(v){ return v>=10 ? v.toFixed(0) : v>=1 ? v.toFixed(1) : v.toFixed(2); }
+/* Fyzikální kontrolor: světové extrémy krátkodobé intenzity jsou ~120–300 mm/h.
+   Cokoliv nad 150 mm/h nebo záporného/nečíselného je chyba dat → zahodit. */
+var MAX_SANE_MMH = 150;
+function saneMm(v){
+  if(v == null || typeof v !== "number" || isNaN(v) || !isFinite(v)) return null;
+  if(v < 0) return 0;
+  if(v > MAX_SANE_MMH) return null;
+  return v;
+}
+function fmtHr(d){ return d.toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}); }
+function cap(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+function at(arr, i){ return (arr && arr[i] != null) ? arr[i] : null; }
+
+/* ================= BLÍZKOST VELKÉ VODNÍ PLOCHY (moře / jezero) =================
+   U pobřeží a velkých jezer vzniká vlastní místní cirkulace (brízy), která
+   často rozhoduje o tom, kde a kdy se spustí odpolední přeháňky — víc, než
+   samo velkoprostorové proudění. Detekce běží čistě na pozadí. */
+function bearingDeg(lat1, lon1, lat2, lon2){
+  var f1=lat1*Math.PI/180, f2=lat2*Math.PI/180, dl=(lon2-lon1)*Math.PI/180;
+  var y = Math.sin(dl)*Math.cos(f2);
+  var x = Math.cos(f1)*Math.sin(f2) - Math.sin(f1)*Math.cos(f2)*Math.cos(dl);
+  return (Math.atan2(y,x)*180/Math.PI + 360) % 360;
+}
+/* Cca 40 největších jezer/vnitřních moří světa (poloha, hrubý poloměr v km) —
+   pokrývá případy, které oceánský vlnový model (níže) nezachytí. */
+var LAKES = [
+  {n:"Kaspické moře", lat:41.5, lon:50.7, r:230}, {n:"Aralské jezero", lat:45.0, lon:60.0, r:40},
+  {n:"Lake Superior", lat:47.7, lon:-87.5, r:80}, {n:"Lake Michigan", lat:44.0, lon:-87.0, r:60},
+  {n:"Lake Huron", lat:44.8, lon:-82.4, r:65}, {n:"Lake Erie", lat:42.2, lon:-81.2, r:45},
+  {n:"Lake Ontario", lat:43.7, lon:-77.9, r:35}, {n:"Great Bear Lake", lat:65.8, lon:-120.6, r:60},
+  {n:"Great Slave Lake", lat:61.5, lon:-114.0, r:55}, {n:"Lake Winnipeg", lat:52.1, lon:-97.9, r:45},
+  {n:"Lake Victoria", lat:-1.0, lon:33.0, r:110}, {n:"Lake Tanganyika", lat:-6.0, lon:29.5, r:45},
+  {n:"Lake Malawi", lat:-12.0, lon:34.5, r:35}, {n:"Lake Baikal", lat:53.5, lon:108.0, r:40},
+  {n:"Lake Balkhash", lat:46.0, lon:74.5, r:45}, {n:"Lake Ladoga", lat:60.9, lon:31.5, r:60},
+  {n:"Lake Onega", lat:61.7, lon:35.5, r:45}, {n:"Lake Titicaca", lat:-15.9, lon:-69.3, r:45},
+  {n:"Lake Nicaragua", lat:11.6, lon:-85.3, r:45}, {n:"Lake Athabasca", lat:59.1, lon:-110.5, r:45},
+  {n:"Issyk-Kul", lat:42.4, lon:77.2, r:35}, {n:"Vänern", lat:58.9, lon:13.5, r:30},
+  {n:"Vättern", lat:58.4, lon:14.6, r:25}, {n:"Balaton", lat:46.8, lon:17.7, r:20},
+  {n:"Lake Geneva", lat:46.4, lon:6.6, r:20}, {n:"Bodensee", lat:47.6, lon:9.4, r:15},
+  {n:"Lake Garda", lat:45.6, lon:10.7, r:12}, {n:"Lake Como", lat:45.9, lon:9.3, r:10},
+  {n:"Lake Maggiore", lat:45.9, lon:8.6, r:12}, {n:"Lake Neuchâtel", lat:46.9, lon:6.9, r:12},
+  {n:"Great Salt Lake", lat:41.1, lon:-112.5, r:35}, {n:"Lake Tahoe", lat:39.1, lon:-120.0, r:15},
+  {n:"Lake Okeechobee", lat:26.9, lon:-80.8, r:20}, {n:"Lake Champlain", lat:44.6, lon:-73.3, r:15},
+  {n:"Dead Sea", lat:31.5, lon:35.5, r:15}, {n:"Lake Vostok", lat:77.5, lon:106.8, r:80}
+];
+function nearestLake(lat, lon){
+  var best = null, bestD = 1e9;
+  LAKES.forEach(function(L){
+    var d = distKm(lat, lon, L.lat, L.lon);
+    if(d <= L.r + 20 && d < bestD){ bestD = d; best = {name:L.n, distKm:d, bearingToWaterDeg: bearingDeg(lat,lon,L.lat,L.lon)}; }
+  });
+  return best;
+}
+/* Moře/oceán: vzorkujeme oceánský vlnový model ~22 km od obce ve 4 světových
+   stranách. Kde model vrátí platnou výšku vlny, tam je otevřená voda. */
+function detectSea(lat, lon){
+  var dLat = 22/111, dLon = 22/(111*Math.max(0.15, Math.cos(lat*Math.PI/180)));
+  var dirs = [{n:"N",lat:lat+dLat,lon:lon,brg:0}, {n:"E",lat:lat,lon:lon+dLon,brg:90},
+              {n:"S",lat:lat-dLat,lon:lon,brg:180}, {n:"W",lat:lat,lon:lon-dLon,brg:270}];
+  var lats = dirs.map(function(d){ return d.lat.toFixed(3); }).join(",");
+  var lons = dirs.map(function(d){ return d.lon.toFixed(3); }).join(",");
+  return cachedJson("https://marine-api.open-meteo.com/v1/marine?latitude="+lats+"&longitude="+lons
+    + "&hourly=wave_height&forecast_days=1&timeformat=unixtime", 2592000000)   /* pobřeží se nehýbe — cache 30 dní */
+    .then(function(res){
+      var arr = Array.isArray(res) ? res : [res];
+      for(var i=0;i<arr.length;i++){
+        var wh = arr[i] && arr[i].hourly && arr[i].hourly.wave_height;
+        if(wh && wh.some(function(v){ return v != null; })){
+          return {kind:"sea", bearingToWaterDeg: dirs[i].brg, distanceKm: 22};
+        }
+      }
+      return null;
+    })
+    .catch(function(){ return null; });
+}
+/* Kombinace: jezero je hned k dispozici (žádný dotaz), moře vyžaduje síťový dotaz. */
+function detectNearWater(lat, lon){
+  var lake = nearestLake(lat, lon);
+  return detectSea(lat, lon).then(function(sea){
+    if(lake && sea) return (lake.distKm <= sea.distanceKm) ? {kind:"lake", name:lake.name, bearingToWaterDeg:lake.bearingToWaterDeg} : sea;
+    if(lake) return {kind:"lake", name:lake.name, bearingToWaterDeg:lake.bearingToWaterDeg};
+    return sea;
+  });
+}
+
+/* ================= LOKÁLNÍ UČENÍ PŘESNOSTI MODELŮ =================
+   Appka si na telefonu (localStorage — nikam se nic neposílá) pamatuje,
+   co který model předpověděl, a s odstupem to porovná s realitou přes
+   METAR. Nasbírané odchylky pak tiše korigují SOUHRNNÉ výpočty
+   (pravděpodobnost, shodu, minutový odhad) — ne čísla v tabulce, ta
+   dál ukazují přesně to, co model řekl. Korekce se použije až po
+   nasbírání dostatečného vzorku a je omezená na ±30 %. */
+var BIAS_KEY = "bpBias_v1", PENDING_KEY = "bpPending_v1";
+var BIAS_MIN_SAMPLES = 15, BIAS_MAX_SAMPLES = 40, BIAS_CLAMP = [0.7, 1.3];
+var biasVerifiedThisSession = false;
+
+function lsGet(key, fallback){
+  try{ var v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch(e){ return fallback; }
+}
+function lsSet(key, val){
+  try{ localStorage.setItem(key, JSON.stringify(val)); }
+  catch(e){ /* soukromý režim prohlížeče / plné úložiště — tiše ignorovat */ }
+}
+function locKeyOf(lat, lon){
+  return (Math.round(lat*2)/2).toFixed(1) + "," + (Math.round(lon*2)/2).toFixed(1);
+}
+function getBiasFactor(locKey, modelId){
+  var store = lsGet(BIAS_KEY, {locations:{}});
+  var loc = store.locations[locKey];
+  var arr = loc && loc.models && loc.models[modelId];
+  if(!arr || arr.length < BIAS_MIN_SAMPLES) return 1;    /* málo dat → žádný vliv */
+  var mean = arr.reduce(function(a,b){ return a+b; },0) / arr.length;
+  var factor = Math.exp(mean);
+  return Math.min(BIAS_CLAMP[1], Math.max(BIAS_CLAMP[0], factor));
+}
+function recordBiasSample(locKey, lat, lon, modelId, logRatio){
+  var store = lsGet(BIAS_KEY, {locations:{}});
+  if(!store.locations[locKey]) store.locations[locKey] = {lastUsed:0, lat:lat, lon:lon, models:{}};
+  var loc = store.locations[locKey];
+  loc.lastUsed = Date.now();
+  if(!loc.models[modelId]) loc.models[modelId] = [];
+  loc.models[modelId].push(logRatio);
+  if(loc.models[modelId].length > BIAS_MAX_SAMPLES) loc.models[modelId].shift();
+  /* pojistka: appka si pamatuje jen posledních ~40 míst, ať paměť telefonu neroste do nekonečna */
+  var keys = Object.keys(store.locations);
+  if(keys.length > 40){
+    keys.sort(function(a,b){ return (store.locations[a].lastUsed||0) - (store.locations[b].lastUsed||0); });
+    for(var i=0;i<keys.length-40;i++) delete store.locations[keys[i]];
+  }
+  lsSet(BIAS_KEY, store);
+}
+/* Zařadí čerstvé predikce (jen nejbližší 4 h — realisticky ověřitelné) do fronty na pozdější kontrolu. */
+function enqueuePredictions(locKey, lat, lon, times, perModel){
+  var q = lsGet(PENDING_KEY, []);
+  var maxIdx = Math.min(4, times.length);
+  for(var i=0;i<maxIdx;i++){
+    perModel.forEach(function(pm){
+      if(pm.vals[i] == null) return;
+      q.push({locKey:locKey, lat:lat, lon:lon, model:pm.m.id,
+              targetTime: times[i].getTime(), predictedMm: pm.vals[i]});
+    });
+  }
+  if(q.length > 600) q = q.slice(q.length - 600);
+  lsSet(PENDING_KEY, q);
+}
+/* Hrubý odhad mm/h z METAR kategorie — jen pro srovnání, nikde se nezobrazuje. */
+function metarApproxMm(wx){
+  if(!wx || !metarHasPrecip(wx)) return 0;
+  var w = wx.toUpperCase();
+  if(w.indexOf("+") >= 0) return 6;
+  if(w.indexOf("TS") >= 0 || w.indexOf("GR") >= 0) return 8;
+  if(w.indexOf("SH") >= 0) return 3;
+  if(w.indexOf("-") >= 0 || w.indexOf("DZ") >= 0) return 0.3;
+  return 1.5;
+}
+/* Ověří predikce starší než ~20 min proti METAR pozorování. Max jednou za otevření appky. */
+function runBiasVerification(){
+  if(biasVerifiedThisSession) return;
+  biasVerifiedThisSession = true;
+  var q = lsGet(PENDING_KEY, []);
+  if(!q.length) return;
+  var now = Date.now(), GRACE = 20*60*1000, EXPIRE = 48*3600*1000;
+  var due = [], keep = [];
+  q.forEach(function(item){
+    var age = now - item.targetTime;
+    if(age < GRACE){ keep.push(item); return; }
+    if(age > EXPIRE) return;                     /* moc staré na ověření → zahodit */
+    due.push(item);
+  });
+  if(!due.length){ lsSet(PENDING_KEY, keep); return; }
+
+  var groups = {};
+  due.forEach(function(item){
+    if(!groups[item.locKey]) groups[item.locKey] = {lat:item.lat, lon:item.lon, items:[]};
+    groups[item.locKey].items.push(item);
+  });
+  var locKeys = Object.keys(groups), gi = 0;
+  (function next(){
+    if(gi >= locKeys.length){ lsSet(PENDING_KEY, keep); return; }
+    var g = groups[locKeys[gi]]; gi++;
+    var oldest = Math.min.apply(null, g.items.map(function(it){ return it.targetTime; }));
+    var hoursSpan = Math.min(48, Math.max(2, Math.ceil((now - oldest)/3600000) + 1));
+    var d = 1.0;
+    cachedJson("https://aviationweather.gov/api/data/metar?format=json&hours="+hoursSpan
+      + "&bbox="+(g.lat-d).toFixed(2)+","+(g.lon-d*1.6).toFixed(2)+","+(g.lat+d).toFixed(2)+","+(g.lon+d*1.6).toFixed(2), 3600000)
+      .then(function(arr){
+        g.items.forEach(function(item){
+          var best = null, bestDt = 1e9;
+          (arr||[]).forEach(function(o){
+            if(o.obsTime == null) return;
+            var dt = Math.abs(o.obsTime*1000 - item.targetTime);
+            if(dt < bestDt && dt <= 40*60*1000){ bestDt = dt; best = o; }
+          });
+          if(!best) return;                       /* žádné pozorování v okně → přeskočit */
+          var observed = metarApproxMm(best.wxString || "");
+          var pred = Math.max(0.05, Math.min(50, item.predictedMm));
+          var obs  = Math.max(0.05, Math.min(50, observed));
+          var logRatio = Math.max(-2, Math.min(2, Math.log(pred/obs)));
+          recordBiasSample(item.locKey, item.lat, item.lon, item.model, logRatio);
+        });
+        next();
+      })
+      .catch(function(){ next(); });
+  })();
+}
+/* Zmenší obsah panelu tak, aby se vždy vešel do rámečku (bez přetečení). */
+function fitPanel(el){
+  if(!el) return;
+  el.style.fontSize = "";
+  var scale = 1;
+  for(var i=0; i<14; i++){
+    var overH = el.scrollHeight > el.clientHeight + 1;
+    var overW = el.scrollWidth  > el.clientWidth + 1;
+    if(!overH && !overW) break;
+    scale -= 0.05;
+    if(scale < 0.55) break;
+    el.style.fontSize = (scale*100).toFixed(0)+"%";
+  }
+}
+function fitPanels(){
+  requestAnimationFrame(function(){
+    var v = document.querySelector(".verdict"), w = document.querySelector(".when");
+    fitPanel(v); fitPanel(w);
+  });
+}
+function isPhoneLike(){
+  var small = Math.min(screen.width||9999, screen.height||9999) <= 520;
+  var coarse = window.matchMedia && window.matchMedia("(pointer:coarse)").matches;
+  return window.innerWidth <= 900 || (coarse && small);
+}
+var NARROW = { matches: isPhoneLike() };
+function applyLayoutMode(){
+  NARROW.matches = isPhoneLike();
+  document.documentElement.classList.toggle("compact", NARROW.matches);
+  fitGuard();
+}
+/* Pojistka: pokud i tak obsah přetéká (prohlížeč ignoruje viewport),
+   plynule zmenšit celou plochu, aby se vešla beze zbytku. */
+function fitGuard(){
+  var b = document.body;
+  b.style.zoom = "";
+  requestAnimationFrame(function(){
+    var over = document.documentElement.scrollWidth / window.innerWidth;
+    if(over > 1.02) b.style.zoom = String(Math.floor(100/over*0.99)/100);
+  });
+}
+window.addEventListener("resize", function(){
+  fitPanels();
+  var was = NARROW.matches;
+  applyLayoutMode();
+  if(was !== NARROW.matches && lastJ) render(lastJ, lastModels); else fitGuard();
+});
+window.addEventListener("orientationchange", function(){ setTimeout(function(){
+  var was = NARROW.matches; applyLayoutMode();
+  if(was !== NARROW.matches && lastJ) render(lastJ, lastModels);
+}, 200); });
+applyLayoutMode();
+function fmtHrHead(d){ return NARROW.matches ? String(d.getHours()) : fmtHr(d); }
+
+/* ================= START ================= */
+var curFromGeo = false;
+var manualPickAt = 0;      /* kdy si uživatel naposledy ručně vybral obec */
+var hiddenAt = 0;
+init();
+function init(){ acquirePosition(false); }
+/* iOS standalone: návrat do appky = "otevření" → znovu požádat o polohu.
+   Ruční volbu obce respektujeme jen krátce v rámci téže seance (5 min). */
+window.addEventListener("pageshow", function(e){
+  if(e.persisted) acquirePosition(true);
+});
+function acquirePosition(silent){
+  if(!navigator.geolocation){ if(!silent) noGeo(); return; }
+  navigator.geolocation.getCurrentPosition(function(p){
+    var lat = p.coords.latitude, lon = p.coords.longitude;
+    curFromGeo = true;
+    fetch("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude="+lat+"&longitude="+lon+"&localityLanguage=cs")
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(silent && !curFromGeo) return;       /* uživatel mezitím zvolil obec ručně */
+        var name = [j.city||j.locality, j.countryCode].filter(Boolean).join(", ") || "Moje poloha";
+        load({lat:lat, lon:lon, name:name, cc:j.countryCode||""}, silent);
+      })
+      .catch(function(){ load({lat:lat, lon:lon, name:"Moje poloha", cc:""}, silent); });
+  }, function(err){
+    if(!silent) noGeo(err);
+  }, {timeout:12000, maximumAge:0, enableHighAccuracy:false});
+}
+function noGeo(err){
+  status(null);
+  if(err && err.code === 1){
+    /* přístup zamítnut na úrovni systému/prohlížeče */
+    var s = $("status");
+    s.firstElementChild.innerHTML =
+      'Aplikace nemá povolený přístup k poloze.<br><br>' +
+      '<b style="color:var(--text)">iPhone:</b> Nastavení → Soukromí a zabezpečení → Polohové služby → Safari (nebo název appky) → „Při používání“.<br><br>' +
+      '<button id="retryGeo" style="background:var(--rain-deep);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-weight:700;font-family:var(--sans);cursor:pointer">Zkusit znovu</button>' +
+      '<div style="margin-top:10px;font-size:11px">…nebo zavři toto okno a napiš obec ručně.</div>';
+    s.classList.add("show");
+    s.addEventListener("click", function(e){ if(e.target === s) status(null); });
+    var btn = document.getElementById("retryGeo");
+    if(btn) btn.addEventListener("click", function(){ status("Žádám o polohu…"); acquirePosition(false); });
+  } else {
+    $("locInput").placeholder = "Napiš obec nebo adresu (kdekoliv na světě)";
+    $("locInput").focus();
+  }
+}
+
+/* ================= VYHLEDÁVÁNÍ OBCÍ ================= */
+var input = $("locInput");
+
+input.addEventListener("input", function(){
+  clearTimeout(debounceT);
+  selIdx = -1;
+  var q = input.value.trim();
+  if(q.length < 3){ closeSugg(); return; }
+  showMsg("Hledám „"+q+"“…");
+  debounceT = setTimeout(function(){ fetchSuggestions(q); }, 450);
+});
+input.addEventListener("focus", function(){
+  if(suggData.length && input.value.trim() === lastQuery) renderSuggestions();
+});
+input.addEventListener("keydown", function(e){
+  if(e.key === "ArrowDown" && suggData.length){ e.preventDefault(); selIdx = (selIdx+1)%suggData.length; renderSuggestions(); }
+  else if(e.key === "ArrowUp" && suggData.length){ e.preventDefault(); selIdx = (selIdx-1+suggData.length)%suggData.length; renderSuggestions(); }
+  else if(e.key === "Enter"){ e.preventDefault(); confirmLocation(); }
+  else if(e.key === "Escape"){ closeSugg(); }
+});
+$("locBtn").addEventListener("click", function(e){ e.preventDefault(); confirmLocation(); });
+$("pinBtn").addEventListener("click", function(e){
+  e.preventDefault(); e.stopPropagation();
+  manualPickAt = 0;
+  status("Žádám o polohu…");
+  acquirePosition(false);
+});
+
+function confirmLocation(){
+  var q = input.value.trim();
+  if(!q) return;
+  if(suggData.length && q === lastQuery){ pick(selIdx >= 0 ? selIdx : 0); return; }
+  showMsg("Hledám „"+q+"“…");
+  geocode(q, true).then(function(results){
+    if(results === null){ showMsg("⚠ Vyhledávání selhalo. Zkontroluj připojení k internetu."); return; }
+    if(!results.length){ showMsg("Žádné výsledky pro „"+q+"“."); return; }
+    suggData = results; lastQuery = q;
+    pick(0);
+  });
+}
+function fetchSuggestions(q){
+  geocode(q, false).then(function(results){
+    if(input.value.trim() !== q) return;
+    if(results === null){ showMsg("⚠ Vyhledávání selhalo. Zkontroluj připojení."); return; }
+    suggData = results; lastQuery = q; selIdx = -1;
+    if(!results.length){ showMsg("Žádné výsledky pro „"+q+"“."); return; }
+    renderSuggestions();
+  });
+}
+
+/* Databáze obcí: GeoNames (open-meteo, cs→en) + OpenStreetMap Nominatim jako záloha
+   pro malé vesnice a konkrétní adresy. Pokrytí: celý svět. */
+/* Řetězec geokodérů:
+   1) GeoNames (cs → en) — hlavní zdroj obcí
+   2) Photon — geokodér nad daty OpenStreetMap stavěný na našeptávání,
+      zvládne vesnice i adresy a snese dotaz na každý stisk klávesy
+   3) Nominatim — až po potvrzení hledání, s brzdou (max 1 dotaz/s)      */
+function geocode(q, confirmed){
+  return geoOpenMeteo(q, "cs").then(function(r1){
+    if(r1 === null) return null;
+    if(r1.length) return r1;
+    return geoOpenMeteo(q, "en").then(function(r2){
+      if(r2 === null) return null;
+      if(r2.length) return r2;
+      return geoPhoton(q).then(function(r3){
+        if(r3 && r3.length) return r3;
+        if(!confirmed) return r3 || [];      /* při psaní Nominatim nevoláme */
+        return geoNominatim(q);
+      });
+    });
+  });
+}
+function geoPhoton(q){
+  return cachedJson("https://photon.komoot.io/api/?q="+encodeURIComponent(q)
+    + "&limit=8&lang=default", 86400000)
+    .then(function(j){
+      var feats = (j && j.features) || [];
+      return feats.map(function(f){
+        var pr = f.properties || {};
+        var co = (f.geometry && f.geometry.coordinates) || [];
+        var detail = [pr.state, pr.country].filter(Boolean).join(", ");
+        var nm = pr.name || pr.city || pr.district || "";
+        if(pr.housenumber && pr.street) nm = pr.street+" "+pr.housenumber;
+        return {name:nm, detail:detail,
+                lat:parseFloat(co[1]), lon:parseFloat(co[0]),
+                cc:(pr.countrycode||"").toUpperCase(), src:"OSM"};
+      }).filter(function(r){ return r.name && !isNaN(r.lat) && !isNaN(r.lon); });
+    })
+    .catch(function(){ return null; });
+}
+/* Brzda: mezi dvěma dotazy na Nominatim vždy alespoň 1,1 s (jejich limit). */
+var nomLast = 0, nomChain = Promise.resolve();
+function nominatimThrottled(url){
+  nomChain = nomChain.then(function(){
+    var wait = Math.max(0, 1100 - (Date.now() - nomLast));
+    return new Promise(function(res){ setTimeout(res, wait); });
+  }).then(function(){
+    nomLast = Date.now();
+    return cachedJson(url, 86400000);
+  });
+  return nomChain;
+}
+function geoOpenMeteo(q, lang){
+  return cachedJson("https://geocoding-api.open-meteo.com/v1/search?name="+encodeURIComponent(q)+"&count=8&language="+lang+"&format=json", 86400000)
+    .then(function(j){
+      return (j.results||[]).map(function(p){
+        return {name:p.name, detail:[p.admin1,p.country].filter(Boolean).join(", "),
+                lat:p.latitude, lon:p.longitude, cc:(p.country_code||"").toUpperCase(), src:"GeoNames"};
+      });
+    })
+    .catch(function(){ return null; });
+}
+function geoNominatim(q){
+  return nominatimThrottled("https://nominatim.openstreetmap.org/search?q="+encodeURIComponent(q)+"&format=jsonv2&limit=8&accept-language=cs&addressdetails=1")
+    .then(function(arr){
+      return arr.map(function(p){
+        var a = p.address||{};
+        var nm = a.village||a.town||a.city||a.hamlet||(p.display_name||"").split(",")[0];
+        return {name:nm, detail:(p.display_name||"").split(",").slice(1,3).join(",").trim(),
+                lat:parseFloat(p.lat), lon:parseFloat(p.lon), cc:(a.country_code||"").toUpperCase(), src:"OSM"};
+      });
+    })
+    .catch(function(){ return null; });
+}
+
+function renderSuggestions(){
+  var s = $("sugg");
+  s.innerHTML = "";
+  suggData.forEach(function(p,i){
+    var b = document.createElement("button");
+    b.type = "button";
+    if(i === selIdx) b.classList.add("sel");
+    b.innerHTML = "<span>"+p.name
+      + (p.detail ? " <span class=\"cc\">· "+p.detail+"</span>" : "")
+      + (p.src==="OSM" ? "<span class=\"src\">OSM</span>" : "")
+      + "</span><span class=\"cc\">"+p.lat.toFixed(2)+", "+p.lon.toFixed(2)+"</span>";
+    b.addEventListener("mousedown", function(ev){ ev.preventDefault(); pick(i); });
+    b.addEventListener("touchstart", function(ev){ ev.preventDefault(); pick(i); }, {passive:false});
+    s.appendChild(b);
+  });
+  s.classList.add("open");
+}
+function showMsg(text){
+  var s = $("sugg");
+  s.innerHTML = "<div style=\"padding:12px 14px;color:var(--muted);font-size:12px;font-family:var(--mono)\">"+text+"</div>";
+  s.classList.add("open");
+}
+function pick(i){
+  var p = suggData[i];
+  if(!p) return;
+  curFromGeo = false;
+  manualPickAt = Date.now();
+  closeSugg();
+  input.blur();
+  load({lat:p.lat, lon:p.lon, name:[p.name, p.cc].filter(Boolean).join(", "), cc:p.cc});
+}
+function closeSugg(){ $("sugg").classList.remove("open"); $("sugg").innerHTML=""; selIdx=-1; }
+document.addEventListener("mousedown", function(e){ if(!$("locBox").contains(e.target)) closeSugg(); });
+
+/* ================= NAČTENÍ PŘEDPOVĚDÍ ================= */
+var lastFetch = 0;
+var reqId = 0;              /* generace požadavku — starší odpovědi se zahodí */
+function isStale(id){ return id !== reqId; }
+function load(place, silent){
+  var myId = ++reqId;       /* od této chvíle jsou všechny předchozí dotazy neplatné */
+  cur = place;
+  lastFetch = Date.now();
+  if(!silent) status("Stahuji předpovědi modelů…");
+  input.value = place.name;
+  $("coords").textContent = place.lat.toFixed(3)+"° / "+place.lon.toFixed(3)+"°";
+
+  var allModels = pickModels(place.cc, place.lat, place.lon);
+  var reg = allModels.length && allModels[0].national ? allModels[0] : null;
+
+  var omModels = allModels.filter(function(m){ return !m.special; });
+  var hasMetno = allModels.some(function(m){ return m.special === "metno"; });
+  var ids = omModels.map(function(m){ return m.id; }).join(",");
+  var url = "https://api.open-meteo.com/v1/forecast?latitude="+place.lat+"&longitude="+place.lon
+    + "&hourly=precipitation&models="+ids+"&forecast_hours="+(HOURS+1)+"&timezone=auto";
+
+  var metnoPromise = hasMetno
+    ? cachedJson("https://api.met.no/weatherapi/locationforecast/2.0/compact?lat="
+        + place.lat.toFixed(4)+"&lon="+place.lon.toFixed(4), 900000).catch(function(){ return null; })
+    : Promise.resolve(null);
+
+  Promise.all([cachedJson(url, 600000), metnoPromise])
+    .then(function(res){
+      if(isStale(myId)) return;              /* mezitím uživatel vybral jinou obec */
+      var j = res[0], mn = res[1];
+      if(mn) injectMetno(j, mn);
+      render(j, allModels);
+      status(null);
+    })
+    .catch(function(){
+      if(isStale(myId)) return;
+      /* pokud regionální model shodí dotaz (mimo doménu), zkus jen globální */
+      if(reg){
+        var url2 = "https://api.open-meteo.com/v1/forecast?latitude="+place.lat+"&longitude="+place.lon
+          + "&hourly=precipitation&models="+MODELS.map(function(m){return m.id;}).join(",")
+          + "&forecast_hours="+(HOURS+1)+"&timezone=auto";
+        cachedJson(url2, 600000)
+          .then(function(j){ if(isStale(myId)) return; render(j, MODELS.slice()); status(null); })
+          .catch(function(){ if(!isStale(myId)) failLoad(); });
+      } else failLoad();
+    });
+
+  loadRadar(place.lat, place.lon, myId);
+}
+
+/* Obnova dat: pouze při viditelné aplikaci — na pozadí nula aktivity,
+   žádné časovače nesahají na síť, šetří baterii i data. */
+var REFRESH_MS = 15*60*1000;
+setInterval(function(){
+  if(document.visibilityState !== "visible") return;
+  if(cur && Date.now() - lastFetch >= REFRESH_MS) load(cur, true);
+}, 60*1000);
+document.addEventListener("visibilitychange", function(){
+  if(document.visibilityState === "hidden"){ hiddenAt = Date.now(); return; }
+  /* appka se právě otevřela / vrátila do popředí */
+  var manualFresh = manualPickAt && (Date.now() - manualPickAt < 5*60*1000);
+  if(!manualFresh){
+    acquirePosition(true);                      /* každé otevření → žádost o polohu */
+  } else if(cur && Date.now() - lastFetch >= REFRESH_MS){
+    load(cur, true);
+  }
+});
+
+/* service worker jen na https/localhost (GitHub Pages) */
+if("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")){
+  window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
+}
+window.addEventListener("load", function(){ setTimeout(runBiasVerification, 4000); });
+
+function injectMetno(j, mn){
+  try{
+    var off = (j.utc_offset_seconds || 0) * 1000;
+    var series = (mn.properties && mn.properties.timeseries) || [];
+    var byUtc = {};
+    series.forEach(function(e){
+      var d = e.data && e.data.next_1_hours && e.data.next_1_hours.details;
+      if(d && d.precipitation_amount != null){
+        byUtc[Date.parse(e.time)] = saneMm(d.precipitation_amount);
+      }
+    });
+    j.hourly["precipitation_metno_lf"] = (j.hourly.time||[]).map(function(t){
+      var utcMs = Date.parse(t+"Z") - off;      /* lokální ISO → UTC */
+      return (utcMs in byUtc) ? byUtc[utcMs] : null;
+    });
+  }catch(e){ /* MET Norway nedostupné → řádek se prostě nezobrazí */ }
+}
+function failLoad(){
+  status("Data se nepodařilo načíst.<br>Zkontroluj připojení a zkus jinou lokaci.");
+  setTimeout(function(){ status(null); }, 3500);
+}
+
+/* ================= VYKRESLENÍ MATICE ================= */
+function render(j, allModels){
+  lastJ = j; lastModels = allModels;
+  placeUtcOffset = (j.utc_offset_seconds != null) ? j.utc_offset_seconds : null;
+  var times = (j.hourly.time||[]).slice(0,HOURS).map(function(t){ return new Date(t); });
+  $("hdr").innerHTML = "<th class=\"model\">Model</th>"
+    + times.map(function(t){ return "<th class=\"hr\">"+fmtHrHead(t)+"</th>"; }).join("")
+    + "<th class=\"sum\">"+(NARROW.matches ? "Σ" : "Σ mm")+"</th>";
+
+  var body = $("body"); body.innerHTML = "";
+  var locKey = locKeyOf(cur.lat, cur.lon);
+  var perModel = [];
+  allModels.forEach(function(m){
+    var arr = j.hourly["precipitation_"+m.id] || (allModels.length===1 ? j.hourly.precipitation : null);
+    var vals = times.map(function(_,i){ return arr ? saneMm(arr[i]) : null; });
+    var sum = vals.reduce(function(a,v){ return a+(v||0); }, 0);
+    var rains = vals.some(function(v){ return v!=null && v>=THRESH; });
+    var avail = vals.some(function(v){ return v!=null; });
+    if(!avail) return;
+    /* korigované hodnoty (podle nasbírané historie přesnosti) — jen pro souhrnné
+       výpočty; tabulka dál ukazuje přesně to, co model doslova předpověděl. */
+    var factor = getBiasFactor(locKey, m.id);
+    var cvals = (factor === 1) ? vals : vals.map(function(v){ return v==null ? null : saneMm(v/factor); });
+    var csum = cvals.reduce(function(a,v){ return a+(v||0); }, 0);
+    var crains = cvals.some(function(v){ return v!=null && v>=THRESH; });
+    perModel.push({m:m, vals:vals, sum:sum, rains:rains, avail:true, cvals:cvals, csum:csum, crains:crains});
+  });
+  enqueuePredictions(locKey, cur.lat, cur.lon, times, perModel);
+  perModel.sort(function(a,b){
+    var na = a.m.national?0:1, nb = b.m.national?0:1;
+    if(na !== nb) return na-nb;
+    var da = (a.m.hl!=null) ? distKm(cur.lat,cur.lon,a.m.hl,a.m.hg) : 0;
+    var db = (b.m.hl!=null) ? distKm(cur.lat,cur.lon,b.m.hl,b.m.hg) : 0;
+    return da-db;
+  });
+  perModel = perModel.slice(0, 8);
+
+  perModel.forEach(function(pm){
+    var tr = document.createElement("tr");
+    if(pm.m.national) tr.className = "national";
+    var cells = pm.vals.map(function(v){
+      if(v==null) return "<td class=\"cell\">·</td>";
+      var wet = v>=THRESH;
+      if(!wet) return "<td class=\"cell\">0</td>";
+      var alpha = Math.min(0.22 + Math.pow(Math.min(v,6)/6,0.6)*0.78, 1);
+      return "<td class=\"cell wet\" style=\"background:rgba(91,179,232,"+alpha.toFixed(2)+")\">"+fmtMM(v)+"</td>";
+    }).join("");
+    tr.innerHTML = "<td class=\"name\"><div class=\"n\">"+pm.m.n
+      + (pm.m.national ? "<span class=\"badge\">NÁRODNÍ</span>" : "")
+      + "</div><div class=\"a\">"+pm.m.a+"</div><div class=\"flag\">"+flagEmoji(pm.m.cc)+"</div></td>" + cells
+      + "<td class=\"sumcell\" style=\"color:"+(pm.rains?"var(--rain)":"var(--muted)")+"\">"+(pm.avail?fmtMM(pm.sum):"·")+"</td>";
+    body.appendChild(tr);
+  });
+
+  var active = perModel.filter(function(p){ return p.avail; });
+  var N = active.length;
+  var consensus = times.map(function(_,i){
+    return active.filter(function(p){ return p.cvals[i]!=null && p.cvals[i]>=THRESH; }).length;
+  });
+  var trc = document.createElement("tr");
+  trc.className = "consensus";
+  trc.innerHTML = "<td class=\"name\"><div class=\"n\">Shoda modelů</div><div class=\"a\">kolik z "+N+" hlásí déšť</div></td>"
+    + consensus.map(function(c){
+        var f = N ? c/N : 0, wet = c>0;
+        var bg = wet ? " style=\"background:rgba(91,179,232,"+(0.15+f*0.85).toFixed(2)+")\"" : "";
+        return "<td class=\"cell"+(wet?" wet":"")+"\""+bg+">"+c+"/"+N+"</td>";
+      }).join("")
+    + "<td class=\"sumcell\"></td>";
+  body.appendChild(trc);
+
+  /* verdikt */
+  var rainModels = active.filter(function(p){ return p.crains; }).length;
+  var prob = N ? Math.round(rainModels/N*100) : 0;
+  $("pct").textContent = prob+"%";
+  $("pct").style.color = prob>=60 ? "var(--rain)" : prob>=30 ? "var(--warn)" : "var(--text)";
+  $("gaugeFill").style.width = prob+"%";
+  $("word").textContent = prob>=85 ? "Téměř jistě zaprší" : prob>=60 ? "Pravděpodobně zaprší"
+    : prob>=30 ? "Déšť je možný" : prob>0 ? "Spíš nezaprší" : "Sucho";
+  $("expl").textContent = rainModels+" z "+N+" modelů předpovídá v příštích "+HOURS+" hodinách srážky ≥ 0,1 mm/h pro lokalitu "+cur.name+".";
+  $("agree").innerHTML = rainModels+"/"+N+" <small>déšť</small>";
+
+  var half = -1, any = -1;
+  for(var i=0;i<consensus.length;i++){
+    if(any<0 && consensus[i]>0) any=i;
+    if(half<0 && consensus[i]>=Math.ceil(N/2)) half=i;
+  }
+  var frIdx = half>=0 ? half : (any>=0 ? any : -1);
+  $("firstRain").innerHTML = frIdx<0 ? "—"
+    : fmtHr(times[frIdx]) + (half<0 ? " <small>(menšina)</small>" : "") + tzHint(times[frIdx]);
+  var avg = N ? active.reduce(function(a,p){ return a+p.csum; },0)/N : 0;
+  $("avgSum").innerHTML = fmtMM(avg)+" <small>mm</small>";
+  var mx = 0;
+  active.forEach(function(p){ p.cvals.forEach(function(v){ if(v!=null && v>mx) mx=v; }); });
+  $("maxInt").innerHTML = fmtMM(mx)+" <small>mm/h</small>";
+
+  var perHourMax = times.map(function(_,i){
+    var mm = 0;
+    active.forEach(function(p){ if(p.cvals[i]!=null && p.cvals[i]>mm) mm=p.cvals[i]; });
+    return mm;
+  });
+  /* rozptyl modelů: shoda na množství, nejen na "ano/ne" */
+  var spread = times.map(function(_,i){
+    var vs = [];
+    active.forEach(function(pm){ if(pm.cvals[i] != null) vs.push(pm.cvals[i]); });
+    if(!vs.length) return {cv:null, med:0, iqr:null};
+    vs.sort(function(a,b){ return a-b; });
+    var med = vs[Math.floor(vs.length/2)];
+    var q1 = vs[Math.floor(vs.length*0.25)], q3 = vs[Math.floor(vs.length*0.75)];
+    var mean = vs.reduce(function(a,b){ return a+b; },0)/vs.length;
+    var sd = Math.sqrt(vs.reduce(function(a,b){ return a+(b-mean)*(b-mean); },0)/vs.length);
+    return {cv: mean > 0.02 ? sd/mean : null, med:med, iqr:(q3-q1)};
+  });
+  modelState = {times:times, consensus:consensus, N:N, perHourMax:perHourMax, spread:spread};
+  recomputeWhen();
+
+  fitGuard();
+  fitPanels();
+
+  var now = new Date();
+  $("updated").innerHTML = "aktualizováno<br>"+now.toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"});
+}
+
+/* ================= METEORADAR (na pozadí) =================
+   Radar se nezobrazuje — jen ticho čte odrazivost (dBZ) v místě obce
+   z globálního kompozitu (RainViewer / OPERA vč. ČHMÚ) a zpřesňuje
+   minutový odhad začátku deště pomocí 10min nowcastu. */
+var radarState = null;   /* {points:[{t,fut,dbz}]} | "error" | null */
+var altNowcast = null;   /* zdroj 2: 15min srážkový nowcast (radarem řízený) | "error" */
+var obsCurrent = null;   /* zdroj 3: aktuální pozorované podmínky (weather_code) | "error" */
+var obsMetar   = null;   /* zdroj 4: METAR — reálný senzor na nejbližším letišti | "error" */
+var gridNowcast = null;  /* 3×3 mřížka nowcastu kolem obce | "error" */
+var stormMotion = null;  /* {dirDeg, speedKmh, etaMin, mmh} z posunu radarových snímků */
+var radarTimeline = null; /* [{dt,mmh}] hustá extrapolace na dt=5..60 min z vlastní advekce */
+var radarTrendRate = null; /* frakční změna intenzity za minutu — sílí/slábne */
+var waterState = null;   /* {kind:"sea"|"lake", bearingToWaterDeg, name?} | null | "error" */
+var waterCache = {};     /* poloha je statická vlastnost místa — nemá smysl ptát se pokaždé znovu */
+var atmoState   = null;  /* {pTrend, cape, lightning} — tlakový trend a konvekce */
+
+/* ---- slovní typ srážek (WMO weather_code) ---- */
+function wmoType(code, mmh){
+  if(code == null) return null;
+  var c = Number(code);
+  if([51,53,55,56,57].indexOf(c) >= 0) return {t:"mrholení", i:"slabé, velmi drobné kapky"};
+  if([56,57,66,67].indexOf(c) >= 0)    return {t:"mrznoucí déšť", i:"pozor na námrazu"};
+  if([95,96,99].indexOf(c) >= 0)       return {t:"bouřka", i:"s přeháňkami, možné kroupy"};
+  if([96,99].indexOf(c) >= 0)          return {t:"kroupy", i:"bouřka s krupobitím"};
+  if([71,73,75,77,85,86].indexOf(c) >= 0) return {t:"sněžení", i:"sníh"};
+  if([66,67].indexOf(c) >= 0)          return {t:"mrznoucí déšť", i:"námraza"};
+  if([80,81,82].indexOf(c) >= 0)       return {t:"přeháňky", i:"krátké, ale vydatné"};
+  if([61,63,65].indexOf(c) >= 0){
+    if(c === 65 || (mmh != null && mmh >= 4)) return {t:"vydatný déšť", i:"silné srážky"};
+    if(c === 63 || (mmh != null && mmh >= 1)) return {t:"déšť", i:"mírné srážky"};
+    return {t:"slabý déšť", i:"jen se rosí"};
+  }
+  return null;
+}
+/* ---- slovní typ z METAR kódu (skutečné pozorování) ---- */
+function metarType(wx){
+  if(!wx) return null;
+  var w = wx.toUpperCase();
+  if(w.indexOf("GR") >= 0) return {t:"kroupy", i:"pozorováno stanicí"};
+  if(w.indexOf("GS") >= 0) return {t:"krupky", i:"pozorováno stanicí"};
+  if(w.indexOf("FZRA") >= 0 || w.indexOf("FZDZ") >= 0) return {t:"mrznoucí déšť", i:"námraza, pozorováno"};
+  if(w.indexOf("TS") >= 0) return {t:"bouřka", i:"pozorováno stanicí"};
+  if(w.indexOf("SN") >= 0) return {t:"sněžení", i:"pozorováno stanicí"};
+  if(w.indexOf("PL") >= 0 || w.indexOf("IC") >= 0) return {t:"zmrzlý déšť", i:"ledové krupky"};
+  if(w.indexOf("DZ") >= 0) return {t:"mrholení", i:"pozorováno stanicí"};
+  if(w.indexOf("SH") >= 0) return {t:"přeháňky", i:"pozorováno stanicí"};
+  if(w.indexOf("RA") >= 0){
+    if(w.indexOf("+RA") >= 0) return {t:"vydatný déšť", i:"pozorováno stanicí"};
+    if(w.indexOf("-RA") >= 0) return {t:"slabý déšť", i:"pozorováno stanicí"};
+    return {t:"déšť", i:"pozorováno stanicí"};
+  }
+  return null;
+}
+function metarHasPrecip(wx){
+  if(!wx) return false;
+  return /(RA|DZ|SN|GR|GS|PL|SG|IC|UP)/.test(wx.toUpperCase());
+}
+var modelState = null;   /* {times:[Date], consensus:[int], N, perHourMax:[mm]} */
+
+function loadRadar(lat, lon, myId){
+  if(myId == null) myId = reqId;
+  radarState = null;
+  altNowcast = null;
+  stormMotion = null;
+  radarTimeline = null; radarTrendRate = null;
+  gridNowcast = null;
+
+  /* blízkost velké vodní plochy — vlastnost místa, klidně z paměti opakovaně */
+  var wKey = locKeyOf(lat, lon);
+  if(waterCache[wKey] !== undefined){
+    waterState = waterCache[wKey];
+  } else {
+    waterState = null;
+    detectNearWater(lat, lon).then(function(w){
+      if(isStale(myId)) return;
+      waterState = w; waterCache[wKey] = w;
+      recomputeWhen();
+    }).catch(function(){ if(!isStale(myId)){ waterState = "error"; waterCache[wKey] = "error"; } });
+  }
+  recomputeWhen();
+  obsCurrent = null; obsMetar = null;
+
+  /* zdroj 3: aktuální pozorované podmínky (typ srážek + intenzita) */
+  cachedJson("https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon
+    + "&current=precipitation,rain,showers,snowfall,weather_code&timeformat=unixtime&timezone=auto", 300000)
+    .then(function(j){
+      if(isStale(myId)) return;
+      var c = j.current || {};
+      obsCurrent = {mmh: saneMm(c.precipitation), code: c.weather_code,
+                    snow: saneMm(c.snowfall), t: c.time};
+      recomputeWhen();
+    })
+    .catch(function(){ if(isStale(myId)) return; obsCurrent = "error"; recomputeWhen(); });
+
+  /* zdroj 4: METAR — reálný senzor srážek na nejbližší letecké stanici (do ~100 km) */
+  var d = 1.0;
+  cachedJson("https://aviationweather.gov/api/data/metar?format=json&hours=2&bbox="
+    + (lat-d).toFixed(2)+","+(lon-d*1.6).toFixed(2)+","+(lat+d).toFixed(2)+","+(lon+d*1.6).toFixed(2), 600000)
+    .then(function(arr){
+      if(isStale(myId)) return;
+      if(!arr || !arr.length){ obsMetar = "error"; recomputeWhen(); return; }
+      var best = null, bestD = 1e9;
+      arr.forEach(function(o){
+        if(o.lat == null || o.lon == null) return;
+        var dd = distKm(lat, lon, o.lat, o.lon);
+        var age = o.obsTime ? (Date.now()/1000 - o.obsTime) : 9999;
+        if(dd < bestD && dd <= 120 && age < 5400){ bestD = dd; best = o; }
+      });
+      if(!best){ obsMetar = "error"; recomputeWhen(); return; }
+      obsMetar = {wx: best.wxString || "", name: best.name || best.icaoId || "stanice",
+                  km: Math.round(bestD), raw: best.rawOb || ""};
+      recomputeWhen();
+    })
+    .catch(function(){ if(isStale(myId)) return; obsMetar = "error"; recomputeWhen(); });
+
+  /* 3×3 mřížka bodů kolem obce (~3 km rozestup) — přeháňky jsou lokální,
+     jeden bod je snadno mine. Bereme medián a maximum z devíti bodů. */
+  (function(){
+    var dLat = 0.027, dLon = 0.027/Math.max(0.2, Math.cos(lat*Math.PI/180));
+    var lats = [], lons = [];
+    for(var iy=-1; iy<=1; iy++) for(var ix=-1; ix<=1; ix++){
+      lats.push((lat+iy*dLat).toFixed(4)); lons.push((lon+ix*dLon).toFixed(4));
+    }
+    cachedJson("https://api.open-meteo.com/v1/forecast?latitude="+lats.join(",")
+      + "&longitude="+lons.join(",")
+      + "&minutely_15=precipitation&forecast_minutely_15=8&timeformat=unixtime&timezone=auto", 300000)
+      .then(function(res){
+        if(isStale(myId)) return;
+        var arr = Array.isArray(res) ? res : [res];
+        var steps = [];
+        arr.forEach(function(j){
+          var t = (j.minutely_15 && j.minutely_15.time) || [];
+          var v = (j.minutely_15 && j.minutely_15.precipitation) || [];
+          t.forEach(function(ts,i){
+            if(!steps[i]) steps[i] = {t:ts, vals:[]};
+            var mm = saneMm(v[i]);
+            if(mm != null) steps[i].vals.push(mm*4);      /* mm/15min → mm/h */
+          });
+        });
+        gridNowcast = steps.map(function(s){
+          if(!s || !s.vals.length) return {t:s?s.t:0, med:null, max:null, hits:0};
+          var sorted = s.vals.slice().sort(function(a,b){ return a-b; });
+          return {t:s.t,
+                  med: sorted[Math.floor(sorted.length/2)],
+                  max: sorted[sorted.length-1],
+                  hits: s.vals.filter(function(x){ return x >= 0.1; }).length};
+        });
+        recomputeWhen();
+      })
+      .catch(function(){ if(isStale(myId)) return; gridNowcast = "error"; recomputeWhen(); });
+  })();
+
+  /* Tlakový trend + konvektivní potenciál (CAPE, bleskový potenciál).
+     Skutečná síť detektorů blesků (Blitzortung) běží přes ws:// — z HTTPS
+     stránky ji prohlížeč odmítne, proto modelový bleskový potenciál. */
+  cachedJson("https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon
+    + "&hourly=pressure_msl,cape,lightning_potential,"
+    + "relative_humidity_850hPa,relative_humidity_700hPa,relative_humidity_500hPa,"
+    + "wind_speed_850hPa,wind_speed_500hPa,wind_direction_850hPa,wind_direction_500hPa,"
+    + "wind_speed_10m,wind_direction_10m"
+    + "&past_hours=3&forecast_hours=3"
+    + "&timeformat=unixtime&timezone=auto", 900000)
+    .then(function(j){
+      if(isStale(myId)) return;
+      var h = j.hourly || {};
+      var pr = h.pressure_msl || [], cp = h.cape || [], lp = h.lightning_potential || [];
+      var nowIdx = Math.min(3, pr.length-1);           /* 3 h zpět + aktuální */
+      var p0 = pr[0], p1 = pr[nowIdx];
+
+      /* --- vertikální vlhkostní profil ---
+         Vlhko dole + sucho nahoře → srážky se cestou k zemi částečně
+         vypaří (virga) — modely to samo o sobě nepočítají.
+         Vlhko v celém sloupci → srážky vytrvalejší a spolehlivější. */
+      var rh850 = at(h.relative_humidity_850hPa, nowIdx);
+      var rh700 = at(h.relative_humidity_700hPa, nowIdx);
+      var rh500 = at(h.relative_humidity_500hPa, nowIdx);
+      var dryAloft = (rh850 != null && rh500 != null) ? (rh850 - rh500 >= 30 && rh850 >= 60 && rh500 <= 45) : false;
+      var moistDeep = (rh850 != null && rh700 != null && rh500 != null) ? (rh850 >= 70 && rh700 >= 65 && rh500 >= 55) : false;
+
+      /* --- střih větru (850 hPa vs 500 hPa) ---
+         Malý střih → izolované, nepředvídatelné přeháňky (pop-up).
+         Velký střih → organizované, vytrvalejší a intenzivnější bouřky. */
+      var ws850 = at(h.wind_speed_850hPa, nowIdx), wd850 = at(h.wind_direction_850hPa, nowIdx);
+      var ws500 = at(h.wind_speed_500hPa, nowIdx), wd500 = at(h.wind_direction_500hPa, nowIdx);
+      var shearKmh = null;
+      if(ws850 != null && wd850 != null && ws500 != null && wd500 != null){
+        var u850 = -ws850*Math.sin(wd850*Math.PI/180), v850 = -ws850*Math.cos(wd850*Math.PI/180);
+        var u500 = -ws500*Math.sin(wd500*Math.PI/180), v500 = -ws500*Math.cos(wd500*Math.PI/180);
+        shearKmh = Math.sqrt((u500-u850)*(u500-u850) + (v500-v850)*(v500-v850));
+      }
+
+      atmoState = {
+        pTrend: (p0 != null && p1 != null) ? (p1 - p0) : null,   /* hPa / 3 h */
+        cape:   cp.length ? Math.max.apply(null, cp.filter(function(x){ return x != null; }).concat([0])) : null,
+        lightning: lp.length ? Math.max.apply(null, lp.filter(function(x){ return x != null; }).concat([0])) : null,
+        dryAloft: dryAloft, moistDeep: moistDeep, shearKmh: shearKmh,
+        ws850: ws850, ws10: at(h.wind_speed_10m, nowIdx), wd10: at(h.wind_direction_10m, nowIdx)
+      };
+      recomputeWhen();
+    })
+    .catch(function(){ if(isStale(myId)) return; atmoState = "error"; recomputeWhen(); });
+
+  /* zdroj 2: radarem řízený 15minutový nowcast */
+  cachedJson("https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon
+    + "&minutely_15=precipitation&forecast_minutely_15=8&timeformat=unixtime&timezone=auto", 300000)
+    .then(function(j){
+      var t = (j.minutely_15 && j.minutely_15.time) || [];
+      var v = (j.minutely_15 && j.minutely_15.precipitation) || [];
+      if(isStale(myId)) return;
+      altNowcast = t.map(function(ts,i){
+        var mm15 = saneMm(v[i]);
+        return {t:ts, mmh: mm15 == null ? null : mm15*4};   /* mm/15min → mm/h */
+      });
+      recomputeWhen();
+    })
+    .catch(function(){ if(isStale(myId)) return; altNowcast = "error"; recomputeWhen(); });
+  cachedJson("https://api.rainviewer.com/public/weather-maps.json", 300000)
+    .then(function(j){
+      var past = (j.radar && j.radar.past) ? j.radar.past.slice(-6) : [];   /* ~50–60 min historie */
+      var future = (j.radar && j.radar.nowcast) ? j.radar.nowcast : [];
+      var frames = past.map(function(f){ return {f:f, fut:false}; })
+        .concat(future.map(function(f){ return {f:f, fut:true}; }));
+      if(!frames.length) throw new Error("no frames");
+      var host = j.host || "https://tilecache.rainviewer.com";
+      var z = 8, n = Math.pow(2,z);
+      var xf = (lon+180)/360*n;
+      var latR = lat*Math.PI/180;
+      var yf = (1 - Math.log(Math.tan(latR)+1/Math.cos(latR))/Math.PI)/2*n;
+      var tx = Math.floor(xf), ty = Math.floor(yf);
+      var px = Math.floor((xf-tx)*256), py = Math.floor((yf-ty)*256);
+      /* Výřez ~±48 px kolem obce (na střední šířce ≈ ±19 km). Čteme VŠECHNY
+         dostupné minulé snímky (ne jen dva) — víc dvojic = odolnější medián
+         rychlosti a navíc lze spočítat, jestli srážky sílí, nebo slábnou. */
+      var R = 48;
+      var kmPerPx = 40075 * Math.cos(latR) / (n * 256);
+      var patchFrames = frames.filter(function(fr){ return !fr.fut; });
+      var patchPromise = Promise.all(patchFrames.map(function(fr){
+        return readTilePatch(host+fr.f.path+"/256/"+z+"/"+tx+"/"+ty+"/0/0_0.png", px, py, R)
+          .then(function(pt){ return {t:fr.f.time, patch:pt}; });
+      })).then(function(ps){
+        try{
+          stormMotion = null; radarTimeline = null;
+          ps = ps.filter(function(p){ return p.patch; });
+          if(ps.length < 2) return;
+          ps.sort(function(a,b){ return a.t - b.t; });
+
+          var mo = estimateMotion(ps, kmPerPx, 14);
+          if(!mo) return;
+          var vxKm = mo.vx, vyKm = mo.vy;                /* km/min */
+          var speed = Math.sqrt(vxKm*vxKm + vyKm*vyKm) * 60;
+          if(speed < 2 || speed > 160){ vxKm = 0; vyKm = 0; speed = 0; }  /* nesmyslná rychlost → jen persistence */
+
+          /* trend intenzity: maximum odrazivosti v okolí obce na každém snímku */
+          var m = ps[ps.length-1].patch.n, c = Math.floor(m/2);
+          function localMaxMm(patch){
+            var best = 0;
+            for(var y=Math.max(0,c-10); y<Math.min(m,c+10); y+=1){
+              for(var x=Math.max(0,c-10); x<Math.min(m,c+10); x+=1){
+                var v = patch.data[y*m+x];
+                if(v != null){ var mm = dbzToMm(v); if(mm > best) best = mm; }
+              }
+            }
+            return best;
+          }
+          var trendSeries = ps.map(function(p){ return {t:p.t, mmh: localMaxMm(p.patch)}; });
+          var rate = estimateTrend(trendSeries);          /* frakční změna / min, +roste −slábne */
+          radarTrendRate = rate;
+
+          var latest = ps[ps.length-1].patch;
+          var latestMm = trendSeries[trendSeries.length-1].mmh;
+
+          /* Hustá 60minutová osa: pro každé dt najdi, co bylo v místě odkud
+             se ta srážka po (vx,vy) k obci dostane, a uprav o trend síly. */
+          var DT = [5,10,15,20,25,30,35,40,45,50,55,60];
+          radarTimeline = DT.map(function(dt){
+            var dbz = sampleAdvected(latest, kmPerPx, vxKm, vyKm, dt, c, c);
+            var mm = (dbz == null) ? null : dbzToMm(dbz);
+            if(mm == null){
+              /* mimo výřez / bez dat — persistence z aktuální intenzity jako slabá záloha */
+              mm = latestMm > 0 ? latestMm : 0;
+            }
+            mm *= growthFactor(rate, Math.min(dt, 30));    /* trend po 30 min tlumíme, ať neujede do extrému */
+            return {dt:dt, mmh: saneMm(mm) || 0};
+          });
+
+          var dirDeg = (Math.atan2(vxKm, -vyKm) * 180/Math.PI + 360) % 360;
+          var firstHit = radarTimeline.filter(function(r){ return r.mmh >= 0.1; })[0];
+          stormMotion = {dirDeg:dirDeg, speedKmh:speed,
+                         etaMin: firstHit ? firstHit.dt : null,
+                         mmh: firstHit ? firstHit.mmh : latestMm};
+        }catch(e){ stormMotion = null; radarTimeline = null; }
+      });
+
+      return patchPromise.then(function(){
+        return Promise.all(frames.map(function(fr){
+          return readTilePixel(host+fr.f.path+"/256/"+z+"/"+tx+"/"+ty+"/0/0_0.png", px, py)
+            .then(function(dbz){ return {t:fr.f.time, fut:fr.fut, dbz:dbz}; });
+        }));
+      });
+    })
+    .then(function(points){
+      if(isStale(myId)) return;
+      var usable = points.filter(function(pt){ return pt.dbz !== undefined; });
+      radarState = usable.length ? {points:points} : "error";
+      recomputeWhen();
+    })
+    .catch(function(){ if(isStale(myId)) return; radarState = "error"; recomputeWhen(); });
+}
+/* Vícesnímkový odhad rychlosti postupu srážek — medián z několika párů
+   snímků (odolný vůči jedné vadné dlaždici), místo jediného náhodného páru. */
+function estimateMotion(patches, kmPerPx, maxShift){
+  var vxs = [], vys = [];
+  for(var i=1;i<patches.length;i++){
+    var dtMin = (patches[i].t - patches[i-1].t)/60;
+    if(dtMin <= 0) continue;
+    var sh = estimateShift(patches[i-1].patch, patches[i].patch, maxShift);
+    if(!sh) continue;
+    vxs.push(sh.dx*kmPerPx/dtMin);
+    vys.push(sh.dy*kmPerPx/dtMin);
+  }
+  if(!vxs.length) return null;
+  vxs.sort(function(a,b){ return a-b; }); vys.sort(function(a,b){ return a-b; });
+  return {vx: vxs[Math.floor(vxs.length/2)], vy: vys[Math.floor(vys.length/2)], samples: vxs.length};
+}
+/* Sílí, nebo slábne? Medián frakční změny intenzity za minutu z posledních snímků. */
+function estimateTrend(series){
+  var rates = [];
+  for(var i=1;i<series.length;i++){
+    var dtMin = (series[i].t - series[i-1].t)/60;
+    if(dtMin <= 0) continue;
+    var base = Math.max(series[i-1].mmh, 0.1);
+    rates.push((series[i].mmh - series[i-1].mmh)/base/dtMin);
+  }
+  if(!rates.length) return 0;
+  rates.sort(function(a,b){ return a-b; });
+  return rates[Math.floor(rates.length/2)];
+}
+function growthFactor(rate, dtMin){ return Math.min(3, Math.max(0.15, 1 + rate*dtMin)); }
+/* Semi-Lagrangeova zpětná extrapolace: bod, který BUDE za dt minut v cíli,
+   je NYNÍ posunut zpět o rychlost×dt — čteme tam, ne v aktuální poloze cíle. */
+function sampleAdvected(patch, kmPerPx, vx, vy, dtMin, cx, cy){
+  var dxPx = (vx*dtMin)/kmPerPx, dyPx = (vy*dtMin)/kmPerPx;
+  var sx = Math.round(cx - dxPx), sy = Math.round(cy - dyPx);
+  if(sx<0||sy<0||sx>=patch.n||sy>=patch.n) return null;
+  return patch.data[sy*patch.n + sx];
+}
+/* Lineární interpolace časové řady na libovolnou minutu; mimo rozsah zdroje → null. */
+function interpAtMinutes(series, dtMin, nowMs){
+  if(!series || series.length < 2) return null;
+  var target = nowMs + dtMin*60000;
+  for(var i=0;i<series.length-1;i++){
+    var t0 = series[i].t*1000, t1 = series[i+1].t*1000;
+    if(target>=t0 && target<=t1){
+      var f = (target-t0)/(t1-t0);
+      return series[i].mmh + (series[i+1].mmh - series[i].mmh)*f;
+    }
+  }
+  return null;
+}
+/* Váhy míšení podle horizontu: blízko teď věříme radaru, dál modelům. */
+function blendWeights(dt){
+  var wR = Math.exp(-dt/40);
+  var wM = Math.min(0.35, dt/60*0.35);
+  var wN = Math.max(0, 1 - wR - wM);
+  var sum = wR+wM+wN || 1;
+  return {radar:wR/sum, model:wM/sum, nowcast:wN/sum};
+}
+function readTilePixel(url, px, py){
+  return readTilePatch(url, px, py, 1).then(function(pt){
+    if(!pt) return undefined;
+    var best = null;
+    for(var i=0;i<pt.data.length;i++){
+      var v = pt.data[i];
+      if(v != null && (best === null || v > best)) best = v;
+    }
+    return best;
+  });
+}
+/* Načte čtvercový výřez dBZ kolem bodu (poloměr r px, krok 1). */
+function readTilePatch(url, px, py, r){
+  return new Promise(function(resolve){
+    var img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function(){
+      try{
+        var c = document.createElement("canvas");
+        c.width = 256; c.height = 256;
+        var ctx = c.getContext("2d");
+        ctx.drawImage(img,0,0);
+        var x0 = Math.max(0, Math.min(255-2*r, px-r));
+        var y0 = Math.max(0, Math.min(255-2*r, py-r));
+        var n = 2*r+1;
+        var d = ctx.getImageData(x0, y0, n, n).data;
+        var out = new Array(n*n);
+        for(var i=0, k=0; i<d.length; i+=4, k++){
+          out[k] = (d[i+3] === 0) ? null : (d[i] - 32);   /* alfa 0 = bez odrazu */
+        }
+        resolve({data:out, n:n, x0:x0, y0:y0});
+      }catch(e){ resolve(null); }        /* CORS blok */
+    };
+    img.onerror = function(){ resolve(null); };
+    img.src = url;
+  });
+}
+/* Odhad posunu srážkového pole mezi dvěma snímky (křížová korelace).
+   Vrací {dx,dy} v pixelech — o kolik se pole posunulo za dt. */
+function estimateShift(prev, cur, maxShift){
+  if(!prev || !cur || prev.n !== cur.n) return null;
+  var n = prev.n, best = null, bestScore = -1;
+  var step = 1;
+  for(var sy=-maxShift; sy<=maxShift; sy+=step){
+    for(var sx=-maxShift; sx<=maxShift; sx+=step){
+      var score = 0, cnt = 0;
+      for(var y=maxShift; y<n-maxShift; y+=2){
+        for(var x=maxShift; x<n-maxShift; x+=2){
+          var a = prev.data[(y-sy)*n + (x-sx)];
+          var b = cur.data[y*n + x];
+          if(a == null && b == null) continue;
+          var av = (a == null || a < 5) ? 0 : a;
+          var bv = (b == null || b < 5) ? 0 : b;
+          if(av === 0 && bv === 0) continue;
+          score += av*bv; cnt++;
+        }
+      }
+      if(cnt > 0){
+        var norm = score/cnt;
+        if(norm > bestScore){ bestScore = norm; best = {dx:sx, dy:sy}; }
+      }
+    }
+  }
+  return (bestScore > 0) ? best : null;
+}
+function dbzToMm(dbz){
+  if(dbz == null || typeof dbz !== "number" || isNaN(dbz)) return 0;
+  if(dbz < 10) return 0;                 /* pod ~10 dBZ šum/mrholení */
+  if(dbz > 75) return 0;                 /* nad 75 dBZ = vadný pixel, ne déšť */
+  var zlin = Math.pow(10, dbz/10);
+  var mm = Math.pow(zlin/200, 1/1.6);    /* Marshall–Palmer */
+  return Math.min(mm, MAX_SANE_MMH);
+}
+
+/* ============ KDY ZAČNE PRŠET (minutový odhad) ============
+   Priorita: 1) radar-nowcast (přesnost 10 min), 2) hodina s NEJVYŠŠÍ
+   shodou modelů — první výskyt maxima konsenzu v okně 8 h. */
+function recomputeWhen(){
+  var big = $("whenBig"), sub = $("whenSub"), srcEl = $("whenSrc");
+  if(!modelState){ return; }
+  setTimeout(fitPanels, 0);
+
+  var now = Date.now();
+  var ms = modelState;
+
+  /* ---- POZOROVÁNÍ: hlasování nezávislých zdrojů ----
+     "Právě prší" tvrdíme jen při shodě ALESPOŇ DVOU zdrojů. */
+  var votes = [], mmhVals = [], typeGuess = null, stationNote = "";
+
+  /* zdroj A: radarový pixel nad obcí */
+  var radarNow = null;
+  if(radarState && radarState !== "error"){
+    var pastPts = radarState.points.filter(function(pt){ return !pt.fut; });
+    if(pastPts.length){
+      radarNow = saneMm(dbzToMm(pastPts[pastPts.length-1].dbz));
+      if(radarNow != null && radarNow >= 0.1){ votes.push("radar"); mmhVals.push(radarNow); }
+    }
+  }
+  /* zdroj B: 15min nowcast (radarem řízený) */
+  var altNowMmh = null, altSeries = (altNowcast && altNowcast !== "error") ? altNowcast : null;
+  if(altSeries && altSeries.length){
+    altNowMmh = altSeries[0].mmh;
+    if(altNowMmh != null && altNowMmh >= 0.1){ votes.push("nowcast"); mmhVals.push(altNowMmh); }
+  }
+  /* zdroj C: aktuální pozorované podmínky */
+  if(obsCurrent && obsCurrent !== "error"){
+    if(obsCurrent.mmh != null && obsCurrent.mmh >= 0.1){ votes.push("pozorování"); mmhVals.push(obsCurrent.mmh); }
+    var wt = wmoType(obsCurrent.code, obsCurrent.mmh);
+    if(wt) typeGuess = wt;
+  }
+  /* zdroj D: METAR — skutečný senzor na letišti */
+  if(obsMetar && obsMetar !== "error"){
+    if(metarHasPrecip(obsMetar.wx)){
+      votes.push("stanice");
+      var mt = metarType(obsMetar.wx);
+      if(mt){ typeGuess = mt; }                 /* pozorování má přednost před modelem */
+      stationNote = " Stanice " + obsMetar.name + " (" + obsMetar.km + " km) hlásí srážky.";
+    }
+  }
+
+  /* ---- PRŠÍ PRÁVĚ TEĎ (potvrzeno ≥2 zdroji) ---- */
+  if(votes.length >= 2){
+    mmhVals.sort(function(a,b){ return a-b; });
+    var med = mmhVals[Math.floor(mmhVals.length/2)];   /* medián = odolný vůči výstřelkům */
+    med = saneMm(med); if(med == null) med = 0.1;
+    if(!typeGuess) typeGuess = wmoType(null, med) || {t:"déšť", i:"srážky v místě"};
+
+    /* Trend: sílí, nebo slábne? Jen když to máme z čeho poznat (skutečná
+       radarová historie), jinak nic nehádáme. */
+    var trendPhrase = "";
+    if(radarState && radarState !== "error" && radarTimeline && radarTimeline.length && typeof radarTrendRate === "number"){
+      var near30 = radarTimeline.filter(function(r){ return r.dt <= 30; }).slice(-1)[0];
+      if(near30){
+        if(radarTrendRate >= 0.02 && near30.mmh > med*1.15){
+          trendPhrase = " Zesiluje — kolem " + near30.dt + ". minuty čekej ~" + fmtMM(near30.mmh) + " mm/h.";
+        } else if(radarTrendRate <= -0.02 && near30.mmh < med*0.7){
+          trendPhrase = " Slábne, brzy by mělo odeznít.";
+        }
+      }
+    }
+
+    big.className = "big";
+    big.innerHTML = cap(typeGuess.t) + " <small>právě teď</small>";
+    sub.innerHTML = "Intenzita <b>" + fmtMM(med) + " mm/h</b> · " + typeGuess.i + "."
+      + stationNote + " Potvrzeno <b>" + votes.length + "</b> nezávislými zdroji." + trendPhrase;
+    srcEl.textContent = "ověřeno: " + votes.join(" + ");
+    return;
+  }
+
+  /* ---- jediný zdroj hlásí déšť → opatrná formulace, ne tvrzení ---- */
+  if(votes.length === 1){
+    big.className = "big";
+    big.innerHTML = "Možná <small>mrholí</small>";
+    sub.innerHTML = "Srážky hlásí jen jeden zdroj (" + votes[0] + "), ostatní je nepotvrzují — spíš jen ojedinělé kapky.";
+    srcEl.textContent = "nepotvrzeno · 1 ze 4 zdrojů";
+    return;
+  }
+
+  /* ---- ZAČÁTEK DEŠTĚ NA MINUTY (horizont 60 min) ----
+     Hustá časová osa po 5 minutách slučuje TŘI nezávislé pohledy:
+       radar  — vlastní semi-Lagrangeova extrapolace posunu srážkového pole
+                (víc přesná blízko "teď", degraduje s časem)
+       nowcast— bodový + mřížkový minutový nowcast (dobrý střední rozsah)
+       model  — hodinový konsenzus modelů (spolehlivější až k 45.–60. minutě)
+     Váhy se s horizontem plynule přelévají od radaru k modelům. */
+  var DTGRID = [5,10,15,20,25,30,35,40,45,50,55,60];
+  var gridSeries = null;
+  if(gridNowcast && gridNowcast !== "error"){
+    gridSeries = gridNowcast.filter(function(g){ return g && g.hits >= 3 && g.med != null; })
+      .map(function(g){ return {t:g.t, mmh:g.med}; });
+  }
+  var radarByDt = null;
+  if(radarTimeline && radarTimeline.length){
+    radarByDt = {};
+    radarTimeline.forEach(function(r){ radarByDt[r.dt] = r.mmh; });
+  }
+  function modelValAtMinutes(dt){
+    if(!modelState || !modelState.times || !modelState.times.length) return null;
+    var target = now + dt*60000;
+    var times = modelState.times, pm = modelState.perHourMax;
+    if(target <= times[0].getTime()) return pm[0];
+    for(var i=0;i<times.length-1;i++){
+      var t0=times[i].getTime(), t1=times[i+1].getTime();
+      if(target>=t0 && target<=t1){
+        var f=(target-t0)/(t1-t0);
+        return pm[i] + (pm[i+1]-pm[i])*f;
+      }
+    }
+    return pm[pm.length-1];
+  }
+
+  var timeline = DTGRID.map(function(dt){
+    var vR = radarByDt ? radarByDt[dt] : null;
+    var vN1 = altSeries ? interpAtMinutes(altSeries, dt, now) : null;
+    var vN2 = gridSeries ? interpAtMinutes(gridSeries, dt, now) : null;
+    var vN = (vN1 != null && vN2 != null) ? (vN1+vN2)/2 : (vN1 != null ? vN1 : vN2);
+    var vM = modelValAtMinutes(dt);
+    var w = blendWeights(dt);
+    var parts = [], wsum = 0, val = 0;
+    if(vR != null){ parts.push("radar"); wsum += w.radar; val += vR*w.radar; }
+    if(vN != null){ parts.push("nowcast"); wsum += w.nowcast; val += vN*w.nowcast; }
+    if(vM != null){ parts.push("model"); wsum += w.model; val += vM*w.model; }
+    var blended = wsum > 0 ? val/wsum : null;
+    return {dt:dt, mmh: blended, vR:vR, vN:vN, vM:vM, parts:parts};
+  });
+
+  var hit = null, prev = null;
+  for(var ti=0; ti<timeline.length; ti++){
+    var pt = timeline[ti];
+    if(pt.mmh != null && pt.mmh >= THRESH){ hit = pt; break; }
+    prev = pt;
+  }
+
+  if(hit){
+    /* zpřesnění: lineární dohledání přesnější minuty mezi předchozím a nalezeným bodem */
+    var estMin = hit.dt, estMm = hit.mmh;
+    if(prev && prev.mmh != null){
+      var span = hit.dt - prev.dt;
+      var f2 = (THRESH - prev.mmh) / Math.max(1e-6, hit.mmh - prev.mmh);
+      estMin = prev.dt + span*Math.max(0, Math.min(1, f2));
+    }
+    var agree = hit.parts.length;
+
+    /* korekce podle atmosféry (na pozadí, bez zmínky v UI) */
+    if(atmoState && atmoState !== "error"){
+      if(atmoState.pTrend != null && atmoState.pTrend <= -1.5) estMin *= 0.88;
+      else if(atmoState.pTrend != null && atmoState.pTrend >= 1.5) estMin *= 1.10;
+      var conv = Math.max(atmoState.cape || 0, (atmoState.lightning || 0)*100);
+      if(conv >= 1500) estMin *= 0.85;
+      else if(conv >= 800) estMin *= 0.93;
+      if(atmoState.dryAloft) estMm *= 0.78;
+      else if(atmoState.moistDeep){ estMm *= 1.08; estMin *= 0.95; }
+      if(atmoState.shearKmh != null){
+        if(atmoState.shearKmh >= 55) estMm *= 1.15;
+        else if(atmoState.shearKmh < 18 && conv >= 500) estMin = Math.min(estMin, 75);
+      }
+
+      /* místní bríza u moře/velkého jezera: slabé velkoprostorové proudění
+         nechá vyniknout místní cirkulaci. Bríza vanoucí OD vody na pobřeží
+         často spouští/zesiluje odpolední přeháňky (konvergenční zóna);
+         bríza vanoucí OD pevniny K vodě je naopak tlumí. */
+      if(waterState && waterState !== "error" && atmoState.ws10 != null && atmoState.wd10 != null){
+        var synWeak = (atmoState.ws850 == null) || (atmoState.ws850 < 18);
+        var hourLocal = (placeUtcOffset != null) ? new Date(now + placeUtcOffset*1000).getUTCHours() : null;
+        var isDay = (hourLocal == null) ? true : (hourLocal >= 10 && hourLocal <= 19);
+        if(synWeak && isDay){
+          var diff = Math.abs(((atmoState.wd10 - waterState.bearingToWaterDeg + 540) % 360) - 180);
+          if(diff <= 55 && conv >= 400){ estMm *= 1.12; estMin *= 0.94; }      /* bríza od vody → konvergence */
+          else if(diff >= 150){ estMm *= 0.90; }                               /* bríza k vodě → tlumí konvekci nad pevninou */
+        }
+      }
+    }
+    if(modelState.spread){
+      var hIdx = Math.min(modelState.spread.length-1, Math.max(0, Math.round(estMin/60)));
+      var spr = modelState.spread[hIdx];
+      if(spr && spr.cv != null && spr.cv > 1.2) estMm = Math.min(estMm, spr.med || estMm);
+    }
+
+    var mins = Math.max(1, Math.round(estMin));
+    var tp = typeGuess || wmoType(obsCurrent && obsCurrent !== "error" ? obsCurrent.code : null, estMm);
+    estMm = saneMm(estMm); if(estMm == null) estMm = 0.1;
+    big.className = "big";
+    big.innerHTML = "za " + mins + " <small>min</small>";
+    sub.innerHTML = (tp ? cap(tp.t) : "Srážky") + " ~<b>" + fmtMM(estMm) + " mm/h</b>"
+      + (agree >= 2 ? " · shoda " + agree + " zdrojů" : " · zatím jen jeden zdroj, ber s rezervou") + ".";
+    srcEl.textContent = "zdroj: " + hit.parts.join(" + ") + " · rozlišení 5 min, horizont 60 min";
+    return;
+  }
+
+  /* nowcast, radar i modely mlčí do 60. minuty → pod prahem 1 h nic netvrdit */
+  /* modelová větev: první výskyt maxima konsenzu */
+  var maxC = 0;
+  ms.consensus.forEach(function(c){ if(c>maxC) maxC=c; });
+  if(maxC === 0){
+    big.className = "big none";
+    big.textContent = "Nemělo by pršet";
+    sub.innerHTML = "Žádný z "+ms.N+" modelů nehlásí srážky v příštích "+HOURS+" hodinách.";
+    srcEl.textContent = radarState==="error" ? "radar nedostupný · jen modely" : "zdroj: "+ms.N+" modelů + radar";
+    return;
+  }
+  var idx = ms.consensus.indexOf(maxC);
+  var t = ms.times[idx].getTime();
+  var minM = Math.round((t - now)/60000);
+  var pct = Math.round(maxC/ms.N*100);
+  big.className = "big";
+  if(minM <= 0){
+    big.innerHTML = "do hodiny";           /* pozorování déšť nepotvrdila → netvrdit "teď" */
+  } else if(minM < 60){
+    big.innerHTML = "za "+minM+" <small>min</small>";
+  } else {
+    var h = Math.floor(minM/60), m = minM%60;
+    big.innerHTML = "za "+h+"<small>h</small> "+(m>0? m+"<small>min</small>":"");
+  }
+  sub.innerHTML = "Nejvyšší pravděpodobnost: <b>"+fmtHr(ms.times[idx])+"</b> · shoda <b>"+maxC+"/"+ms.N+"</b> modelů ("+pct+" %), ~"+fmtMM(ms.perHourMax[idx])+" mm/h.";
+  srcEl.textContent = radarState==="error" ? "radar nedostupný · jen modely" : "zdroj: "+ms.N+" modelů + radar na pozadí";
+}
+</script>
+</body>
+</html>
