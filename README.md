@@ -29,3 +29,24 @@ Srovnává hodinové předpovědi srážek ze špičkových globálních modelů
 - reverzní geokódování polohy: [BigDataCloud](https://www.bigdatacloud.com)
 
 Bez API klíčů, bez sledování, bez reklam.
+
+## Časy a původ aktuálních dat
+
+Hodinové časy se z Open-Meteo načítají jako Unix timestampy a interně zůstávají v UTC. Tabulka, začátek a konec deště používají časové pásmo vybrané lokality včetně změn letního času; údaj „u tebe“ zobrazuje tentýž okamžik v pásmu zařízení.
+
+Open-Meteo `current` a 15minutové řady jsou modelová data, nikoli další nezávislá pozorování. Do potvrzení aktuálního deště ani do intenzity označené jako ověřená se nezapočítávají jako měření; `current.precipitation` se převádí z mm za `current.interval` sekund na mm/h. Chybějící nebo neplatné jednotky či interval znamenají neznámou intenzitu, ne nulu. Viz [dokumentace Open-Meteo](https://open-meteo.com/en/docs).
+
+Při každém načtení lokality se předchozí stav odstraní. Nová předpověď a doplňkové zdroje mohou měnit výsledek jen v aktuální generaci požadavků; načítání nebo výpadek nesmí zobrazit data jiné lokality.
+
+## Vývoj a testy
+
+Aplikace stále běží jako statický HTML soubor, bez sestavení a bez runtime npm závislostí. Node.js 20+ slouží pouze pro testy:
+
+```sh
+npm ci
+npm test
+npx playwright install --with-deps chromium
+npm run test:browser
+```
+
+Jednotkové testy používají přímo funkce ze zdrojového HTML a ověřují časová pásma, přechody letního času, jednotky srážek, reset stavu a rozdíl mezi modely a pozorováním. Prohlížečové testy spouštějí lokální server, používají řízené API odpovědi a kontrolují hledání, geolokaci, mobilní zobrazení, opožděné odpovědi, selhání i záložní modely; neověřují dlouhodobou meteorologickou přesnost ani dostupnost externích služeb.

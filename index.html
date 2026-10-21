@@ -959,16 +959,43 @@ function flagEmoji(cc){
   cc = cc.toUpperCase();
   return String.fromCodePoint(0x1F1E6 + cc.charCodeAt(0) - 65, 0x1F1E6 + cc.charCodeAt(1) - 65);
 }
-var lastJ = null, lastModels = null;
+var lastJ = null, lastModels = null, lastForecastId = null;
 var metnoStatus = "nedotazováno";
 var placeUtcOffset = null;
+var placeTimeZone = null;
+/* Časy API jsou Unix sekundy (UTC). Pásmo lokality patří jen do zobrazení. */
+function forecastDate(t){
+  return new Date(typeof t === "number" && isFinite(t) ? t*1000 : NaN);
+}
+function setPlaceTimeZone(j){
+  placeUtcOffset = typeof j.utc_offset_seconds === "number" ? j.utc_offset_seconds : null;
+  placeTimeZone = null;
+  if(j.timezone){
+    try{
+      new Intl.DateTimeFormat("cs-CZ", {timeZone:j.timezone}).format(0);
+      placeTimeZone = j.timezone;
+    }catch(e){ /* offset je nouzová cesta, nikdy pásmo zařízení */ }
+  }
+}
+function placeParts(d){
+  var zone = placeTimeZone || "UTC";
+  var date = !placeTimeZone && placeUtcOffset != null
+    ? new Date(d.getTime() + placeUtcOffset*1000) : d;
+  var parts = new Intl.DateTimeFormat("en-GB", {timeZone:zone,
+    year:"numeric", month:"2-digit", day:"2-digit",
+    hour:"2-digit", minute:"2-digit", hourCycle:"h23"}).formatToParts(date);
+  var out = {};
+  parts.forEach(function(p){ if(p.type !== "literal") out[p.type] = p.value; });
+  return out;
+}
 /* Když je lokalita v jiném pásmu než zařízení, ukázat čas i u tebe. */
 function tzHint(d){
-  if(placeUtcOffset == null) return "";
-  var devOff = -new Date().getTimezoneOffset()*60;
-  if(devOff === placeUtcOffset) return "";
-  var local = new Date(d.getTime() - (placeUtcOffset - devOff)*1000);
-  return "<span class=\"tzhint\">u tebe " + fmtHr(local) + "</span>";
+  if(!placeTimeZone && placeUtcOffset == null) return "";
+  var p = placeParts(d);
+  if(+p.year === d.getFullYear() && +p.month === d.getMonth()+1 &&
+     +p.day === d.getDate() && +p.hour === d.getHours() && +p.minute === d.getMinutes()) return "";
+  var local = d.toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"});
+  return "<span class=\"tzhint\">u tebe " + local + "</span>";
 }
 var CACHE = {};
 function cachedJson(url, ttlMs){
@@ -1052,8 +1079,8 @@ function readCoverage(host, lat, lon){
 /* Má tato lokalita SKUTEČNÁ 15minutová data z modelu, nebo jen interpolaci
    z hodinových? Open-Meteo dodává nativní 15min jen z ICON-D2 (střední Evropa),
    AROME (Francie) a HRRR (Severní Amerika). Jinde je "nowcast" jen jinak
-   navzorkovaný tentýž hodinový model — a nesmí se počítat jako nezávislý zdroj,
-   jinak by aplikace hlásila vyšší jistotu, než na jakou má. */
+   navzorkovaný tentýž hodinový model. Ani nativní řada není nezávislé
+   pozorování; příznak slouží jen pro rozlišení dat a jejich váhu. */
 function hasNative15min(lat, lon){
   if(lat >= 43.0 && lat <= 58.5 && lon >= -4.0  && lon <= 20.5)  return true;  /* DWD ICON-D2 */
   if(lat >= 37.5 && lat <= 55.5 && lon >= -12.0 && lon <= 16.0)  return true;  /* Météo-France AROME */
@@ -1077,7 +1104,20 @@ function saneMm(v){
   if(v > MAX_SANE_MMH) return null;
   return v;
 }
-function fmtHr(d){ return d.toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}); }
+function fmtHr(d){ var p = placeParts(d); return p.hour + ":" + p.minute; }
+/* Úhrn za interval není intenzita. Bez metadat neodhadujeme nulu ani mm/h. */
+function precipitationRate(amount, interval, unit){
+  if(unit !== "mm" || typeof amount !== "number" || !isFinite(amount) || amount < 0 ||
+     typeof interval !== "number" || !isFinite(interval) || interval <= 0) return null;
+  return saneMm(amount * 3600 / interval);
+}
+function parseModelCurrent(j){
+  var c = j.current || {}, units = j.current_units || {};
+  if(typeof c.time !== "number" || !isFinite(c.time)) throw new Error("bez current.time");
+  return {mmh:precipitationRate(c.precipitation, c.interval, units.precipitation),
+          code:c.weather_code, snow:saneMm(c.snowfall), t:c.time,
+          interval:c.interval, kind:"model", source:"open-meteo-current"};
+}
 function cap(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
 function at(arr, i){ return (arr && arr[i] != null) ? arr[i] : null; }
 
@@ -1350,7 +1390,7 @@ window.addEventListener("orientationchange", function(){ setTimeout(function(){
   if(was !== NARROW.matches && lastJ) render(lastJ, lastModels);
 }, 200); });
 applyLayoutMode();
-function fmtHrHead(d){ return NARROW.matches ? String(d.getHours()) : fmtHr(d); }
+function fmtHrHead(d){ return NARROW.matches ? String(+placeParts(d).hour) : fmtHr(d); }
 
 /* ================= START ================= */
 var curFromGeo = false;
@@ -1663,9 +1703,48 @@ document.addEventListener("mousedown", function(e){ if(!$("locBox").contains(e.t
 var lastFetch = 0;
 var reqId = 0;              /* generace požadavku — starší odpovědi se zahodí */
 function isStale(id){ return id !== reqId; }
+/* Reset je synchronní, před spuštěním nových zdrojů, i při refreshi téhož místa. */
+function resetForecastState(){
+  lastJ = null; lastModels = null; lastForecastId = null;
+  modelState = null; verdictState = null; whenState = null; lastBlendTimeline = null; blendMeta = null;
+  placeUtcOffset = null; placeTimeZone = null; metnoStatus = "nedotazováno";
+  orogState = null; orogNote = "";
+  radarState = null; radarCoverage = null; rvNowcast = null;
+  precipMix = null; native15 = false; altNowcast = null;
+  modelCurrent = null; obsMetar = null; metarPreskoceno = 0;
+  gridNowcast = null; stormMotion = null; radarTimeline = null; radarTrendRate = null;
+  waterState = null; atmoState = null; stormRisk = null; probSeries = null;
+  ensState = null; ensNote = "";
+  chmiState = null; chmiNote = "";
+  regioNowcast = null; regioName = ""; regioNote = "";
+  metnoNow = null; metnoNowNote = "";
+  wmsncState = null; wmsncNote = ""; wmsncSrc = null;
+  eumetState = null; eumetNote = ""; satState = null; satNote = "";
+}
+function showForecastLoading(){
+  ["hdr","body","word","ensrow","vextra","whenUntil","whenSrc","updated",
+   "soloFacts","soloTalk","soloSrc","soloArt","soloHour","soloOut"].forEach(function(id){
+    var el = $(id); if(el) el.textContent = "";
+  });
+  ["pct","agree","firstRain","avgSum","maxInt","whenBig","soloBig"].forEach(function(id){
+    var el = $(id); if(el) el.textContent = "–";
+  });
+  if($("pct")) $("pct").className = "pct";
+  if($("solo")) $("solo").className = "solo";
+  if($("gaugeFill")) $("gaugeFill").style.width = "0%";
+  if($("soloArt")) delete $("soloArt").dataset.kind;
+  if($("soloHourWrap")) $("soloHourWrap").hidden = true;
+  if($("soloOutWrap")) $("soloOutWrap").hidden = true;
+  if($("soloPillTxt")) $("soloPillTxt").textContent = "Načítám";
+  if($("soloSub")) $("soloSub").textContent = "Načítám data pro vybranou lokalitu…";
+  if($("expl")) $("expl").textContent = "Načítám data modelů…";
+  if($("whenSub")) $("whenSub").textContent = "Počítám nejpravděpodobnější začátek…";
+}
 function load(place, silent){
   var myId = ++reqId;       /* od této chvíle jsou všechny předchozí dotazy neplatné */
+  resetForecastState();
   cur = place;
+  showForecastLoading();
   THRESH = threshFor(place.lat);   /* v tropech vyšší — viz threshFor() */
   lastFetch = Date.now();
   if(!silent) status("Stahuji předpovědi modelů…");
@@ -1686,12 +1765,12 @@ function load(place, silent){
   if(hasMetno) ids.push("metno_seamless");
   ids = ids.join(",");
   var url = "https://api.open-meteo.com/v1/forecast?latitude="+place.lat+"&longitude="+place.lon
-    + "&hourly=precipitation,snowfall&models="+ids+"&forecast_hours="+(HOURS_END+1)+"&timezone=auto";
+    + "&hourly=precipitation,snowfall&models="+ids+"&forecast_hours="+(HOURS_END+1)+"&timeformat=unixtime&timezone=auto";
 
   var metnoPromise = hasMetno
     ? metnoJson("https://api.met.no/weatherapi/locationforecast/2.0/compact?lat="
         + place.lat.toFixed(4)+"&lon="+place.lon.toFixed(4), 900000)
-        .catch(function(e){ metnoStatus = "přímé volání: " + (e && e.message || e); return null; })
+        .catch(function(e){ if(!isStale(myId)) metnoStatus = "přímé volání: " + (e && e.message || e); return null; })
     : Promise.resolve(null);
 
   Promise.all([cachedJson(url, 600000), metnoPromise])
@@ -1699,7 +1778,7 @@ function load(place, silent){
       if(isStale(myId)) return;              /* mezitím uživatel vybral jinou obec */
       var j = res[0], mn = res[1];
       if(hasMetno) injectMetno(j, mn, allModels);
-      render(j, allModels);
+      render(j, allModels, myId);
       status(null);
     })
     .catch(function(){
@@ -1708,9 +1787,9 @@ function load(place, silent){
       if(reg){
         var url2 = "https://api.open-meteo.com/v1/forecast?latitude="+place.lat+"&longitude="+place.lon
           + "&hourly=precipitation,snowfall&models="+MODELS.map(function(m){return m.id;}).join(",")
-          + "&forecast_hours="+(HOURS_END+1)+"&timezone=auto";
+          + "&forecast_hours="+(HOURS_END+1)+"&timeformat=unixtime&timezone=auto";
         cachedJson(url2, 600000)
-          .then(function(j){ if(isStale(myId)) return; render(j, MODELS.slice()); status(null); })
+          .then(function(j){ if(isStale(myId)) return; render(j, MODELS.slice(), myId); status(null); })
           .catch(function(){ if(!isStale(myId)) failLoad(); });
       } else failLoad();
     });
@@ -1798,7 +1877,6 @@ function injectMetno(j, mn, allModels){
   /* ---- 1. pokus: přímo od met.no (celosvětově, přímo od zdroje) ---- */
   if(mn){
     try{
-      var off = (j.utc_offset_seconds || 0) * 1000;
       var series = (mn.properties && mn.properties.timeseries) || [];
       var byUtc = {};
       series.forEach(function(e){
@@ -1808,7 +1886,7 @@ function injectMetno(j, mn, allModels){
         }
       });
       var arr = (j.hourly.time||[]).map(function(t){
-        var utcMs = Date.parse(t+"Z") - off;      /* lokální ISO → UTC */
+        var utcMs = forecastDate(t).getTime();
         return (utcMs in byUtc) ? byUtc[utcMs] : null;
       });
       var got = arr.filter(function(v){ return v != null; }).length;
@@ -1855,15 +1933,19 @@ function failLoad(){
 }
 
 /* ================= VYKRESLENÍ MATICE ================= */
-function render(j, allModels){
-  lastJ = j; lastModels = allModels;
+function render(j, allModels, generation){
+  /* Nová odpověď musí uvést generaci, překreslení smí použít jen aktuální data. */
+  if(generation == null){
+    if(j !== lastJ || lastForecastId !== reqId) return;
+  } else if(isStale(generation)) return;
+  lastJ = j; lastModels = allModels; lastForecastId = reqId;
   /* Práh se počítá TADY, ne jen v load(). CAPE a podíl přeháněk dorazí
      z jiných dotazů, typicky až po modelech — kdyby se práh nastavil
      jen jednou na začátku, konvektivní korekce by se do prvního
      vykreslení nikdy nedostala. */
   if(cur) THRESH = threshFor(cur.lat);
-  placeUtcOffset = (j.utc_offset_seconds != null) ? j.utc_offset_seconds : null;
-  var times = (j.hourly.time||[]).slice(0,HOURS).map(function(t){ return new Date(t); });
+  setPlaceTimeZone(j);
+  var times = (j.hourly.time||[]).slice(0,HOURS).map(forecastDate);
   $("hdr").innerHTML = "<th class=\"model\">Model</th>"
     + times.map(function(t){ return "<th class=\"hr\">"+fmtHrHead(t)+"</th>"; }).join("")
     + "<th class=\"sum\">"+(NARROW.matches ? "Σ" : "Σ mm")+"</th>";
@@ -2077,7 +2159,7 @@ function render(j, allModels){
   });
   /* Dlouhá řada (24 h) jen pro odhad konce deště. Bere se MEDIÁN modelů:
      maximum by déšť drželo uměle dlouho, stačil by jediný ukecaný model. */
-  var longTimes = (j.hourly.time||[]).map(function(t){ return new Date(t); });
+  var longTimes = (j.hourly.time||[]).map(forecastDate);
   var longMed = longTimes.map(function(_,i){
     var vs = [];
     allModels.forEach(function(m){
@@ -2224,8 +2306,8 @@ var radarCoverage = null;/* "ok" | "none" (radar sem nedosahuje) | "error" | nul
 var rvNowcast = null;    /* zdroj 5: vlastní nowcast RainVieweru [{t,mmh}] | "error" */
 var precipMix = null;    /* {showerFrac, snowFrac} — konvekce vs fronta */
 var native15 = false;    /* má lokalita SKUTEČNÁ 15min data, nebo jen interpolaci? */
-var altNowcast = null;   /* zdroj 2: 15min srážkový nowcast (radarem řízený) | "error" */
-var obsCurrent = null;   /* zdroj 3: aktuální pozorované podmínky (weather_code) | "error" */
+var altNowcast = null;   /* zdroj 2: 15min model Open-Meteo, nikoli měření | "error" */
+var modelCurrent = null; /* Open-Meteo current: modelový odhad, NE nezávislé pozorování */
 var metarPreskoceno = 0; /* kolik bójí a automatů se přeskočilo */
 var obsMetar   = null;   /* zdroj 4: METAR — reálný senzor na nejbližším letišti | "error" */
 var gridNowcast = null;  /* 3×3 mřížka nowcastu kolem obce | "error" */
@@ -2331,7 +2413,7 @@ function bpDiag(){
       ? "přeháňky " + Math.round(precipMix.showerFrac*100) + " %, sníh " +
         Math.round(precipMix.snowFrac*100) + " %"
       : "nerozlišeno",
-    "pozorování (weather_code)": st(obsCurrent),
+    "Open-Meteo current (model, nikoli pozorování)": st(modelCurrent),
     "METAR": obsMetar && obsMetar !== "error"
       ? obsMetar.name + " (" + obsMetar.km + " km)" : st(obsMetar),
     "METAR: přeskočeno bójí/automatů": metarPreskoceno,
@@ -2523,7 +2605,7 @@ function loadRadar(lat, lon, myId){
     }).catch(function(){ if(!isStale(myId)){ waterState = "error"; waterCache[wKey] = "error"; } });
   }
   recomputeWhen();
-  obsCurrent = null; obsMetar = null;
+  modelCurrent = null; obsMetar = null;
   loadSatellite(lat, lon, myId);
   loadEumetsat(lat, lon, myId);       /* Meteosat tam, kde GIBS mlčí */
   chmiImgCache = {};                 /* snímky se mění po 5 min, cache je krátkodobá */
@@ -2545,7 +2627,7 @@ function loadRadar(lat, lon, myId){
      zdarma jako součet jedné položky do už existujícího dotazu.
 
      Bloky se parsují každý zvlášť: když jeden chybí, ostatní to nepoloží. */
-  obsCurrent = null; atmoState = null; altNowcast = null; probSeries = null;
+  modelCurrent = null; atmoState = null; altNowcast = null; probSeries = null;
   cachedJson("https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon
     + "&current=precipitation,rain,showers,snowfall,weather_code"
     + "&minutely_15=precipitation,rain,showers,snowfall&forecast_minutely_15=8"
@@ -2557,15 +2639,13 @@ function loadRadar(lat, lon, myId){
     + "&timeformat=unixtime&timezone=auto", 300000)
     .then(function(j){
       if(isStale(myId)) return;
+      if(!lastJ) setPlaceTimeZone(j);
       var praskl = [];
 
-      /* ---- blok A: aktuální pozorované podmínky ---- */
+      /* ---- blok A: modelový odhad, úhrn za current.interval ---- */
       try{
-        var c = j.current || {};
-        if(c.time == null) throw new Error("bez current");
-        obsCurrent = {mmh: saneMm(c.precipitation), code: c.weather_code,
-                      snow: saneMm(c.snowfall), t: c.time};
-      }catch(e){ obsCurrent = "error"; praskl.push("current"); }
+        modelCurrent = parseModelCurrent(j);
+      }catch(e){ modelCurrent = "error"; praskl.push("current"); }
 
       /* ---- blok B: 15minutový nowcast + rozklad na typy srážek ---- */
       try{
@@ -2657,7 +2737,7 @@ function loadRadar(lat, lon, myId){
     })
     .catch(function(){
       if(isStale(myId)) return;
-      obsCurrent = "error"; atmoState = "error"; altNowcast = "error";
+      modelCurrent = "error"; atmoState = "error"; altNowcast = "error";
       precipMix = null; stormRisk = null; probSeries = null;
       recomputeWhen();
     });
@@ -4015,11 +4095,7 @@ function soloArtKind(){
 /* Den/noc podle MÍSTNÍHO času lokality, ne podle času v telefonu.
    Uživatel se může dívat na předpověď pro jiné pásmo. */
 function soloJeNoc(){
-  var d = new Date();
-  var h;
-  if(placeUtcOffset != null){
-    h = new Date(d.getTime() + d.getTimezoneOffset()*60000 + placeUtcOffset*1000).getHours();
-  } else h = d.getHours();
+  var h = +placeParts(new Date()).hour;
   return h < 6 || h >= 20;
 }
 
@@ -4171,11 +4247,10 @@ function renderSolo(){
     box.classList.add("soon");
     pill.textContent = "nepotvrzeno";
     big.innerHTML = "Možná <small>kape</small>";
-    sub.innerHTML = "Srážky hlásí jen <b>" + W.votes[0] + "</b>, ostatní zdroje je nepotvrzují.";
+    sub.textContent = "Signál srážek: " + W.votes.join(", ") + ".";
     facts.innerHTML = "";
-    talk.innerHTML = "Jeden zdroj proti ostatním obvykle znamená <em>ojedinělé kapky</em>, "
-                   + "ne déšť. Deštník bych kvůli tomu nebral.";
-    src.textContent = "1 zdroj ze 4";
+    talk.textContent = "Déšť není potvrzen dvěma nezávislými pozorovacími zdroji. Modelový odhad není měření v místě.";
+    src.textContent = "nezávislá potvrzení: " + (W.indep || 0);
     return;
   }
 
@@ -5115,7 +5190,7 @@ function buildBlendTimeline(now, altSeries){
     }
     if(obsNow == null && mnSeries && mnSeries.length){ obsNow = mnSeries[0].mmh; obsKdo = "met.no"; }
     if(obsNow == null && rgSeries && rgSeries.length){ obsNow = rgSeries[0].mmh; obsKdo = regioName || "region"; }
-    if(obsNow == null && obsCurrent && obsCurrent !== "error"){ obsNow = obsCurrent.mmh; obsKdo = "pozorování"; }
+    /* Modelovým current neukotvujeme model jako údajně naměřenou realitou. */
     if(obsNow == null) return;
     /* Malá konstanta v čitateli i jmenovateli brání dělení nulou a drží
        poměr rozumný, když jsou obě čísla drobná. */
@@ -5149,7 +5224,7 @@ function buildBlendTimeline(now, altSeries){
     if(vRV != null){ var wv = w.rvcast*taper(konecRV, dt);
       if(wv > 0){ parts.push("rv-nowcast"); wsum += wv; val += vRV*wv; } }
     if(vN != null){ var wn = w.nowcast*taper(konecAL, dt);
-      if(wn > 0){ parts.push("nowcast"); wsum += wn; val += vN*wn; } }
+      if(wn > 0){ parts.push("15min model"); wsum += wn; val += vN*wn; } }
     if(vMN != null){ var wm = w.metno*taper(konecMN, dt);
       if(wm > 0){ parts.push("met.no"); wsum += wm; val += vMN*wm; } }
     if(vRG != null){ var wg = w.regio*taper(konecRG, dt);
@@ -5204,7 +5279,7 @@ function buildBlendTimeline(now, altSeries){
   pridej("met.no", zeSerie(mnSeries), "metno");
   pridej(regioName || "region", zeSerie(rgSeries), "regio");
   pridej(wmsncSrc ? wmsncSrc.n : "nat. nowcast", zeSerie(ncSeries), "natcast");
-  pridej("nowcast", zeSerie(altSeries), "nowcast");
+  pridej("15min model", zeSerie(altSeries), "nowcast");
   pridej("model", DTGRID.map(function(dt){
     var v = modelValAtMinutes(dt);
     return {min: dt, mmh: v == null ? null : v*anchorAt(dt)};
@@ -5281,8 +5356,9 @@ function estimateRainEnd(now, startMin, timeline){
    uživatel viděl "do 02:30" a nevěděl, jestli je to za dvě nebo za 26 hodin. */
 function clockWithDay(now, mins){
   var d = new Date(now + mins*60000), n = new Date(now);
-  var days = Math.round((new Date(d.getFullYear(),d.getMonth(),d.getDate()) -
-                         new Date(n.getFullYear(),n.getMonth(),n.getDate())) / 86400000);
+  var dp = placeParts(d), np = placeParts(n);
+  var days = Math.round((Date.UTC(+dp.year,+dp.month-1,+dp.day) -
+                         Date.UTC(+np.year,+np.month-1,+np.day)) / 86400000);
   var hhmm = fmtHr(d);
   if(days <= 0) return hhmm;
   if(days === 1) return "zítra " + hhmm;
@@ -5373,23 +5449,19 @@ function recomputeWhen(){
       if(radarState.isSnow) typeGuess = {t:"sněžení", i:"radar hlásí sníh"};
     }
   }
-  /* zdroj B: 15min nowcast (radarem řízený).
-     POZOR: mimo střední Evropu a Severní Ameriku Open-Meteo 15min data jen
-     interpoluje z hodinových — je to tedy tentýž model, ne samostatné měření.
-     Hodnotu použijeme, ale do počtu NEZÁVISLÝCH zdrojů ji tam nezapočítáme. */
+  /* zdroj B: 15min model Open-Meteo. Nativní i interpolovaná řada jsou
+     modelové produkty, nikoli nezávislé pozorování. */
   var altNowMmh = null;
   if(altSeries && altSeries.length){
     altNowMmh = altSeries[0].mmh;
     if(altNowMmh != null && altNowMmh >= 0.1){
-      votes.push(native15 ? "nowcast" : "nowcast*");
-      if(native15) indepVotes++;
-      mmhVals.push(altNowMmh);
+      votes.push(native15 ? "15min model" : "15min model (interpolovaný)");
     }
   }
-  /* zdroj C: aktuální pozorované podmínky */
-  if(obsCurrent && obsCurrent !== "error"){
-    if(obsCurrent.mmh != null && obsCurrent.mmh >= 0.1){ votes.push("pozorování"); indepVotes++; mmhVals.push(obsCurrent.mmh); }
-    var wt = wmoType(obsCurrent.code, obsCurrent.mmh);
+  /* zdroj C: Open-Meteo current je model, ne další nezávislé měření. */
+  if(modelCurrent && modelCurrent !== "error"){
+    if(modelCurrent.mmh != null && modelCurrent.mmh >= THRESH_OBS){ votes.push("Open-Meteo current (model)"); }
+    var wt = wmoType(modelCurrent.code, modelCurrent.mmh);
     if(wt) typeGuess = wt;
   }
   /* zdroj D: METAR — skutečný senzor na letišti */
@@ -5479,9 +5551,10 @@ function recomputeWhen(){
     big.innerHTML = cap(typeGuess.t) + " <small>právě teď</small>";
     sub.innerHTML = "Intenzita <b>" + fmtMM(med) + " mm/h</b> · " + typeGuess.i + "."
       + stationNote + " Potvrzeno <b>" + indepVotes + "</b> nezávislými zdroji." + trendPhrase;
-    srcEl.textContent = "ověřeno: " + votes.join(" + ") + sourceCaveat();
+    var observedVotes = votes.filter(function(v){ return v.indexOf("model") < 0; });
+    srcEl.textContent = "ověřeno: " + observedVotes.join(" + ") + sourceCaveat();
     renderRainEnd(now, 0, blendTimeline);
-    whenState = {mode:"wet", mmh:med, type:typeGuess, votes:votes, indep:indepVotes,
+    whenState = {mode:"wet", mmh:med, type:typeGuess, votes:observedVotes, indep:indepVotes,
                  end: estimateRainEnd(now, 0, blendTimeline), trend:trendPhrase,
                  station:stationNote, now:now};
     renderSolo();
@@ -5492,10 +5565,10 @@ function recomputeWhen(){
   if(votes.length >= 1 && indepVotes < 2){
     big.className = "big";
     big.innerHTML = "Možná <small>mrholí</small>";
-    sub.innerHTML = "Srážky hlásí jen jeden nezávislý zdroj (" + votes[0] + "), ostatní je nepotvrzují — spíš jen ojedinělé kapky.";
-    srcEl.textContent = "nepotvrzeno · 1 ze 4 zdrojů" + sourceCaveat();
+    sub.textContent = "Signál srážek: " + votes.join(", ") + ". Déšť není potvrzen dvěma nezávislými pozorovacími zdroji.";
+    srcEl.textContent = "nepotvrzeno · nezávislá potvrzení: " + indepVotes + sourceCaveat();
     if($("whenUntil")) $("whenUntil").innerHTML = "";
-    whenState = {mode:"maybe", votes:votes, now:now};
+    whenState = {mode:"maybe", votes:votes, indep:indepVotes, now:now};
     renderSolo();
     return;
   }
@@ -5569,7 +5642,7 @@ function recomputeWhen(){
          bríza vanoucí OD pevniny K vodě je naopak tlumí. */
       if(waterState && waterState !== "error" && atmoState.ws10 != null && atmoState.wd10 != null){
         var synWeak = (atmoState.ws850 == null) || (atmoState.ws850 < 18);
-        var hourLocal = (placeUtcOffset != null) ? new Date(now + placeUtcOffset*1000).getUTCHours() : null;
+        var hourLocal = (placeTimeZone || placeUtcOffset != null) ? +placeParts(new Date(now)).hour : null;
         var isDay = (hourLocal == null) ? true : (hourLocal >= 10 && hourLocal <= 19);
         if(synWeak && isDay){
           var diff = Math.abs(((atmoState.wd10 - waterState.bearingToWaterDeg + 540) % 360) - 180);
@@ -5598,7 +5671,7 @@ function recomputeWhen(){
       chmiUsed = true;
     }
     var mins = Math.max(1, Math.round(estMin));
-    var tp = typeGuess || wmoType(obsCurrent && obsCurrent !== "error" ? obsCurrent.code : null, estMm);
+    var tp = typeGuess || wmoType(modelCurrent && modelCurrent !== "error" ? modelCurrent.code : null, estMm);
     estMm = saneMm(estMm); if(estMm == null) estMm = 0.1;
 
     /* ---- ROZPĚTÍ MÍSTO PŘEDSTÍRANÉ PŘESNOSTI ----

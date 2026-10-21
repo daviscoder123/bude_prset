@@ -1,0 +1,11 @@
+{
+  "name": "bude-prset",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/regression.test.cjs",
+    "test:browser": "node --test tests/browser.test.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.59.0"
+  }
+}
