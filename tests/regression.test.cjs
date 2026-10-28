@@ -295,7 +295,7 @@ test('ensemble probability pools members from all neighborhood points',()=>{
 test('blend skill starts neutral, shrinks with few samples and saturates with many',()=>{
   const store={};
   const ls={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v;},removeItem:()=>{}};
-  const c=context(['getBlendMult','recordBlendError','lsGet','lsSet'],{localStorage:ls,BLEND_KEY:'bpBlend_v1'});
+  const c=context(['blendBucket','getBlendMult','recordBlendError','lsGet','lsSet'],{localStorage:ls,BLEND_KEY:'bpBlend_v1'});
   assert.equal(c.getBlendMult('CZ',30,'radar'),1);   /* bez dat žádný vliv */
   c.recordBlendError('CZ','30','radar',0.7);
   const few=c.getBlendMult('CZ',30,'radar');
@@ -309,7 +309,7 @@ test('blend skill starts neutral, shrinks with few samples and saturates with ma
 test('learned blend multipliers rescale weights only for the region with data',()=>{
   const store={};
   const ls={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v;},removeItem:()=>{}};
-  const c=context(['blendWeights','getBlendMult','recordBlendError','lsGet','lsSet'],{localStorage:ls,BLEND_KEY:'bpBlend_v1'});
+  const c=context(['blendBucket','blendWeights','getBlendMult','recordBlendError','lsGet','lsSet'],{localStorage:ls,BLEND_KEY:'bpBlend_v1'});
   const base30=c.blendWeights(30,null), base45=c.blendWeights(45,null);
   assert.deepEqual(c.blendWeights(30,'CZ'),base30);  /* bez dat stejné váhy */
   for(let i=0;i<40;i++)c.recordBlendError('CZ','30','radar',0.7);
