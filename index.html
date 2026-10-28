@@ -1067,7 +1067,12 @@ function syncOfflineBar(){
             ? !navigator.onLine : false;
   b.classList.toggle("show", off);
 }
-window.addEventListener("online", function(){ syncOfflineBar(); });
+window.addEventListener("online", function(){
+  syncOfflineBar();
+  /* Po návratu spojení obnovit zastaralá data hned — bez toho by uživatel
+     koukal na předpověď z doby, kdy byl offline, až do dalšího cyklu. */
+  if(cur && Date.now() - lastFetch >= REFRESH_MS) load(cur, true);
+});
 window.addEventListener("offline", function(){ syncOfflineBar(); });
 syncOfflineBar();
 

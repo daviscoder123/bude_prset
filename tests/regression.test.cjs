@@ -182,3 +182,63 @@ test('radar-detected approaching rain sets "soon" state and renders the mobile p
   assert.equal(c.whenState.hi,22);
   assert.deepEqual(c.whenState.parts,['radar','model']);
 });
+
+
+/* ===== Kolo 2: timeouty síťových volání, úklid cache, offline lišta ===== */
+class FakeAbortController{
+  constructor(){ this.signal={listeners:[],addEventListener:(t,f)=>this.signal.listeners.push(f)}; }
+  abort(){ this.signal.listeners.forEach(f=>f()); }
+}
+test('hanging API call is aborted by timeout instead of loading forever',async()=>{
+  const hanging=(url,opts)=>new Promise((_,rej)=>{
+    if(opts&&opts.signal&&opts.signal.addEventListener)
+      opts.signal.addEventListener('abort',()=>rej(new Error('AbortError')));
+  });
+  const c=context(['fetchT'],{AbortController:FakeAbortController,
+    fetch:hanging,setTimeout,clearTimeout});
+  await assert.rejects(c.fetchT('https://example/api',null,50),/AbortError/);
+});
+test('memory cache prunes expired entries and caps size while browsing',()=>{
+  const now=Date.now();
+  const c=context(['pruneCache'],{
+    CACHE:{fresh:{t:now,ttl:3600000,d:'x'},old:{t:now-2*3600000,ttl:3600000,d:'y'}},
+    CACHE_MAX:3
+  });
+  c.pruneCache();
+  assert.equal(c.CACHE.fresh.d,'x');
+  assert.equal(c.CACHE.old,undefined);
+  for(let i=0;i<5;i++){c.CACHE['k'+i]={t:now-i,ttl:3600000,d:i};}
+  c.pruneCache();
+  assert.equal(Object.keys(c.CACHE).length,3);
+  assert.equal(c.CACHE['k1'].d,1);
+  assert.equal(c.CACHE['k4'],undefined);
+});
+test('cachedJson stores TTL, dedupes repeat calls and reports HTTP errors',async()=>{
+  let fetches=0;
+  const c=context(['cachedJson','fetchT','pruneCache'],{
+    CACHE:{},CACHE_MAX:200,
+    fetch:()=>{fetches++;return Promise.resolve({ok:true,json:()=>Promise.resolve({v:1})});},
+    AbortController:FakeAbortController,setTimeout,clearTimeout
+  });
+  const j=await c.cachedJson('https://x/api',60000);
+  assert.equal(j.v,1);
+  assert.equal(c.CACHE['https://x/api'].ttl,60000);
+  await c.cachedJson('https://x/api',60000);
+  assert.equal(fetches,1);
+  const bad=context(['cachedJson','fetchT'],{
+    CACHE:{},CACHE_MAX:200,
+    fetch:()=>Promise.resolve({ok:false,status:503}),
+    AbortController:FakeAbortController,setTimeout,clearTimeout
+  });
+  await assert.rejects(bad.cachedJson('https://x/bad',60000),/HTTP 503/);
+});
+test('offline bar follows connectivity state and stays hidden without navigator',()=>{
+  let shown=null;
+  const bar=()=>({classList:{toggle:(cls,on)=>{shown=on;}}});
+  const c=context(['syncOfflineBar'],{$:bar,document:{}});
+  c.syncOfflineBar();
+  assert.equal(shown,false);
+  const c2=context(['syncOfflineBar'],{$:bar,document:{},navigator:{onLine:false}});
+  c2.syncOfflineBar();
+  assert.equal(shown,true);
+});
