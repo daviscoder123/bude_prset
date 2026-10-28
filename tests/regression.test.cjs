@@ -159,3 +159,26 @@ test('radar plus METAR still confirms rain; model intensity and labels stay out 
   assert.equal(c.whenState.mmh,1);
   assert.ok(c.whenState.votes.every(v=>!v.includes('model')));
 });
+test('radar-detected approaching rain sets "soon" state and renders the mobile panel',()=>{
+  const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
+  let soloCalls=0;
+  const c=context(['recomputeWhen','saneMm','cap'],{
+    $:id=>nodes[id],modelState:{},whenState:null,
+    radarState:null,radarTimeline:null,stormMotion:null,altNowcast:null,
+    modelCurrent:{mmh:0,code:0},obsMetar:null,chmiState:null,metnoNow:null,
+    regioNowcast:null,satState:null,atmoState:null,precipMix:null,
+    setTimeout:()=>{},fitPanels:()=>{},THRESH_OBS:0.2,MAX_SANE_MMH:500,
+    buildBlendTimeline:()=>[{dt:15,mmh:0.3,parts:['radar','model']}],
+    blendMeta:{arrival:{min:15,lo:12,hi:22,n:2,obsN:1}},
+    chmiFirstEchoMin:()=>null,chmiSaysDry:()=>false,
+    wmoType:()=>({t:'déšť',i:'test'}),fmtMM:String,
+    sourceCaveat:()=>'',renderRainEnd:()=>{},renderSolo:()=>{soloCalls++}
+  });
+  c.recomputeWhen();
+  assert.equal(soloCalls,1);
+  assert.equal(c.whenState.mode,'soon');
+  assert.equal(c.whenState.etaMin,15);
+  assert.equal(c.whenState.lo,12);
+  assert.equal(c.whenState.hi,22);
+  assert.deepEqual(c.whenState.parts,['radar','model']);
+});

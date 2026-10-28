@@ -940,7 +940,8 @@ function loadEnsemble(lat, lon, myId){
           perHour.push(c/members.length);
         }
         ensState = {prob: Math.round(pk.prob*100), members: members.length,
-                    model: M.n, res: M.res, idx: pk.idx, count: pk.count, perHour: perHour};
+                    model: M.n, res: M.res, idx: pk.idx, count: pk.count, perHour: perHour,
+                    memberCvals: members};
         ensNote = M.n + " · " + members.length + " členů · " + M.res;
         if(lastJ && lastModels) render(lastJ, lastModels);
       })
@@ -952,6 +953,22 @@ function loadEnsemble(lat, lon, myId){
   })(0);
 }
 
+/* Práh (THRESH) se zpřesní CAPE korekcí až po modelech — ensemble mezitím
+   spočítal hlasy členů se starým prahem. Členy si proto schováme a
+   pravděpodobnost přepočítáme, až platí práh, které soudí i modely. */
+function refreshEnsembleProb(){
+  if(!ensState || !ensState.memberCvals || !ensState.memberCvals.length) return;
+  var ms = ensState.memberCvals, n = ms.length;
+  for(var hh=0; hh<HOURS && hh<ensState.perHour.length; hh++){
+    var c = 0;
+    ms.forEach(function(m){ if(m.cvals[hh] != null && m.cvals[hh] >= THRESH) c++; });
+    ensState.perHour[hh] = c/n;
+  }
+  var ci = 0;
+  ms.forEach(function(m){ if(m.cvals[ensState.idx] != null && m.cvals[ensState.idx] >= THRESH) ci++; });
+  ensState.prob = Math.round(100*ci/n);
+}
+
 /* "0,2" → "0,2" ; "0,6000000000000001" → "0,6" (desetinná čárka, max 1 místo) */
 function fmtThresh(v){ return (Math.round(v*10)/10).toFixed(1).replace(".", ","); }
 function flagEmoji(cc){
@@ -960,6 +977,7 @@ function flagEmoji(cc){
   return String.fromCodePoint(0x1F1E6 + cc.charCodeAt(0) - 65, 0x1F1E6 + cc.charCodeAt(1) - 65);
 }
 var lastJ = null, lastModels = null, lastForecastId = null;
+var predictionsQueued = false;   /* render() běží 2–4× za jednu generaci: predikce do fronty jen jednou */
 var metnoStatus = "nedotazováno";
 var placeUtcOffset = null;
 var placeTimeZone = null;
@@ -1005,6 +1023,9 @@ function cachedJson(url, ttlMs){
     .then(function(j){ CACHE[url] = {t:Date.now(), d:j}; return j; });
 }
 function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+  return c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;";
+}); }
 var cur = null, debounceT = null, selIdx = -1, suggData = [], lastQuery = "";
 
 function status(msg){
@@ -1395,7 +1416,6 @@ function fmtHrHead(d){ return NARROW.matches ? String(+placeParts(d).hour) : fmt
 /* ================= START ================= */
 var curFromGeo = false;
 var manualPickAt = 0;      /* kdy si uživatel naposledy ručně vybral obec */
-var hiddenAt = 0;
 init();
 function init(){ acquirePosition(false); }
 /* iOS standalone: návrat do appky = "otevření" → znovu požádat o polohu.
@@ -1531,7 +1551,6 @@ function noGeo(err){
       '<button id="retryGeo" style="background:var(--rain-deep);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-weight:700;font-family:var(--sans);cursor:pointer">Zkusit znovu</button>' +
       '<div style="margin-top:10px;font-size:11px">…nebo zavři toto okno a napiš obec ručně.</div>';
     s.classList.add("show");
-    s.addEventListener("click", function(e){ if(e.target === s) status(null); });
     var btn = document.getElementById("retryGeo");
     if(btn) btn.addEventListener("click", function(){ status("Žádám o polohu…"); acquirePosition(false); });
   } else {
@@ -1567,6 +1586,9 @@ $("pinBtn").addEventListener("click", function(e){
   status("Žádám o polohu…");
   acquirePosition(false);
 });
+/* Klik na pozadí stavové hlášky ji zavře. Jedna registrace na celou appku,
+   ať se listenery nehromadí při každém noGeo(). */
+(function(){ var s = $("status"); s.addEventListener("click", function(e){ if(e.target === s) status(null); }); })();
 
 function confirmLocation(){
   var q = input.value.trim();
@@ -1606,7 +1628,7 @@ function geocode(q, confirmed){
       if(r2.length) return r2;
       return geoPhoton(q).then(function(r3){
         if(r3 && r3.length) return r3;
-        if(!confirmed) return r3 || [];      /* při psaní Nominatim nevoláme */
+        if(!confirmed) return r3;      /* při psaní Nominatim nevoláme (null = chyba sítě) */
         return geoNominatim(q);
       });
     });
@@ -1672,8 +1694,8 @@ function renderSuggestions(){
     var b = document.createElement("button");
     b.type = "button";
     if(i === selIdx) b.classList.add("sel");
-    b.innerHTML = "<span>"+p.name
-      + (p.detail ? " <span class=\"cc\">· "+p.detail+"</span>" : "")
+    b.innerHTML = "<span>"+esc(p.name)
+      + (p.detail ? " <span class=\"cc\">· "+esc(p.detail)+"</span>" : "")
       + (p.src==="OSM" ? "<span class=\"src\">OSM</span>" : "")
       + "</span><span class=\"cc\">"+p.lat.toFixed(2)+", "+p.lon.toFixed(2)+"</span>";
     b.addEventListener("mousedown", function(ev){ ev.preventDefault(); pick(i); });
@@ -1684,7 +1706,7 @@ function renderSuggestions(){
 }
 function showMsg(text){
   var s = $("sugg");
-  s.innerHTML = "<div style=\"padding:12px 14px;color:var(--muted);font-size:12px;font-family:var(--mono)\">"+text+"</div>";
+  s.innerHTML = "<div style=\"padding:12px 14px;color:var(--muted);font-size:12px;font-family:var(--mono)\">"+esc(text)+"</div>";
   s.classList.add("open");
 }
 function pick(i){
@@ -1706,6 +1728,7 @@ function isStale(id){ return id !== reqId; }
 /* Reset je synchronní, před spuštěním nových zdrojů, i při refreshi téhož místa. */
 function resetForecastState(){
   lastJ = null; lastModels = null; lastForecastId = null;
+  predictionsQueued = false;
   modelState = null; verdictState = null; whenState = null; lastBlendTimeline = null; blendMeta = null;
   placeUtcOffset = null; placeTimeZone = null; metnoStatus = "nedotazováno";
   orogState = null; orogNote = "";
@@ -1806,7 +1829,7 @@ setInterval(function(){
   if(cur && Date.now() - lastFetch >= REFRESH_MS) load(cur, true);
 }, 60*1000);
 document.addEventListener("visibilitychange", function(){
-  if(document.visibilityState === "hidden"){ hiddenAt = Date.now(); return; }
+  if(document.visibilityState === "hidden") return;
   /* appka se právě otevřela / vrátila do popředí */
   var manualFresh = manualPickAt && (Date.now() - manualPickAt < 5*60*1000);
   if(!manualFresh){
@@ -1944,6 +1967,7 @@ function render(j, allModels, generation){
      jen jednou na začátku, konvektivní korekce by se do prvního
      vykreslení nikdy nedostala. */
   if(cur) THRESH = threshFor(cur.lat);
+  refreshEnsembleProb();   /* ensemble soudí se stejným prahem jako modely */
   setPlaceTimeZone(j);
   var times = (j.hourly.time||[]).slice(0,HOURS).map(forecastDate);
   $("hdr").innerHTML = "<th class=\"model\">Model</th>"
@@ -1987,7 +2011,8 @@ function render(j, allModels, generation){
     perModel.push({m:m, vals:vals, sum:sum, rains:rains, avail:true, cvals:cvals, csum:csum,
                    crains:crains, snowMm:snowMm, isSnow:isSnow});
   });
-  enqueuePredictions(locKey, cur.lat, cur.lon, times, perModel);
+  if(!predictionsQueued){ predictionsQueued = true;
+    enqueuePredictions(locKey, cur.lat, cur.lon, times, perModel); }
   perModel.sort(function(a,b){
     var na = a.m.national?0:1, nb = b.m.national?0:1;
     if(na !== nb) return na-nb;
@@ -2103,14 +2128,6 @@ function render(j, allModels, generation){
     mokre.sort(function(a,b){ return a-b; });
     perHourMm.push(mokre.length ? mokre[Math.floor(mokre.length/2)] : 0);
   }
-  verdictState = {
-    prob: prob, jePravdepodobnost: jePravdepodobnost,
-    agreeProb: agreeProb, rainModels: rainModels, N: N,
-    pkIdx: pk.idx, times: times, perHourRain: perHourRain, perHourMm: perHourMm,
-    spread: spread, ens: ens
-  };
-  renderSolo();
-
   var half = -1, any = -1;
   for(var i=0;i<consensus.length;i++){
     if(any<0 && consensus[i]>0) any=i;
@@ -2157,6 +2174,14 @@ function render(j, allModels, generation){
     var sd = Math.sqrt(vs.reduce(function(a,b){ return a+(b-mean)*(b-mean); },0)/vs.length);
     return {cv: mean > 0.02 ? sd/mean : null, med:med, iqr:(q3-q1), mokrych: vs.length};
   });
+  verdictState = {
+    prob: prob, jePravdepodobnost: jePravdepodobnost,
+    agreeProb: agreeProb, rainModels: rainModels, N: N,
+    pkIdx: pk.idx, times: times, perHourRain: perHourRain, perHourMm: perHourMm,
+    spread: spread, ens: ens
+  };
+  renderSolo();
+
   /* Dlouhá řada (24 h) jen pro odhad konce deště. Bere se MEDIÁN modelů:
      maximum by déšť drželo uměle dlouho, stačil by jediný ukecaný model. */
   var longTimes = (j.hourly.time||[]).map(forecastDate);
@@ -4323,7 +4348,8 @@ function renderSolo(){
     vyklad += " Ensemble a shoda modelů se ale <em>výrazně rozcházejí</em> ("
             + V.prob + " % proti " + V.agreeProb + " %) — situace je nejistá.";
   }
-  if(V.spread && V.spread.wide) vyklad += " I na množství se modely rozcházejí.";
+  if(V.spread && V.pkIdx >= 0 && V.spread[V.pkIdx] && V.spread[V.pkIdx].cv > 1.1)
+    vyklad += " I na množství se modely rozcházejí.";
   talk.innerHTML = vyklad;
   src.textContent = V.ens ? (V.ens.members + " členů · " + V.ens.model) : (V.N + " modelů");
 }
@@ -5751,12 +5777,12 @@ function recomputeWhen(){
       sub.innerHTML += " Český radar ale v příští hodině nad tímhle místem"
                      + " žádné echo nemá — ber to jako slabší signál.";
     }
-    renderRainEnd(now, mins, blendTimeline);
-    return;
     whenState = {mode:"soon", etaMin: estMin, mmh: estMm, now: now,
                  lo: lo, hi: hi, arr: (blendMeta && blendMeta.arrival) || null,
                  parts: partsTxt};
+    renderRainEnd(now, mins, blendTimeline);
     renderSolo();
+    return;
   }
 
   /* Míchanka mlčí, ale národní radar echo vidí. Stává se to u malých
@@ -5770,10 +5796,10 @@ function recomputeWhen(){
       + " ho nepotvrzují, takže spíš slabší nebo malá buňka."
       + (chmiState.scale ? "" : " Intenzitu neuvádím, legenda ČHMÚ se nenačetla.");
     srcEl.textContent = "zdroj: ČHMÚ " + chmiNote + sourceCaveat();
+    whenState = {mode:"soon", etaMin: chmiOnly, now: now, chmi:true};
     renderRainEnd(now, chmiOnly, blendTimeline);
-    return;
-    whenState = {mode:"soon", etaMin: chmiFirstEchoMin(), now: now, chmi:true};
     renderSolo();
+    return;
   }
 
   /* Družice vidí bouřku VZNIKAT, ne se přesouvat — a to je jediná věc,
@@ -5791,9 +5817,9 @@ function recomputeWhen(){
       + (satState.trusted ? "" : " Družice si tady zatím ověřuje spolehlivost, ber to jako upozornění, ne předpověď.");
     srcEl.textContent = "zdroj: družice " + satState.layer + " · snímek " + satState.ageMin + " min starý" + sourceCaveat();
     if($("whenUntil")) $("whenUntil").innerHTML = "";
-    return;
     whenState = {mode:"soon", etaMin: 30, now: now, sat:true};
     renderSolo();
+    return;
   }
 
   /* nowcast, radar i modely mlčí do 60. minuty → pod prahem 1 h nic netvrdit */
