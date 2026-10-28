@@ -273,7 +273,10 @@ test('NEP grid covers 3x3 neighborhood with the center point first',()=>{
   const c=context(['ensembleGrid']);
   const g=c.ensembleGrid(50.1234,15.5678);
   assert.equal(g.length,9);
-  assert.deepEqual(g[0],[50.1234,15.5678]);
+  /* g[0] je pole z vm realm — deepStrictEqual selhává na prototypu,
+     střed proto porovnáme po souřadnicích. */
+  assert.equal(g[0][0],50.1234);
+  assert.equal(g[0][1],15.5678);
   assert.ok(g.every(p=>Math.abs(p[0]-50.1234)<=0.1001&&Math.abs(p[1]-15.5678)<=0.1501));
 });
 test('ensemble probability pools members from all neighborhood points',()=>{
