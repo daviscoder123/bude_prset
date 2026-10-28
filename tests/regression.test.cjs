@@ -242,3 +242,90 @@ test('offline bar follows connectivity state and stays hidden without navigator'
   c2.syncOfflineBar();
   assert.equal(shown,true);
 });
+
+
+/* ===== Kolo 3: přesnost — trend radaru, NEP ensemble, naučené váhy, AIFS ===== */
+test('radar trend scales future radar intensity with decaying confidence',()=>{
+  const c=context(['trendFactor']);
+  assert.equal(c.trendFactor(null,30),1);
+  assert.equal(c.trendFactor(0,30),1);
+  assert.ok(c.trendFactor(0.05,30)>1);
+  assert.ok(c.trendFactor(-0.05,30)<1);
+  assert.equal(c.trendFactor(0.5,45),2);      /* strop nahoru */
+  assert.equal(c.trendFactor(-0.5,45),0.5);  /* strop dolů */
+  assert.ok(c.trendFactor(0.05,45)>c.trendFactor(0.05,10));  /* trend s horizontem roste, */
+  assert.ok(c.trendFactor(0.05,45)>c.trendFactor(0.05,90));  /* ...ale za 45. minutou ztrácí váhu */
+});
+test('organized advection shifts a late model onset, clutter does not',()=>{
+  const c=context(['phaseShiftMin']);
+  const mv={samples:8,spreadKmh:10,speedKmh:35};
+  assert.equal(c.phaseShiftMin(40,20,mv),20);
+  assert.equal(c.phaseShiftMin(80,20,mv),45);   /* clamp 45 min */
+  assert.equal(c.phaseShiftMin(20,20,mv),0);    /* model není pozdní */
+  assert.equal(c.phaseShiftMin(40,90,mv),0);    /* radar nevidí příchod do hodiny */
+  assert.equal(c.phaseShiftMin(200,20,mv),0);   /* model dál než 3 h */
+  assert.equal(c.phaseShiftMin(null,20,mv),0);
+  assert.equal(c.phaseShiftMin(40,20,{samples:3,spreadKmh:10,speedKmh:35}),0);
+  assert.equal(c.phaseShiftMin(40,20,{samples:8,spreadKmh:25,speedKmh:35}),0);
+  assert.equal(c.phaseShiftMin(40,20,{samples:8,spreadKmh:10,speedKmh:12}),0);
+});
+test('NEP grid covers 3x3 neighborhood with the center point first',()=>{
+  const c=context(['ensembleGrid']);
+  const g=c.ensembleGrid(50.1234,15.5678);
+  assert.equal(g.length,9);
+  assert.deepEqual(g[0],[50.1234,15.5678]);
+  assert.ok(g.every(p=>Math.abs(p[0]-50.1234)<=0.1001&&Math.abs(p[1]-15.5678)<=0.1501));
+});
+test('ensemble probability pools members from all neighborhood points',()=>{
+  const c=context(['ensembleFromJson','saneMm'],{THRESH:0.2,MAX_SANE_MMH:500});
+  const mk=(mod)=>{ /* člen m prší v h=2, právě když (m+mod)%2===0 */
+    const h={};
+    const row=(m)=>Array.from({length:5},(_,i)=>((m+mod)%2===0&&i===2)?1:0);
+    h.precipitation=row(0);
+    for(let m=1;m<6;m++)h['precipitation_member0'+m]=row(m);
+    return {hourly:h};};
+  const pts=[mk(0),mk(1),mk(0),{hourly:{}}]; /* čtvrtý bod bez členů se přeskočí */
+  const r=c.ensembleFromJson(pts,5);
+  assert.equal(r.members.length,6);   /* centrální bod */
+  assert.equal(r.all.length,18);     /* 3 platné body × 6 členů */
+  assert.ok(Math.abs(r.perHour[2]-0.5)<1e-9);
+  assert.equal(r.perHour[0],0);
+  assert.equal(c.ensembleFromJson([{hourly:{}}],5),null); /* bez centrálního bodu nic */
+});
+test('blend skill starts neutral, shrinks with few samples and saturates with many',()=>{
+  const store={};
+  const ls={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v;},removeItem:()=>{}};
+  const c=context(['getBlendMult','recordBlendError','lsGet','lsSet'],{localStorage:ls,BLEND_KEY:'bpBlend_v1'});
+  assert.equal(c.getBlendMult('CZ',30,'radar'),1);   /* bez dat žádný vliv */
+  c.recordBlendError('CZ','30','radar',0.7);
+  const few=c.getBlendMult('CZ',30,'radar');
+  assert.ok(few<1&&few>0.9,'jeden vzorek smršťuje vliv skoro na nulu');
+  for(let i=0;i<60;i++)c.recordBlendError('CZ','30','radar',0.7);
+  const many=c.getBlendMult('CZ',30,'radar');
+  assert.ok(many<0.7&&many>=0.5,'s nasbíranými vzorky váha klesá, clamp drží');
+  assert.equal(c.getBlendMult('CZ',45,'radar'),1);   /* jiný horizont = jiné zkušenosti */
+  assert.equal(c.getBlendMult('DE',30,'radar'),1);  /* jiná země = jiné zkušenosti */
+});
+test('learned blend multipliers rescale weights only for the region with data',()=>{
+  const store={};
+  const ls={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v;},removeItem:()=>{}};
+  const c=context(['blendWeights','getBlendMult','recordBlendError','lsGet','lsSet'],{localStorage:ls,BLEND_KEY:'bpBlend_v1'});
+  const base30=c.blendWeights(30,null), base45=c.blendWeights(45,null);
+  assert.deepEqual(c.blendWeights(30,'CZ'),base30);  /* bez dat stejné váhy */
+  for(let i=0;i<40;i++)c.recordBlendError('CZ','30','radar',0.7);
+  const w=c.blendWeights(30,'CZ');
+  assert.ok(w.radar<base30.radar);                   /* nadhodnocující radar dolů */
+  assert.ok(base45.radar<base30.radar);              /* váhy přirozeně klesají s horizontem */
+  assert.equal(w.model,base30.model);                /* netestovaný zdroj nedotčen */
+  assert.equal(c.blendWeights(45,'CZ').radar,base45.radar); /* jiný bucket bez dat */
+});
+test('AIFS joins the model pool as its own family next to ECMWF IFS',()=>{
+  assert.match(script,/id:\s*"ecmwf_aifs025_single"[^\n]*fam:\s*"AIFS"/);
+  assert.match(script,/MODEL_POOL\.slice\(0,8\)/);
+});
+test('blend wiring applies trend, phase shift and per-source blend verification',()=>{
+  assert.match(script,/trendFactor\(radarTrendRate,\s*dt\)/);
+  assert.equal((script.match(/modelValAtMinutes\(dt \+ phaseShift\)/g)||[]).length,2);
+  assert.match(script,/kind === "blend"/);
+  assert.match(script,/enqueueBlendSnapshots\(locKey,\s*cur\.cc/);
+});

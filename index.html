@@ -473,6 +473,11 @@ html.compact table{border-spacing:1.5px}
 /* ===== 7 globálních modelů ===== */
 var MODEL_POOL = [
   {id:"ecmwf_ifs025",         n:"ECMWF IFS",     a:"Evropské centrum (EU)",     hl:51.4, hg:-0.9,  fam:"ECMWF",      cc:"EU"},
+  /* AIFS — ML model ECMWF na stejné open-date mřížce (0,25°) jako IFS,
+     ale vlastní rodina (fam), aby ho deduplikace "jedna agentura = jeden
+     řádek" neodstranila jako dvojkartu IFS. Patří do okna modelů jako
+     další řádek — je to jiný model, ne jiný výpočet téže analýzy. */
+  {id:"ecmwf_aifs025_single", n:"ECMWF AIFS",    a:"ML model ECMWF · 0,25°",    hl:51.4, hg:-0.9,  fam:"AIFS",      cc:"EU"},
   {id:"gfs_seamless",         n:"NOAA GFS",      a:"Národní met. služba USA",   hl:38.9, hg:-77.0,  fam:"NOAA",       cc:"US"},
   {id:"icon_seamless",        n:"DWD ICON",      a:"Německá met. služba",       hl:50.1, hg:8.7,    fam:"DWD",        cc:"DE"},
   {id:"meteofrance_seamless", n:"Météo-France",  a:"ARPEGE / AROME",            hl:43.6, hg:1.4,    fam:"MeteoFrance",cc:"FR"},
@@ -492,7 +497,7 @@ var MODEL_POOL = [
   {id:"meteoswiss_icon_ch2",      n:"MeteoSwiss ICON-CH2", a:"Švýcarská met. služba · 2 km", hl:46.9, hg:7.4,  fam:"MeteoSwiss", cc:"CH"},
   {id:"geosphere_arome_austria",  n:"GeoSphere AROME",     a:"Rakouská met. služba · 2,5 km",hl:48.2, hg:16.4, fam:"GeoSphere",  cc:"AT"}
 ];
-var MODELS = MODEL_POOL.slice(0,7); /* nouzový základ */
+var MODELS = MODEL_POOL.slice(0,8); /* nouzový základ */
 function pickModels(cc, lat, lon){
   var reg = regionalFor(cc);
   var chosen = [];
@@ -887,6 +892,47 @@ function calibrateProb(raw){
 /* Doména se vybírá podle rozlišení: jemnější ensemble = lepší odhad
    lokální skvrnitosti. Když preferovaný model nemá data, zkusí se další
    v pořadí — a teprve když selžou všechny, ensemble se vzdá. */
+/* NEP okolí: 3×3 body ~±11 km severojižně a ~±11–13 km východozápadně
+   (0,1° lat, 0,15° lon). Centrální bod je první, aby čas vrcholu zůstal
+   ukotvený k obci. */
+function ensembleGrid(lat, lon){
+  var pts = [[+lat.toFixed(4), +lon.toFixed(4)]];
+  for(var a=-1;a<=1;a++) for(var b=-1;b<=1;b++){
+    if(a===0 && b===0) continue;
+    pts.push([+(lat+a*0.1).toFixed(4), +(lon+b*0.15).toFixed(4)]);
+  }
+  return pts;
+}
+/* Z odpovědi (pole bodů nebo jediný objekt) vybere členy pro každý bod.
+   Centrální bod (první v pořadí dotazu) určuje members pro peakConsensus,
+   všechny body dohromady all pro NEP pravděpodobnost. Body bez členů se
+   přeskočí; bez centrálního bodu není výsledek. */
+function ensembleFromJson(j, nHours){
+  var pts = Array.isArray(j) ? j : [j];
+  var center = null, all = [];
+  pts.forEach(function(p, pi){
+    var h = (p && p.hourly) || {};
+    var keys = Object.keys(h).filter(function(k){ return k.indexOf("precipitation_member") === 0; });
+    if(h.precipitation) keys.unshift("precipitation");  /* deterministický běh = nultý člen */
+    if(keys.length < 5) return;
+    var members = keys.map(function(k){
+      return {cvals: (h[k] || []).slice(0, nHours).map(function(v){ return saneMm(v); })};
+    }).filter(function(m){ return m.cvals.some(function(v){ return v != null; }); });
+    if(members.length < 5) return;
+    if(pi === 0) center = members;
+    members.forEach(function(m){ all.push(m); });
+  });
+  if(!center) return null;
+  var perHour = [];
+  for(var hh=0; hh<nHours; hh++){
+    var c = 0, n = 0;
+    all.forEach(function(m){
+      if(m.cvals[hh] != null){ n++; if(m.cvals[hh] >= THRESH) c++; }
+    });
+    perHour.push(n ? c/n : 0);
+  }
+  return {members: center, all: all, perHour: perHour};
+}
 function ensembleCandidates(lat, lon){
   var c = [];
   /* ICON-D2 EPS — 20 členů, 2,2 km, střední Evropa (včetně celé ČR) */
@@ -912,40 +958,27 @@ function loadEnsemble(lat, lon, myId){
       return;
     }
     var M = cands[i];
-    cachedJson("https://ensemble-api.open-meteo.com/v1/ensemble?latitude=" + lat.toFixed(4)
-      + "&longitude=" + lon.toFixed(4)
+    var pts = ensembleGrid(lat, lon);
+    cachedJson("https://ensemble-api.open-meteo.com/v1/ensemble?latitude="
+      + pts.map(function(p){ return p[0]; }).join(",")
+      + "&longitude=" + pts.map(function(p){ return p[1]; }).join(",")
       + "&hourly=precipitation&models=" + M.id
       + "&forecast_hours=" + (HOURS+1) + "&timezone=auto", 900000)
       .then(function(j){
         if(isStale(myId)) return;
-        var h = (j && j.hourly) || {};
-        /* Členové chodí jako precipitation_member01, _member02, … */
-        var keys = Object.keys(h).filter(function(k){ return k.indexOf("precipitation_member") === 0; });
-        /* Deterministický běh (bez přípony) je taky člen — nultý. */
-        if(h.precipitation) keys.unshift("precipitation");
-        if(keys.length < 5) throw new Error("jen " + keys.length + " členů");
+        var parsed = ensembleFromJson(j, HOURS);
+        if(!parsed || !parsed.members || parsed.members.length < 5) throw new Error("členy bez dat");
 
-        /* Členy nasypeme do stejného tvaru, jaký žere peakConsensus():
-           objekty s polem `cvals`. Práh je tentýž, jaký platí pro modely. */
-        var members = keys.map(function(k){
-          return {cvals: (h[k] || []).slice(0, HOURS).map(function(v){ return saneMm(v); })};
-        }).filter(function(m){
-          return m.cvals.some(function(v){ return v != null; });
-        });
-        if(members.length < 5) throw new Error("členy bez dat");
-
-        var pk = peakConsensus(members, HOURS);
-        /* Podíl členů nad prahem po hodinách — pro tooltip i pro budoucí graf */
-        var perHour = [];
-        for(var hh=0; hh<HOURS; hh++){
-          var c = 0;
-          members.forEach(function(m){ if(m.cvals[hh] != null && m.cvals[hh] >= THRESH) c++; });
-          perHour.push(c/members.length);
-        }
-        ensState = {prob: Math.round(pk.prob*100), members: members.length,
-                    model: M.n, res: M.res, idx: pk.idx, count: pk.count, perHour: perHour,
-                    memberCvals: members};
-        ensNote = M.n + " · " + members.length + " členů · " + M.res;
+        var pk = peakConsensus(parsed.members, HOURS);
+        /* NEP: pravděpodobnost = podíl členů nad prahem přes 3×3 okolí
+           (členové × body). Špička (idx) zůstává z centrálního bodu,
+           aby čas vrcholu neplaval podle toho, kde zrovna prší. */
+        ensState = {prob: Math.round(100*(parsed.perHour[pk.idx] != null ? parsed.perHour[pk.idx] : pk.prob)),
+                    members: parsed.members.length,
+                    model: M.n, res: M.res, idx: pk.idx, count: pk.count,
+                    perHour: parsed.perHour, allCvals: parsed.all,
+                    memberCvals: parsed.members};
+        ensNote = M.n + " · " + parsed.members.length + " členů · " + M.res + " · 3×3 body";
         if(lastJ && lastModels) render(lastJ, lastModels);
       })
       .catch(function(e){
@@ -960,8 +993,10 @@ function loadEnsemble(lat, lon, myId){
    spočítal hlasy členů se starým prahem. Členy si proto schováme a
    pravděpodobnost přepočítáme, až platí práh, které soudí i modely. */
 function refreshEnsembleProb(){
-  if(!ensState || !ensState.memberCvals || !ensState.memberCvals.length) return;
-  var ms = ensState.memberCvals, n = ms.length;
+  if(!ensState) return;
+  var ms = (ensState.allCvals && ensState.allCvals.length) ? ensState.allCvals : ensState.memberCvals;
+  if(!ms || !ms.length) return;
+  var n = ms.length;
   for(var hh=0; hh<HOURS && hh<ensState.perHour.length; hh++){
     var c = 0;
     ms.forEach(function(m){ if(m.cvals[hh] != null && m.cvals[hh] >= THRESH) c++; });
@@ -1321,6 +1356,37 @@ function recordBiasSample(locKey, lat, lon, modelId, logRatio){
   }
   lsSet(BIAS_KEY, store);
 }
+/* ==== Kolo 3: naučené váhy míchané osy ====
+   Každý zdroj blendu (radar, nowcasty, model) a horizont 30/45/60 min si
+   appka ukládá EMA log-poměru "co zdroj tvrdil / co METAR změřil" — po
+   zemích (regioNowcast má jinou kvalitu v každé zemi). Váhu zdroje pak
+   přenásobíme 1 + (exp(-ema)-1)·n/(n+15): nadhodnocující zdroj slábne,
+   podhodnocující sílí, a při málo vzorcích je vliv smrštěný skoro k nule —
+   řídké používání appky nic nepokazí. Clamp [0,5; 1,5] drží extrémy. */
+var BLEND_KEY = "bpBlend_v1";
+function blendBucket(dt){ return dt <= 37.5 ? "30" : (dt <= 52.5 ? "45" : "60"); }
+function getBlendMult(cc, dt, src){
+  if(!cc) return 1;
+  var store = lsGet(BLEND_KEY, {regions:{}});
+  var reg = store.regions && store.regions[cc], b = blendBucket(dt);
+  var e = reg && reg[b] && reg[b][src];
+  if(!e || !e.n) return 1;                        /* žádné zkušenosti → ruční váhy */
+  var raw = Math.exp(-Math.max(-2, Math.min(2, e.ema || 0)));
+  raw = Math.max(0.5, Math.min(2, raw));          /* extrémní ema nesmí shltit vše */
+  var mult = 1 + (raw - 1) * (e.n / (e.n + 15));  /* smrštění: málo dat = malý vliv */
+  return Math.max(0.5, Math.min(1.5, mult));
+}
+function recordBlendError(cc, bucket, src, logRatio){
+  if(!cc || !bucket || !src) return;
+  var store = lsGet(BLEND_KEY, {regions:{}});
+  if(!store.regions[cc]) store.regions[cc] = {};
+  if(!store.regions[cc][bucket]) store.regions[cc][bucket] = {};
+  var e = store.regions[cc][bucket][src];
+  if(!e) e = store.regions[cc][bucket][src] = {n: 0, ema: null};
+  e.n = Math.min(500, e.n + 1);
+  e.ema = (e.ema == null) ? logRatio : 0.9*e.ema + 0.1*logRatio;
+  lsSet(BLEND_KEY, store);
+}
 /* Zařadí čerstvé predikce (jen nejbližší 4 h — realisticky ověřitelné) do fronty na pozdější kontrolu. */
 function enqueuePredictions(locKey, lat, lon, times, perModel){
   var q = lsGet(PENDING_KEY, []);
@@ -1332,6 +1398,29 @@ function enqueuePredictions(locKey, lat, lon, times, perModel){
               targetTime: times[i].getTime(), predictedMm: pm.vals[i]});
     });
   }
+  if(q.length > 600) q = q.slice(q.length - 600);
+  lsSet(PENDING_KEY, q);
+}
+/* Snapshot míchané osy pro budoucí verifikaci: co v horizontu 30/45/60 min
+   tvrdil každý zdroj zvlášť. Ověřovací kolo pak každému zdroji přisoudí jeho
+   vlastní chybu proti METAR — a blend se naučí, komu věřit víc. */
+function enqueueBlendSnapshots(locKey, cc, lat, lon, now, tl){
+  if(!tl || !tl.length) return;
+  var q = lsGet(PENDING_KEY, []);
+  [30,45,60].forEach(function(b){
+    var e = null;
+    for(var i=0;i<tl.length;i++) if(tl[i].dt === b){ e = tl[i]; break; }
+    if(!e) return;
+    var raw = {radar: e.vR, rvcast: e.vRV, nowcast: e.vN, metno: e.vMN,
+               regio: e.vRG, natcast: e.vNC, model: e.vM};
+    var srcs = {};
+    Object.keys(raw).forEach(function(k){
+      if(raw[k] != null) srcs[k] = Math.round(raw[k]*1000)/1000;
+    });
+    if(!Object.keys(srcs).length) return;
+    q.push({kind:"blend", cc: cc || "--", locKey: locKey, lat: lat, lon: lon,
+            targetTime: now + b*60000, bucket: String(b), srcs: srcs});
+  });
   if(q.length > 600) q = q.slice(q.length - 600);
   lsSet(PENDING_KEY, q);
 }
@@ -1397,6 +1486,17 @@ function runBiasVerification(){
             return;
           }
           var observed = metarApproxMm(best.wxString || "");
+          if(item.kind === "blend"){
+            /* Vzorek blendu: každý zdroj dostává svou vlastní chybu,
+               protože ve směsi hraje každý jinou roli. */
+            var obsB = Math.max(0.05, Math.min(50, observed));
+            Object.keys(item.srcs || {}).forEach(function(src){
+              var p = Math.max(0.05, Math.min(50, item.srcs[src]));
+              recordBlendError(item.cc || "--", item.bucket, src,
+                               Math.max(-2, Math.min(2, Math.log(p/obsB))));
+            });
+            return;
+          }
           var pred = Math.max(0.05, Math.min(50, item.predictedMm));
           var obs  = Math.max(0.05, Math.min(50, observed));
           var logRatio = Math.max(-2, Math.min(2, Math.log(pred/obs)));
@@ -2077,7 +2177,10 @@ function render(j, allModels, generation){
                    crains:crains, snowMm:snowMm, isSnow:isSnow});
   });
   if(!predictionsQueued){ predictionsQueued = true;
-    enqueuePredictions(locKey, cur.lat, cur.lon, times, perModel); }
+    enqueuePredictions(locKey, cur.lat, cur.lon, times, perModel);
+    /* Snapshot blendu patří ke stejné generaci dat jako predikce modelů. */
+    if(lastBlendTimeline && lastBlendTimeline.length)
+      enqueueBlendSnapshots(locKey, cur.cc, cur.lat, cur.lon, Date.now(), lastBlendTimeline); }
   perModel.sort(function(a,b){
     var na = a.m.national?0:1, nb = b.m.national?0:1;
     if(na !== nb) return na-nb;
@@ -3328,7 +3431,33 @@ function interpAtMinutes(series, dtMin, nowMs){
    Laborka přitom sleduje `predictedStartMin - actualStartMin` a má
    timingStats() s p10/p90 — jsou to čtyři parametry, které jde nafitovat
    na minimum absolutní chyby. To je další krok, až budou data. */
-function blendWeights(dt){
+/* Radarová složka blendu dosud ignorovala, jestli echo sílí nebo slábne.
+   radarTrendRate je frakční změna intenzity za minutu; promítneme ji do
+   horizontu dt s útlumem exp(-dt/45) — trend se v čase rozpadá, za tři
+   čtvrtě hodiny z něj skoro nic nezbyde. Clamp [0,5; 2] drží
+   extrapolaci v rozumných mezích. */
+function trendFactor(rate, dt){
+  if(rate == null || !isFinite(rate) || dt == null || dt <= 0) return 1;
+  var eff = Math.max(-0.1, Math.min(0.1, rate)) * dt * Math.exp(-dt/45);
+  return Math.max(0.5, Math.min(2, Math.exp(eff)));
+}
+/* Fázová korekce: když se blížící fronta/advekce vidí na radaru, ale model
+   ji položil o hodinu později, je model v čase pozdní — ne "sucho".
+   Lookup modelové osy proto posuneme o rozdíl začátků dopředu (dt + shift).
+   Platí jen pro organizovanou advekci (rychlý, souhlasný posun snímků),
+   jen kladný shift (model pozdní) a max 45 min — vznikající konvekci,
+   kterou radar z principu nevidí, fáze neopravuje. */
+function phaseShiftMin(modelOnset, radarOnset, motion){
+  if(modelOnset == null || radarOnset == null) return 0;
+  if(!motion || !motion.samples || motion.samples < 6) return 0;
+  if(motion.spreadKmh == null || motion.spreadKmh > 15) return 0;
+  if(motion.speedKmh == null || motion.speedKmh < 20) return 0;
+  if(radarOnset > 60) return 0;        /* radar nevidí příchod do hodiny */
+  if(modelOnset > 180) return 0;       /* model mluví o něčem moc vzdáleném */
+  if(modelOnset <= radarOnset) return 0;
+  return Math.max(0, Math.min(45, modelOnset - radarOnset));
+}
+function blendWeights(dt, cc){
   var w = {
     radar:   Math.exp(-dt/40),          /* vlastní advekce z dlaždic */
     rvcast:  0.85*Math.exp(-dt/55),     /* nowcast RainVieweru — cizí optical flow */
@@ -3347,6 +3476,14 @@ function blendWeights(dt){
     model:   Math.min(0.35, dt/60*0.35) /* hodinový konsenzus modelů */
   };
   w.nowcast = Math.max(0.05, 1 - w.radar - w.rvcast - w.natcast - w.metno - w.regio - w.model);
+  /* Naučené váhy: zdroj, který appka vlastní verifikací přistihla při
+     nadhodnocování, zeslabíme (a podhodnocující posílíme). Bez vzorků
+     je multiplikátor 1 — váhy zůstávají ruční. */
+  if(cc){
+    ["radar","rvcast","natcast","metno","regio","nowcast","model"].forEach(function(k){
+      w[k] = w[k] * getBlendMult(cc, dt, k);
+    });
+  }
   return w;
 }
 /* Načte čtvercový výřez kolem bodu (poloměr r px, krok 1).
@@ -5296,6 +5433,16 @@ function buildBlendTimeline(now, altSeries){
     return 1 + (anchor - 1) * Math.exp(-dt/75);
   }
 
+  /* Fázová korekce organizované advekce: radar často vidí příchod dřív,
+     než ho model položí. Lookup modelu pak posuneme o rozdíl začátků. */
+  var radarOnsetMin = radarByDt
+    ? crossingMin(DTGRID.map(function(dt){ return {min: dt, mmh: radarByDt[dt]}; }), THRESH_OBS)
+    : null;
+  var modelOnsetMin = crossingMin(DTGRID.map(function(dt){
+      return {min: dt, mmh: modelValAtMinutes(dt)};
+    }), THRESH_OBS);
+  var phaseShift = phaseShiftMin(modelOnsetMin, radarOnsetMin, stormMotion);
+
   var out = DTGRID.map(function(dt){
     var vR = radarByDt ? radarByDt[dt] : null;
     var vRV = rvSeries ? interpAtMinutes(rvSeries, dt, now) : null;
@@ -5305,13 +5452,14 @@ function buildBlendTimeline(now, altSeries){
     var vMN = mnSeries ? interpAtMinutes(mnSeries, dt, now) : null;
     var vRG = rgSeries ? interpAtMinutes(rgSeries, dt, now) : null;
     var vNC = ncSeries ? interpAtMinutes(ncSeries, dt, now) : null;
-    var vM = modelValAtMinutes(dt);
+    var vM = modelValAtMinutes(dt + phaseShift);   /* ← fázová korekce */
     if(vM != null) vM = vM * anchorAt(dt);         /* ← ukotvení */
-    var w = blendWeights(dt);
+    var w = blendWeights(dt, cur && cur.cc);
     /* Radar za okrajem výřezu je persistence, ne měření — váha dolů. */
     var wRadar = w.radar * (radarConfByDt ? (radarConfByDt[dt] != null ? radarConfByDt[dt] : 1) : 1);
     var parts = [], wsum = 0, val = 0;
-    if(vR != null){ parts.push("radar"); wsum += wRadar; val += vR*wRadar; }
+    if(vR != null){ parts.push("radar"); wsum += wRadar;
+      val += vR*trendFactor(radarTrendRate, dt)*wRadar; }
     if(vRV != null){ var wv = w.rvcast*taper(konecRV, dt);
       if(wv > 0){ parts.push("rv-nowcast"); wsum += wv; val += vRV*wv; } }
     if(vN != null){ var wn = w.nowcast*taper(konecAL, dt);
@@ -5324,7 +5472,7 @@ function buildBlendTimeline(now, altSeries){
       if(wc > 0){ parts.push(wmsncSrc ? wmsncSrc.id : "natcast"); wsum += wc; val += vNC*wc; } }
     if(vM != null){ parts.push("model"); wsum += w.model; val += vM*w.model; }
     var blended = wsum > 0 ? val/wsum : null;
-    return {dt:dt, mmh: blended, vR:vR, vRV:vRV, vN:vN, vM:vM, parts:parts};
+    return {dt:dt, mmh: blended, vR:vR, vRV:vRV, vN:vN, vMN:vMN, vRG:vRG, vNC:vNC, vM:vM, parts:parts};
   });
 
   /* ================= BLENDUJÍ SE ČASY, NE INTENZITY =================
@@ -5351,7 +5499,7 @@ function buildBlendTimeline(now, altSeries){
     if(!pts || !pts.length) return;
     var m = crossingMin(pts, THRESH_OBS);
     if(m == null) return;
-    var w = blendWeights(m)[klic];
+    var w = blendWeights(m, cur && cur.cc)[klic];
     if(!(w > 0)) return;
     /* Model není pozorování. Rozdíl je zásadní ve chvíli, kdy hlásí déšť
        jediný zdroj: radar něco NAMĚŘIL, model si to spočítal z analýzy
@@ -5372,7 +5520,7 @@ function buildBlendTimeline(now, altSeries){
   pridej(wmsncSrc ? wmsncSrc.n : "nat. nowcast", zeSerie(ncSeries), "natcast");
   pridej("15min model", zeSerie(altSeries), "nowcast");
   pridej("model", DTGRID.map(function(dt){
-    var v = modelValAtMinutes(dt);
+    var v = modelValAtMinutes(dt + phaseShift);
     return {min: dt, mmh: v == null ? null : v*anchorAt(dt)};
   }), "model");
 
@@ -5384,7 +5532,7 @@ function buildBlendTimeline(now, altSeries){
                obsN: arrivals.filter(function(a){ return a.obs; }).length,
                sources: arrivals.map(function(a){ return a.kdo; })};
   }
-  blendMeta = {anchor: anchorInfo, arrival: arrival};
+  blendMeta = {anchor: anchorInfo, arrival: arrival, phaseShift: phaseShift || 0};
   return out;
 }
 
