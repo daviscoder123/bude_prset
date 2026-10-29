@@ -385,11 +385,13 @@ html.compact .when{grid-column:2}
 html.compact .stats{grid-column:1/-1;grid-template-columns:repeat(4,1fr);gap:0;padding:8px 2px;border-radius:14px}
 html.compact .stat{min-width:0;overflow:hidden;padding:0 8px}
 html.compact .stat + .stat{border-left:1px solid var(--line)}
-html.compact .stat .k{font-size:8.5px;letter-spacing:.05em;line-height:1.3;white-space:normal}
+html.compact .stat .k{font-size:9px;letter-spacing:.03em;line-height:1.25;white-space:nowrap}
 html.compact .stat .v{font-size:13px;white-space:nowrap;margin-top:2px}
 /* Hlavní panel na mobilu dýchá hustěji, ať zbude místo pro tabulku
    i lištu — čitelnost hlídají zvětšené řádky, ne vzduch kolem. */
-html.compact .solo .hero{padding:11px 13px 9px}
+html.compact .solo .hero{padding:13px 14px 11px}
+html.compact .solo .pill{font-size:10px;letter-spacing:.08em}
+html.compact .solo .sub{margin-top:8px}
 html.compact .solo .wart{width:62px;height:62px;margin:-2px -2px 0 0}
 html.compact .solo .big{font-size:clamp(30px,9.5vw,44px)}
 html.compact .solo .says{padding:10px 13px 0;gap:8px}
@@ -519,10 +521,10 @@ html.compact table{border-spacing:1.5px}
       <div class="compass" id="compass" hidden></div>
 
       <div class="stats">
-        <div class="stat"><div class="k">Shoda modelů</div><div class="v" id="agree">–</div></div>
-        <div class="stat"><div class="k">Nejbližší déšť</div><div class="v" id="firstRain">–</div></div>
-        <div class="stat"><div class="k">Ø úhrn / 8 h</div><div class="v" id="avgSum">–</div></div>
-        <div class="stat"><div class="k">Max. intenzita</div><div class="v" id="maxInt">–</div></div>
+        <div class="stat"><div class="k" data-short="Shoda" data-full="Shoda modelů">Shoda modelů</div><div class="v" id="agree">–</div></div>
+        <div class="stat"><div class="k" data-short="Déšť od" data-full="Nejbližší déšť">Nejbližší déšť</div><div class="v" id="firstRain">–</div></div>
+        <div class="stat"><div class="k" data-short="Ø úhrn" data-full="Ø úhrn / 8 h">Ø úhrn / 8 h</div><div class="v" id="avgSum">–</div></div>
+        <div class="stat"><div class="k" data-short="Max int." data-full="Max. intenzita">Max. intenzita</div><div class="v" id="maxInt">–</div></div>
       </div>
     </aside>
   </main>
@@ -2062,6 +2064,16 @@ var NARROW = { matches: isPhoneLike() };
 function applyLayoutMode(){
   NARROW.matches = isPhoneLike();
   document.documentElement.classList.toggle("compact", NARROW.matches);
+  /* Krátké popisky lišty souhrnů: „NEJBLIŽŠÍ DÉŠŤ" se na úzkém displeji
+     nevejde na jeden řádek a useknutý druhý řádek působí, jako by se
+     text rozsypal. Krátké varianty (Shoda, Déšť od, Ø úhrn, Max int.)
+     sedí na jeden řádek vždy — i na 320px telefonu; na velkém displeji
+     zůstávají plné popisky. */
+  var ks = document.querySelectorAll(".stat .k");
+  for(var i=0;i<ks.length;i++){
+    var el = ks[i];
+    if(el.dataset.full) el.textContent = NARROW.matches ? el.dataset.short : el.dataset.full;
+  }
   fitGuard();
 }
 /* Pojistka: pokud i tak obsah přetéká (prohlížeč ignoruje viewport),
@@ -2080,7 +2092,7 @@ function fitGuard(){
       var overH = document.documentElement.scrollHeight / window.innerHeight;
       if(overH > over) over = overH;
     }
-    if(over > 1.02) b.style.zoom = String(Math.floor(100/over*0.99)/100);
+    if(over > 1.02) b.style.zoom = String(Math.floor(20/over*0.99)/20);
   });
 }
 window.addEventListener("resize", function(){

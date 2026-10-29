@@ -236,6 +236,14 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
            co uzivatel fakticky vidi. */
         fits:(function(){const s=document.querySelector('.stats');
           return s?s.getBoundingClientRect().bottom<=window.innerHeight+4:null;})(),
+        /* Kolo 8b: popisky listy souhrnu se na mobilu zkracuji (data-short),
+           aby se "NEJBLIZSI DEST" nezalamoval — useknuty druhy radek
+           vypadal na telefonu jako rozsypany text. Popisek musi byt
+           kratky A na jednom radku. */
+        k2:(function(){const k=document.querySelectorAll('.stat .k')[1];
+          return k?k.textContent:null;})(),
+        k2h:(function(){const k=document.querySelectorAll('.stat .k')[1];
+          return k?k.getBoundingClientRect().height:null;})(),
         adjust:/(-webkit-)?text-size-adjust:\s*100%/.test(css),
         computedAdjust:cs.getPropertyValue('-webkit-text-size-adjust')||cs.getPropertyValue('text-size-adjust'),
         htmlRule:(rules.find(t=>/^html\s*,\s*body\s*\{/.test(t))||'NO RULE'),
@@ -260,6 +268,8 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
     const z=state.zoom===''?1:parseFloat(state.zoom);
     assert.ok(z>=0.7,'zoom zbesil (regrese inflace fontu?): '+diag);
     assert.ok(state.fits===true,'mobil presahuje obrazovku na vysku — lista souhrnu neni cela videt: '+diag);
+    assert.equal(state.k2,'Déšť od','lista souhrnu musi mit na mobilu kratke popisky: '+diag);
+    assert.ok(state.k2h!==null&&state.k2h<16,'popisek listy se zalomil na dva radky: '+diag);
     assert.ok(state.over<=1.02,'horizontal overflow: '+diag);
     assert.ok(state.adjust===true||state.computedAdjust==='100%','chybi text-size-adjust:100%: '+diag);  /* pojistka proti nafouknuti fontu */
     assert.ok(/max-width:\s*100%/.test(state.appRule)&&/min-height:\s*100%/.test(state.appRule),
