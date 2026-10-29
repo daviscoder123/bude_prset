@@ -349,7 +349,9 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
      nacteni stejnou velikost. Nouzove --fit smi ubrat jen na kratkem
      displeji (typicky SE) a snizi vsechny velikosti naraz, takze
      pomery layoutu zustanou stejne. */
-  const phones=[[360,740],[375,667],[393,852],[430,932],[393,665]];
+  /* seznam serazeny podle sirky — zaver testu porovnava sousedy a
+     ocekava rostouci skalu, takze [393,665] patri PRED [430,932] */
+  const phones=[[360,740],[375,667],[393,852],[393,665],[430,932]];
   const rows=[];
   for(const [w,h] of phones){
     const {ctx,p,errors}=await fixture('Europe/Prague',w,h);
