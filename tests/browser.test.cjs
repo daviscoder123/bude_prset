@@ -261,6 +261,18 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
         nfit:(function(){const ns=document.querySelectorAll('#body td.name .n');
           for(const n of ns){ if(n.scrollWidth>n.clientWidth+1) return false; }
           return ns.length?true:null;})(),
+        /* Kolo 8h (Dave 29.10. 23:10, „Shoda 0/8“ ale vidět 6 modelů):
+           tabulka přetekla panel .matrix a řádky IFS/AIFS se ztratily
+           pod panely níž. Hlídáme: všech 8 modelových řádků v DOM,
+           tabulka nescrolluje (vešla se do panelu) a poslední řádek
+           (Shoda) je vidět uvnitř panelu. */
+        rows:(document.querySelectorAll('#body tr:not(.consensus)')||[]).length,
+        mscroll:(function(){const mx=document.querySelector('.matrix');
+          return mx?(mx.scrollHeight<=mx.clientHeight+1):null;})(),
+        lastIn:(function(){const mx=document.querySelector('.matrix');
+          const trs=document.querySelectorAll('#body tr');
+          const last=trs.length?trs[trs.length-1]:null;
+          return (mx&&last)?(last.getBoundingClientRect().bottom<=mx.getBoundingClientRect().bottom+1):null;})(),
         kf:(function(){const k=document.querySelectorAll('.stat .k')[1];
           return k?parseFloat(getComputedStyle(k).fontSize):null;})(),
         vf:(function(){const v=document.querySelectorAll('.stat .v')[1];
@@ -309,6 +321,9 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
     assert.equal(state.fit,'','--fit se nadmerne spustil na bezkem telefonu: '+diag);
     assert.ok(state.kf>=11&&state.vf>=13.4&&state.bigf>=30,'mala pisma po zmene skaly: '+diag);
     assert.ok(state.nfit===true,'useknute nazvy modelu (kolo 8e): '+diag);
+    assert.ok(state.rows===8,'chybi modelove radky (kolo 8h): '+diag);
+    assert.ok(state.mscroll===true,'tabulka preteka panel — radky by se ztratily pod panely (kolo 8h): '+diag);
+    assert.ok(state.lastIn===true,'posledni radek tabulky (Shoda) neni videt (kolo 8h): '+diag);
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });
@@ -321,13 +336,18 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
        375x667  iPhone SE (nejkratsi bezna vyska displeje)
        393x852  iPhone 14 Pro / 15 / 16
        430x932  iPhone Plus / Pro Max
+       393x665  iPhone v Safari s adresnim radkem — realna layoutova
+                vyska, jak ji appka na iOS vidi (hardware 852 - cca 190 px
+                toolbary). Kolo 8h: prave tady tabulka pretekla panel a
+                radky IFS/AIFS se ztratily pod panely nize; hlidame, ze se
+                vsichni 8 modelu vejde (radky + posledni radek videt).
      Skala fontu je clamp(dolni, X*vw, horni) ukotvena 360 -> 430 px,
      takze velikost textu zalezi JEN na sirce displeje — nic se
      neprepocitava z obsahu, takze stejny telefon vykresli pri kazdem
      nacteni stejnou velikost. Nouzove --fit smi ubrat jen na kratkem
      displeji (typicky SE) a snizi vsechny velikosti naraz, takze
      pomery layoutu zustanou stejne. */
-  const phones=[[360,740],[375,667],[393,852],[430,932]];
+  const phones=[[360,740],[375,667],[393,852],[430,932],[393,665]];
   const rows=[];
   for(const [w,h] of phones){
     const {ctx,p,errors}=await fixture('Europe/Prague',w,h);
@@ -343,11 +363,18 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
         let nfit=null;
         const ns=document.querySelectorAll('#body td.name .n');
         if(ns.length){ nfit=true; for(const n of ns){ if(n.scrollWidth>n.clientWidth+1) nfit=false; } }
+        /* Kolo 8h: vsichni modelove radky videt, tabulka nepretekla panel */
+        const mx=document.querySelector('.matrix');
+        const trs=document.querySelectorAll('#body tr');
+        const last=trs.length?trs[trs.length-1]:null;
         return {
           k:px(ks[1]), v:px(vs[1]),
           n:px(document.querySelector('#body tr td.name .n')),
           big:px(document.getElementById('soloBig')),
           nfit,
+          rows:(document.querySelectorAll('#body tr:not(.consensus)')||[]).length,
+          mscroll:mx?(mx.scrollHeight<=mx.clientHeight+1):null,
+          lastIn:(mx&&last)?(last.getBoundingClientRect().bottom<=mx.getBoundingClientRect().bottom+1):null,
           fit:document.documentElement.style.getPropertyValue('--fit'),
           over:document.documentElement.scrollWidth/window.innerWidth,
           fits:stats?stats.getBoundingClientRect().bottom<=window.innerHeight+4:null
@@ -364,10 +391,14 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
       assert.ok(s.k>=11*f-0.05&&s.v>=13.4*f-0.05&&s.n>=11.4*f-0.05&&s.big>=30*f-0.05,
         'mala pisma na '+w+'px: '+JSON.stringify(s));
       assert.ok(s.nfit===true,'useknute nazvy modelu na '+w+'px: '+JSON.stringify(s));
+      assert.ok(s.rows===8,'chybi modelove radky na '+w+'x'+h+' (kolo 8h): '+JSON.stringify(s));
+      assert.ok(s.mscroll===true,'tabulka preteka panel na '+w+'x'+h+' — radky by se ztratily (kolo 8h): '+JSON.stringify(s));
+      assert.ok(s.lastIn===true,'posledni radek tabulky neni videt na '+w+'x'+h+' (kolo 8h): '+JSON.stringify(s));
       assert.deepEqual(errors,[],'page errors '+w+'px: '+errors.join(' | '));
     }finally{await ctx.close();}
   }
   /* deterministicka skala: vyocene zakladni velikosti (bez --fit) s
+
      rostouci sirkou displeje jen rostou — na zadnem telefonu nesmi
      skala "skacem" klesnout, jinak by appka vypadala pri ruznych
      sirekach nahodne. */
