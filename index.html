@@ -1744,6 +1744,14 @@ function brierCalib(p01, src){
 function verdictProb(agree, obsN){
   var p = null;
   if(ensState && typeof ensState.prob === "number") p = ensState.prob/100;
+  /* Ensemble mluví i bez agregované pravděpodobnosti: podíl členů,
+     které začnou pršet do konce okna, je sám o sobě procentem. */
+  if(p == null && ensState && ensState !== "off" && ensState !== "error"
+     && ensState.onsets && ensState.onsets.length){
+    var n = 0;
+    ensState.onsets.forEach(function(o){ if(o != null && o <= HOURS*60) n++; });
+    p = n / ensState.onsets.length;
+  }
   if(probSeries && probSeries.length){
     var om = 0;
     for(var i=0;i<probSeries.length && i<HOURS;i++) if(probSeries[i] != null && probSeries[i] > om) om = probSeries[i];
@@ -1761,12 +1769,23 @@ function verdictProb(agree, obsN){
    Open-Meteo (jejich ensemble) a shodu modelů (podíl implementací) —
    a každé z nich chybuje jinak. */
 function verdictProbSrc(){
-  if(ensState && typeof ensState.prob === "number"){
+  /* ep = procento ensemblu: primárně agregovaná pravděpodobnost,
+     bez ní podíl členů s časem začátku do konce okna (stejný fallback
+     jako verdictProb — zrcadlení musí být věrné i tady). */
+  var ep = null;
+  if(ensState && typeof ensState.prob === "number") ep = ensState.prob;
+  else if(ensState && ensState !== "off" && ensState !== "error"
+          && ensState.onsets && ensState.onsets.length){
+    var n = 0;
+    ensState.onsets.forEach(function(o){ if(o != null && o <= HOURS*60) n++; });
+    ep = Math.round(100*n/ensState.onsets.length);
+  }
+  if(ep != null){
     if(probSeries && probSeries.length){
       var om = 0;
       for(var i=0;i<probSeries.length && i<HOURS;i++)
         if(probSeries[i] != null && probSeries[i] > om) om = probSeries[i];
-      if(om > ensState.prob) return "om";
+      if(om > ep) return "om";
     }
     return "ens";
   }
