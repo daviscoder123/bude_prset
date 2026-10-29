@@ -1073,6 +1073,131 @@ function ensembleCandidates(lat, lon){
   /* ECMWF IFS ensemble — 51 členů, 25 km, celosvětově */
   c.push({id:"ecmwf_ifs025", n:"ECMWF IFS ENS", res:"25 km"});
   /* GEFS — 31 členů, poslední záchrana */
+  c.push({id:"gfs_seamless", n:"NOAA GEFS", res:"25 km"});
+  return c;
+}
+
+function loadEnsemble(lat, lon, myId){
+  ensState = null; ensNote = "";
+  var cands = ensembleCandidates(lat, lon);
+  (function tryNext(i){
+    if(i >= cands.length){
+      if(isStale(myId)) return;
+      ensState = "error"; ensNote = "žádný ensemble nevrátil data";
+      return;
+    }
+    var M = cands[i];
+    var pts = ensembleGrid(lat, lon);
+    cachedJson("https://ensemble-api.open-meteo.com/v1/ensemble?latitude="
+      + pts.map(function(p){ return p[0]; }).join(",")
+      + "&longitude=" + pts.map(function(p){ return p[1]; }).join(",")
+      + "&hourly=precipitation&models=" + M.id
+      + "&forecast_hours=" + (HOURS+1) + "&timezone=auto", 900000)
+      .then(function(j){
+        if(isStale(myId)) return;
+        var parsed = ensembleFromJson(j, HOURS);
+        if(!parsed || !parsed.members || parsed.members.length < 5) throw new Error("členy bez dat");
+
+        var pk = peakConsensus(parsed.members, HOURS);
+        /* NEP: pravděpodobnost = podíl členů nad prahem přes 3×3 okolí
+           (členové × body). Špička (idx) zůstává z centrálního bodu,
+           aby čas vrcholu neplaval podle toho, kde zrovna prší. */
+        /* Čas začátku deště po JEDNOTLIVÝCH členech (minuty od teď,
+           hodinová hrubost: h*60 — člen neumí slíbit minutu, jen hodinu).
+           Ensemble dosud mluvil jedním procentem přes celé okno, přitom
+           rozptyl začátků 20–51 běhů je nejlepší statistika ČASU
+           příchodu, jakou appka má: slouží jako hlas do mediánu
+           arrivalů i pro "šance do N minut".
+           null = ten člen déšť v okně nehlásí. */
+        var onsets = parsed.members.map(function(m){
+          for(var h=0; h<HOURS; h++){
+            if(m.cvals[h] != null && m.cvals[h] >= THRESH) return h*60;
+          }
+          return null;
+        });
+        ensState = {prob: Math.round(100*(parsed.perHour[pk.idx] != null ? parsed.perHour[pk.idx] : pk.prob)),
+                    members: parsed.members.length,
+                    model: M.n, res: M.res, idx: pk.idx, count: pk.count,
+                    perHour: parsed.perHour, allCvals: parsed.all,
+                    memberCvals: parsed.members, onsets: onsets};
+        ensNote = M.n + " · " + parsed.members.length + " členů · " + M.res + " · 3×3 body";
+        if(lastJ && lastModels) render(lastJ, lastModels);
+      })
+      .catch(function(e){
+        if(isStale(myId)) return;
+        console.warn("[bp] ensemble " + M.id + " nevyšel: " + (e && e.message || e));
+        tryNext(i+1);
+      });
+  })(0);
+}
+
+/* Práh (THRESH) se zpřesní CAPE korekcí až po modelech — ensemble mezitím
+   spočítal hlasy členů se starým prahem. Členy si proto schováme a
+   pravděpodobnost přepočítáme, až platí práh, které soudí i modely. */
+function refreshEnsembleProb(){
+  if(!ensState) return;
+  var ms = (ensState.allCvals && ensState.allCvals.length) ? ensState.allCvals : ensState.memberCvals;
+  if(!ms || !ms.length) return;
+  var n = ms.length;
+  for(var hh=0; hh<HOURS && hh<ensState.perHour.length; hh++){
+    var c = 0;
+    ms.forEach(function(m){ if(m.cvals[hh] != null && m.cvals[hh] >= THRESH) c++; });
+    ensState.perHour[hh] = c/n;
+  }
+  var ci = 0;
+  ms.forEach(function(m){ if(m.cvals[ensState.idx] != null && m.cvals[ensState.idx] >= THRESH) ci++; });
+  ensState.prob = Math.round(100*ci/n);
+}
+
+/* "0,2" → "0,2" ; "0,6000000000000001" → "0,6" (desetinná čárka, max 1 místo) */
+function fmtThresh(v){ return (Math.round(v*10)/10).toFixed(1).replace(".", ","); }
+function flagEmoji(cc){
+  if(!cc || cc.length !== 2) return "";
+  cc = cc.toUpperCase();
+  return String.fromCodePoint(0x1F1E6 + cc.charCodeAt(0) - 65, 0x1F1E6 + cc.charCodeAt(1) - 65);
+}
+var lastJ = null, lastModels = null, lastForecastId = null;
+var predictionsQueued = false;   /* render() běží 2–4× za jednu generaci: predikce do fronty jen jednou */
+var metnoStatus = "nedotazováno";
+var placeUtcOffset = null;
+var placeTimeZone = null;
+/* Časy API jsou Unix sekundy (UTC). Pásmo lokality patří jen do zobrazení. */
+function forecastDate(t){
+  return new Date(typeof t === "number" && isFinite(t) ? t*1000 : NaN);
+}
+function setPlaceTimeZone(j){
+  placeUtcOffset = typeof j.utc_offset_seconds === "number" ? j.utc_offset_seconds : null;
+  placeTimeZone = null;
+  if(j.timezone){
+    try{
+      new Intl.DateTimeFormat("cs-CZ", {timeZone:j.timezone}).format(0);
+      placeTimeZone = j.timezone;
+    }catch(e){ /* offset je nouzová cesta, nikdy pásmo zařízení */ }
+  }
+}
+function placeParts(d){
+  var zone = placeTimeZone || "UTC";
+  var date = !placeTimeZone && placeUtcOffset != null
+    ? new Date(d.getTime() + placeUtcOffset*1000) : d;
+  var parts = new Intl.DateTimeFormat("en-GB", {timeZone:zone,
+    year:"numeric", month:"2-digit", day:"2-digit",
+    hour:"2-digit", minute:"2-digit", hourCycle:"h23"}).formatToParts(date);
+  var out = {};
+  parts.forEach(function(p){ if(p.type !== "literal") out[p.type] = p.value; });
+  return out;
+}
+/* Když je lokalita v jiném pásmu než zařízení, ukázat čas i u tebe. */
+function tzHint(d){
+  if(!placeTimeZone && placeUtcOffset == null) return "";
+  var p = placeParts(d);
+  if(+p.year === d.getFullYear() && +p.month === d.getMonth()+1 &&
+     +p.day === d.getDate() && +p.hour === d.getHours() && +p.minute === d.getMinutes()) return "";
+  var local = d.toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"});
+  return "<span class=\"tzhint\">u tebe " + local + "</span>";
+}
+var CACHE = {}, CACHE_MAX = 200;
+/* Úklid cache: každé nové místo dělá nové klíče (souřadnice v URL),
+   takže bez úklidu by CACHE rostla donekonečna. Při každém zápisu
    vyhazujeme prošlé záznamy a nad strop i nejstarší. */
 function pruneCache(){
   var now = Date.now(), k = Object.keys(CACHE), i;
