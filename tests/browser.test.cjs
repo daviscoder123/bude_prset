@@ -29,7 +29,7 @@ async function fixture(timezone='America/Los_Angeles',width=1280,height=900){
   const ctx=await browser.newContext({timezoneId:timezone,viewport:{width,height},serviceWorkers:'block'});
   const p=await ctx.newPage(), errors=[];
   p.on('pageerror',e=>errors.push(e.message));
-  const control={pending:[],holdLat:null,failLat:null,failRegional:false,modelRequests:[]};
+  const control={pending:[],holdLat:null,failLat:null,failRegional:false,dropModel:null,modelRequests:[]};
   const epoch=Math.floor(Date.now()/3600000)*3600;
   const times=Array.from({length:25},(_,i)=>epoch+i*3600);
   await p.route('**/*',async route=>{
@@ -54,6 +54,7 @@ async function fixture(timezone='America/Los_Angeles',width=1280,height=900){
         return route.fulfill({status:503,json:{error:true}});
       const hourly={time:times};
       for(const model of u.searchParams.get('models').split(',')){
+        if(model===control.dropModel) continue;   /* model bez dat = tiše vypadne */
         hourly[`precipitation_${model}`]=times.map((_,i)=>i===1||i===2?0.8:0);
         hourly[`snowfall_${model}`]=times.map(()=>0);
       }
@@ -381,4 +382,37 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
     }
   }
   console.log('phone scale:',JSON.stringify(rows));
+});
+test('model without data gets a note under the table (kolo 8f)',async()=>{
+  /* Screenshot 29. 10. 22:47: dorazilo jen 6 z 8 modelů a vypadalo to,
+     jako by appka modely sama omezila — chybející řádky jsou tiše.
+     Když open-meteo některým modelem neodpoví, musí se pod tabulkou
+     objevit poznámka s počtem, a tabulka nesmí vypadat rozbitě
+     (žádná useknutá jména ani po zmenšení počtu řádků). */
+  const {ctx,p,errors,control}=await fixture('Europe/Prague',393,852);
+  try{
+    await search(p,'Praha');await ready(p,'Praha');
+    await p.evaluate(()=>new Promise(res=>requestAnimationFrame(()=>requestAnimationFrame(res))));
+    assert.equal(await p.locator('#mnote').innerText(),'',   /* plná osmička → žádná poznámka */
+      'mnote nesmi byt videt, kdyz odpovedi vsech modelu: ');
+    const rowsFull=await p.locator('#body tr').count();
+    /* ECMWF IFS přestane odpovídat — přesně scénář ze 22:47 */
+    control.dropModel='ecmwf_ifs025';
+    await search(p,'Brno');await ready(p,'Brno');
+    await p.evaluate(()=>new Promise(res=>requestAnimationFrame(()=>requestAnimationFrame(res))));
+    const note=await p.locator('#mnote').innerText();
+    assert.match(note,/1 z 8 nejbližších modelů neodpověděl/,
+      'poznámka o chybějícím modelu se nezobrazila: "'+note+'"');
+    assert.equal(await p.locator('#body tr').count(),rowsFull-1,
+      'chybějící model musí ubrat právě jeden řádek');
+    const nfit=await p.evaluate(()=>{
+      for(const n of document.querySelectorAll('#body td.name .n'))
+        if(n.scrollWidth>n.clientWidth+1) return false;
+      return true;});
+    assert.ok(nfit===true,'useknute nazvy po vypadnuti modelu: ');
+    const shoda=await p.locator('#body tr.consensus td.cell').first().innerText();
+    assert.ok(shoda.endsWith('/'+(rowsFull-2)),
+      'shoda musi pocitat jen odpovezene modely: '+shoda);
+    assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
+  }finally{await ctx.close();}
 });

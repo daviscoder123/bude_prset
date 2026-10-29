@@ -103,6 +103,8 @@ td{height:var(--cell-h);border-radius:6px;text-align:center;font-family:var(--mo
 td.name{background:none;text-align:left;padding-right:6px;overflow:hidden}
 td.name .n{font-family:var(--sans);font-weight:700;font-size:clamp(10px,1.45vh,13px);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 td.name .a{font-family:var(--mono);font-size:8.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mnote{font-family:var(--sans);font-size:10px;color:var(--muted);padding:6px 2px 0;line-height:1.35}
+#mnote:empty{display:none}
 td.name .flag{display:none;font-size:12px;line-height:1.1} /* vlajka je inline v názvu — viz render() */
 td.cell{background:var(--panel2);color:var(--dry);transition:background .3s}
 td.cell.wet{color:#DFF0FC;font-weight:600}
@@ -435,6 +437,7 @@ html.compact th.model{width:calc(clamp(70px,19vw,84px)*var(--fit,1))}
 html.compact th.sum{width:32px}
 html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));border-radius:3px;overflow:hidden}
 html.compact td.name .n{font-size:calc(clamp(11.5px,3.3vw,13px)*var(--fit,1))}
+html.compact #mnote{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--fit,1));padding:4px 1px 0}
 html.compact td.name .a{display:none}
 html.compact td.name .flag{display:none}
 html.compact tr.national .badge{display:none}
@@ -491,6 +494,12 @@ html.compact table{border-spacing:1.5px}
         <span class="u">mm / hod · lokální čas</span>
       </div>
       <table id="tbl"><thead><tr id="hdr"></tr></thead><tbody id="body"></tbody></table>
+      <!-- Poznámka o modelech bez odpovědi (kolo 8f): když open-meteo
+           některým modelem neodpoví, jeho řádek tiše vypadne a tabulka
+           vypadala „rozbitá“ — Dave 29. 10. 22:47 viděl jen 6 řádků.
+           Jedna věta pod tabulkou řekne, kolik modelů odpovědět
+           nedokázalo, aby to nebylo záhadné. -->
+      <div id="mnote"></div>
     </section>
 
     <aside>
@@ -610,8 +619,8 @@ var MODEL_POOL = [
   {id:"dwd_aicon_global_native", n:"DWD AICON", ns:"AICON", a:"AI model DWD · ~13 km",    hl:50.1, hg:8.7,    fam:"AICON",      cc:"DE"},
   {id:"meteofrance_seamless", n:"Météo-France", ns:"Météo", a:"ARPEGE / AROME",            hl:43.6, hg:1.4,    fam:"MeteoFrance",cc:"FR"},
   {id:"ukmo_seamless",        n:"UK Met Office", ns:"UKMO",  a:"Britská met. služba",       hl:50.7, hg:-3.5,   fam:"UKMO",       cc:"GB"},
-  {id:"knmi_seamless",        n:"KNMI",          a:"Nizozemská met. služba",    hl:52.1, hg:5.2,    fam:"KNMI",       cc:"NL"},
-  {id:"dmi_seamless",         n:"DMI",           a:"Dánská met. služba",        hl:55.7, hg:12.6,   fam:"DMI",        cc:"DK"},
+  {id:"knmi_seamless",        n:"KNMI",          ns:"KNMI",  a:"Nizozemská met. služba",    hl:52.1, hg:5.2,    fam:"KNMI",       cc:"NL"},
+  {id:"dmi_seamless",         n:"DMI",           ns:"DMI",   a:"Dánská met. služba",        hl:55.7, hg:12.6,   fam:"DMI",        cc:"DK"},
   {id:"metno_lf", special:"metno", n:"MET Norway", ns:"MET", a:"Norský met. institut · celosvětově", hl:59.9, hg:10.7, fam:"METNO", cc:"NO"},
   {id:"gem_seamless",         n:"GEM",           a:"Environment Canada",        hl:45.5, hg:-73.6,  fam:"ECCC",       cc:"CA"},
   {id:"jma_seamless",         n:"JMA",           a:"Japonská met. agentura",    hl:35.7, hg:139.7,  fam:"JMA",        cc:"JP"},
@@ -705,7 +714,7 @@ function regionalFor(cc){
   if(!cc) return null;
   cc = cc.toUpperCase();
   if(REGIONAL[cc]) return REGIONAL[cc];
-  if(EU_FALLBACK_CC.indexOf(cc) >= 0) return {id:"dmi_harmonie_arome_europe", n:"DMI HARMONIE Evropa", a:"regionální evropský model · 2 km", fam:"DMI"};
+  if(EU_FALLBACK_CC.indexOf(cc) >= 0) return {id:"dmi_harmonie_arome_europe", n:"DMI HARMONIE Evropa", ns:"HARMONIE", a:"regionální evropský model · 2 km", fam:"DMI"};
   return null;
 }
 
@@ -2110,6 +2119,27 @@ function applyLayoutMode(){
    CSS): zoom by vw fonty nezmenšil a layout by se rozpadl; --fit
    zmenší všechno najednou a vypadá to jako stejná appka, jen o pár
    procent menší. Na desktopu zůstává klasický zoom. */
+/* Kolo 8f (screenshot 22:47): šířku textu v CSS neodhadneme — metriky
+   písma se liší mezi zařízeními (iOS SF Pro vs. Puppeteer) a jeden znak
+   navíc stačí k tomu, aby z „ICON-D2“ vzniklo useknuté „ICON…“.
+   Proto se každý název v prvním sloupci po vykreslení ZAMĚŘÍ: když
+   přetéká, zmenší se písmo přesně té jedné buňky po 0,5 px, dokud se
+   název nevejde celý. Název, který se vejde, se netkne (žádná změna).
+   Useknutý název tak nemůže vzniknout na žádném zařízení, ani když by
+   se v budoucnu objevil delší název, než dnešní sloupec počítá. */
+function fitNames(){
+  var els = document.querySelectorAll("td.name .n");
+  for(var i=0;i<els.length;i++){
+    var el = els[i];
+    el.style.fontSize = "";
+    var guard = 24;
+    while(el.scrollWidth > el.clientWidth + 1 && guard-- > 0){
+      var fs = parseFloat(getComputedStyle(el).fontSize);
+      if(fs <= 8) break;
+      el.style.fontSize = (fs - 0.5) + "px";
+    }
+  }
+}
 function fitGuard(){
   var root = document.documentElement, b = document.body;
   root.style.removeProperty("--fit");
@@ -2125,6 +2155,7 @@ function fitGuard(){
       if(NARROW.matches) root.style.setProperty("--fit", String(z));
       else b.style.zoom = String(z);
     }
+    fitNames();   /* pojistka proti useknutým názvům — až po případné změně --fit */
   });
 }
 window.addEventListener("resize", function(){
@@ -2748,7 +2779,7 @@ function render(j, allModels, generation){
 
   var body = $("body"); body.innerHTML = "";
   var locKey = locKeyOf(cur.lat, cur.lon);
-  var perModel = [];
+  var perModel = [], availById = {};
   allModels.forEach(function(m){
     var arr = j.hourly["precipitation_"+m.id] || (allModels.length===1 ? j.hourly.precipitation : null);
     /* Sněhová složka. POZOR NA JEDNOTKY: Open-Meteo vrací `snowfall`
@@ -2769,6 +2800,7 @@ function render(j, allModels, generation){
     var sum = vals.reduce(function(a,v){ return a+(v||0); }, 0);
     var rains = vals.some(function(v){ return v!=null && v>=THRESH; });
     var avail = vals.some(function(v){ return v!=null; });
+    availById[m.id] = avail;
     if(!avail) return;
     /* korigované hodnoty (podle nasbírané historie přesnosti) — jen pro souhrnné
        výpočty; tabulka dál ukazuje přesně to, co model doslova předpověděl. */
@@ -2796,6 +2828,27 @@ function render(j, allModels, generation){
     return da-db;
   });
   perModel = perModel.slice(0, 8);
+
+  /* Kolik z osmi nejbližších modelů nedorazilo? Když open-meteo
+     některým modelem neodpoví (503, model mimo svou doménu), jeho řádek
+     tiše vypadne — ve snímku z 29. 10. 22:47 zbylo 6 z 8 a vypadalo
+     to, jako by appka zobrazovala modely navíc omezila. Jednořádková
+     poznámka pod tabulkou řekne, co se stalo, ať to není záhada.
+     Řadí se stejně jako řádky (národní první, pak podle vzdálenosti),
+     takže „chybějící“ jsou doopravdy ti, co by jinak v tabulce byli. */
+  var rankedAll = allModels.slice().sort(function(a,b){
+    var na = a.national?0:1, nb = b.national?0:1;
+    if(na !== nb) return na-nb;
+    var da = (a.hl!=null) ? distKm(cur.lat,cur.lon,a.hl,a.hg) : 0;
+    var db = (b.hl!=null) ? distKm(cur.lat,cur.lon,b.hl,b.hg) : 0;
+    return da-db;
+  }).slice(0, 8);
+  var miss = rankedAll.filter(function(m){ return !availById[m.id]; }).length;
+  $("mnote").textContent = miss
+    ? miss + " z " + rankedAll.length + " nejbližších modelů "
+      + (miss === 1 ? "neodpověděl" : (miss < 5 ? "neodpověděly" : "neodpovědělo"))
+      + " (open-meteo bez dat) — tabulka ukazuje zbytek."
+    : "";
 
   perModel.forEach(function(pm){
     var tr = document.createElement("tr");
@@ -5278,6 +5331,7 @@ function renderChmiRow(){
     + "<div class=\"a\">pozorování + COTREC, 1 km · jen 1. hodina</div></td>" + cells
     + "<td class=\"sumcell\" style=\"color:var(--muted)\">—</td>";
   body.insertBefore(tr, body.firstChild);
+  fitNames();   /* i řádek ČHMÚ musí projít pojistkou proti useknutí */
 }
 
 /* ==================== REGIONÁLNÍ NOWCASTY ====================
