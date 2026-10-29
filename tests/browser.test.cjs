@@ -287,7 +287,9 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
         htmlRule:(rules.find(t=>/^html\s*,\s*body\s*\{/.test(t))||'NO RULE'),
         appRule:(css.match(/html\.compact #app\s*\{[^}]*\}/g)||[]).join(' '),
         noFixedAttach:css.indexOf('background-attachment')===-1,
-        font:n?parseFloat(getComputedStyle(n).fontSize):null
+        font:n?parseFloat(getComputedStyle(n).fontSize):null,
+        flagsN:document.querySelectorAll('#body td.name .flag').length,
+        flagD:(function(){var f=document.querySelector('#body td.name .flag');return f?getComputedStyle(f).display:null;})()
       };
     });
     /* Regrese z 29. 10. 2026 (barvy): stavový gradient musi zit na body::before
@@ -326,6 +328,8 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
     assert.ok(state.rows===8,'chybi modelove radky (kolo 8h): '+diag);
     assert.ok(state.mscroll===true,'tabulka preteka panel — radky by se ztratily pod panely (kolo 8h): '+diag);
     assert.ok(state.lastIn===true,'posledni radek tabulky (Shoda) neni videt (kolo 8h): '+diag);
+    assert.ok(state.flagsN>=8,'vlajecky u modelu chybi (kolo 8i): '+diag);
+    assert.ok(state.flagD!==null&&state.flagD!=='none','vlajecka na mobilu skryta (kolo 8i): '+diag);
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });

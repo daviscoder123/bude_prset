@@ -105,7 +105,7 @@ td.name .n{font-family:var(--sans);font-weight:700;font-size:clamp(10px,1.45vh,1
 td.name .a{font-family:var(--mono);font-size:8.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #mnote{font-family:var(--sans);font-size:10px;color:var(--muted);padding:6px 2px 0;line-height:1.35}
 #mnote:empty{display:none}
-td.name .flag{display:none;font-size:12px;line-height:1.1} /* vlajka je inline v názvu — viz render() */
+td.name .flag{font-style:normal;font-size:12px;line-height:1.1;margin-right:2px} /* vlajka před názvem modelu — viz render() */
 td.cell{background:var(--panel2);color:var(--dry);transition:background .3s}
 td.cell.wet{color:#DFF0FC;font-weight:600}
 /* srážky pod prahem — jsou v součtu, ale za déšť se nepovažují */
@@ -407,7 +407,12 @@ html.compact main{display:flex;flex-direction:column;gap:10px;min-height:0}
    (--fit), takže scroll nastane jen na extrémních výškách. */
 html.compact .matrix{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-ms-overflow-style:none}
 html.compact .matrix::-webkit-scrollbar{display:none}
-html.compact .matrix table{flex:0 0 auto}
+/* Kolo 8i (Dave: „okno nemůže být tak prázdné"): tabulka smí RŮST do
+   volného místa panelu (flex-grow), ale nesmí se smrsknout pod svou
+   přirozenou výšku (no shrink) — řádky tak vyplní panel, když je místa
+   dost (žádný prázdný pás pod tabulkou), a když není, .matrix scrolluje
+   (pojistka z kola 8h zůstává). */
+html.compact .matrix table{flex:1 0 auto}
 html.compact aside{display:grid;grid-template-columns:1fr 1fr;gap:10px;min-height:0}
 html.compact .verdict{grid-column:1}
 html.compact .when{grid-column:2}
@@ -440,13 +445,13 @@ html.compact .mhead h2{font-size:calc(clamp(13.5px,3.8vw,15.5px)*var(--fit,1))}
 html.compact .mhead .u{font-size:calc(clamp(10px,2.8vw,11.5px)*var(--fit,1))}
 html.compact table{border-spacing:2px}
 html.compact th{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
-html.compact th.model{width:calc(clamp(70px,19vw,84px)*var(--fit,1))}
+html.compact th.model{width:calc(clamp(74px,20vw,88px)*var(--fit,1))}
 html.compact th.sum{width:32px}
 html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));border-radius:3px;overflow:hidden}
 html.compact td.name .n{font-size:calc(clamp(11.5px,3.3vw,13px)*var(--fit,1))}
 html.compact #mnote{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--fit,1));padding:4px 1px 0}
 html.compact td.name .a{display:none}
-html.compact td.name .flag{display:none}
+html.compact td.name .flag{display:inline-block;font-style:normal;font-size:calc(clamp(10px,2.9vw,12px)*var(--fit,1));line-height:1;transform:scale(.78);transform-origin:left bottom;margin-right:1px}
 html.compact tr.national .badge{display:none}
 html.compact td.sumcell{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
 html.compact .verdict, html.compact .when{padding:10px;border-radius:10px}
@@ -470,7 +475,7 @@ html.compact body{overflow-x:hidden}
 html.compact #app{overflow-x:hidden}
 html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
 html.compact th{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
-html.compact th.model{width:calc(clamp(70px,19vw,84px)*var(--fit,1))}
+html.compact th.model{width:calc(clamp(74px,20vw,88px)*var(--fit,1))}
 html.compact th.sum{width:32px}
 html.compact td.name .n{font-size:calc(clamp(11.5px,3.3vw,13px)*var(--fit,1))}
 html.compact table{border-spacing:1.5px}
@@ -2919,13 +2924,13 @@ function render(j, allModels, generation){
     /* Na mobilu krátký název (ns), ať se model vejde do úzkého sloupce
        bez useknutí — dlouhé názvy („ICON-D2 · střední Evropa" apod.)
        si přečte desktop, kde je sloupec široký. */
-    /* Kolo 8g: na mobilu odpadá i VLAJKA. Vlajka + pevná mezera stojí
+    /* Kolo 8i (Dave: „vlaječky by tam přece jen mohly být"): vlajka se vrací zmenšená — scale(.78) + menší font (~10 px místo ~18 px). Důvod, proč předtím odpadla (kolo 8g): stála
        ~18 px a je to rozdíl mezi „ICON-D2“, které se do sloupce vejde,
        a „🇨🇿 ICON-D2“, které usekne na „ICON…“ — reálně změřené v
        Chromiumu; odhad šířky vlajky z kola 8e byl o ~40 % menší než
-       skutečnost. Zemi modelu na mobilu nikdo nepostrádá, popisek
-       (skrytý) i desktop plnou podobu vlajky mají. */
-    tr.innerHTML = "<td class=\"name\"><div class=\"n\">" + (fl && !NARROW.matches ? fl + "&nbsp;" : "")
+       skutečnost. Vlajka se vrací: na mobilu zmenšená (scale .78, ~10 px),
+       na desktopu plná 12 px (kolo 8i). */
+    tr.innerHTML = "<td class=\"name\"><div class=\"n\">" + (fl ? "<i class=\"flag\">" + fl + "</i>" : "")
       + (NARROW.matches && pm.m.ns ? pm.m.ns : pm.m.n)
       + (pm.m.national ? "<span class=\"badge\">NÁRODNÍ</span>" : "")
       + "</div><div class=\"a\">"+pm.m.a+"</div></td>" + cells
