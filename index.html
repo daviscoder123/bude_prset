@@ -3317,65 +3317,131 @@ function computeRadarCompass(frames, mo, tcM){
   var speedOk = !!(mo && mo.speedKmh >= 2 && mo.speedKmh <= 200); /* stejné meze jako advekce */
   var ue = speedOk ? mo.vx : 0;   /* km/min k východu */
   var un = speedOk ? -mo.vy : 0;  /* km/min k severu (obrácek roste dolů = k jihu) */
-  /* Time-lagged ensemble: každý snímek posouváme do TEĎ podle jeho
-     stáří a vlastní rychlosti pole, pak bereme MEDIÁN přes snímky.
-     Jedna vadná/zamrzlá dlaždice tak kompas neuneskolelní. */
-  var CE = [], CN = [], MM = [], RD = [], snowy = false;
+  var motionSrc = speedOk ? "field" : null;
+
+  /* Co je PŘÍMO nad obcí: advectovaná špička z jemného zoomu (radarState).
+     Kompas dřív viděl jen nejsilnější buňku, takže mrholení 0.1–0.2 mm/h
+     nad hlavou pod práh buňky 0.2 nespadlo a kompas hlásil „nic se
+     neblíží“, zatímco panel Kdy z téhož mrholení počítal „za 5 min“. */
+  var vMm = (radarState && radarState !== "error" && radarState.nowMm != null)
+    ? radarState.nowMm : null;
+
+  /* První průchod: surové centroidy buněk + hodnota pixelu nad obcí. */
+  var RAW = [], snowy = false, VM = [];
   frames.forEach(function(fr){
     if(!fr.patch) return;
     if(fr.patch.snowSeen) snowy = true;
+    var n = fr.patch.n, c = Math.floor(n/2);
+    var v0 = fr.patch.mm[c*n + c];
+    if(v0 != null) VM.push(v0);
     var st = radarEchoStats(fr.patch, kmPerPx);
     if(!st) return;
-    var ageMin = Math.max(0, (nowS - fr.t)/60);
-    CE.push(st.e + ue*ageMin);
-    CN.push(st.n + un*ageMin);
-    MM.push(st.mm);
-    RD.push(st.radiusKm);
+    RAW.push({t:fr.t, e:st.e, n:st.n, mm:st.mm, rad:st.radiusKm});
   });
   var med = function(a){
     var s = a.slice().sort(function(p,q){ return p-q; });
     return s[Math.floor(s.length/2)];
   };
-  if(!CE.length) return {state:"empty", reachKm:reachKm, snow:snowy};
+  if(vMm == null && VM.length) vMm = med(VM);
+
+  /* ---- DRIFT BUŇKY: druhý názor na pohyb, když pole „stojí“ ----
+     Block matching koreluje celé pole najednou; při vznikající konvekci
+     se pole přestavuje, korelace padají pod 0,3 a rychlost se vynuluje.
+     Centroid téže buňky se ale posouvá plynule, i když jen o zlomek
+     pixelu za pár minut. Theil–Sen (medián směrnic všech párů snímků)
+     z osmi snímků vytáhne drift, kterému korelační okno nestačilo —
+     a kompas pak místo „stojí“ řekne „posouvá se k severu“. */
+  if(!speedOk && RAW.length >= 4){
+    var spanMin = (RAW[RAW.length-1].t - RAW[0].t)/60;
+    if(spanMin >= 10){
+      var se = [], sn = [];
+      for(var pi=0; pi<RAW.length; pi++){
+        for(var pj=pi+1; pj<RAW.length; pj++){
+          var dtM = (RAW[pj].t - RAW[pi].t)/60;
+          if(dtM <= 0) continue;
+          se.push((RAW[pj].e - RAW[pi].e)/dtM);
+          sn.push((RAW[pj].n - RAW[pi].n)/dtM);
+        }
+      }
+      var due = med(se), dun = med(sn);
+      if(Math.sqrt(due*due + dun*dun)*60 >= 2){ /* km/h */
+        ue = due; un = dun; motionSrc = "drift";
+      }
+    }
+  }
+
+  /* Time-lagged ensemble: každý snímek se posune do TEĎ podle svého
+     stáří a rychlosti (pole, nebo drift buňky), pak MEDIÁN přes
+     snímky. Jedna vadná/zamrzlá dlaždice kompas neuneskolelní. */
+  var CE = [], CN = [], MM = [], RD = [];
+  RAW.forEach(function(r){
+    var ageMin = Math.max(0, (nowS - r.t)/60);
+    CE.push(r.e + ue*ageMin);
+    CN.push(r.n + un*ageMin);
+    MM.push(r.mm);
+    RD.push(r.rad);
+  });
+  if(!CE.length){
+    /* Žádná buňka ≥0.2 mm/h v dohledu — mrholení nad obcí přiznáme. */
+    if(vMm != null && vMm >= 0.1)
+      return {state:"overhead", geo:"empty", reachKm:reachKm, snow:snowy, vMm:vMm,
+              motionSrc:motionSrc, ePos:0, nPos:0, ue:ue, un:un, radiusKm:null, mmh:null,
+              distKm:null, bearingFrom:null, speedKmh:0, spreadKmh:null, heading:null,
+              etaMin:null, loMin:null, hiMin:null, missKm:null, missBearing:null, leaveMin:null};
+    return {state:"empty", reachKm:reachKm, snow:snowy, vMm:vMm};
+  }
   var ce = med(CE), cn = med(CN), mmh = med(MM), rad = med(RD);
   var d0 = Math.sqrt(ce*ce + cn*cn);            /* vzdálenost středu echa od obce */
   var u2 = ue*ue + un*un;                       /* |u|² */
   var b = ce*ue + cn*un;                        /* c·u */
   var rEff = Math.max(rad, 2.2) + 1.6;          /* poloměr buňky + hrubá kvantizace pixelu zoomu 6 */
-  var out = {state:"", reachKm:reachKm, snow:snowy, mmh:mmh, radiusKm:rad,
+  var speedKmh = Math.round(Math.sqrt(u2)*60);
+  var out = {state:"", geo:"", reachKm:reachKm, snow:snowy, mmh:mmh, radiusKm:rad,
+             vMm:vMm, motionSrc:motionSrc,
              ePos:ce, nPos:cn, ue:ue, un:un,
              distKm:Math.round(d0), bearingFrom:smer8(ce, cn),
-             speedKmh:speedOk ? Math.round(mo.speedKmh) : 0,
-             spreadKmh:(mo && mo.spreadKmh != null) ? mo.spreadKmh : null,
-             heading:speedOk ? smer8(ue, un) : null,
+             speedKmh:speedKmh,
+             spreadKmh:(motionSrc === "field" && mo.spreadKmh != null) ? mo.spreadKmh : null,
+             heading:speedKmh >= 1 ? smer8(ue, un) : null,
              etaMin:null, loMin:null, hiMin:null,
              missKm:null, missBearing:null, leaveMin:null};
   if(u2 < 1e-8){
-    /* Pole stojí (nebo rychlost mimo věrohodný rozsah): je tu, nebo tu není. */
+    /* Pole i buňka stojí: je tu, nebo tu není. */
     out.state = d0 <= rEff ? "over" : "standing";
-    return out;
-  }
-  /* Nejbližší průlet na trajektorii: t* = −(c·u)/|u|², shora omezený nulou. */
-  var tStar = b >= 0 ? 0 : Math.max(0, -b/u2);
-  var pe = ce + ue*tStar, pn = cn + un*tStar;
-  var dMin = Math.sqrt(pe*pe + pn*pn);
-  var disc = Math.max(0, b*b - u2*(d0*d0 - rEff*rEff)); /* diskriminant |c+ut|²=r² */
-  if(dMin <= rEff && d0 > rEff){
-    out.state = "hit";
-    out.etaMin = Math.max(1, Math.round((-b - Math.sqrt(disc))/u2));
-    /* Rozptyl rychlosti z odhadu pohybu → rozpětí ETA (jako panel „Kdy“). */
-    var v = mo.speedKmh, s = Math.min(mo.spreadKmh || 0, v*0.7);
-    out.loMin = Math.max(1, Math.round(out.etaMin * v/(v+s)));
-    out.hiMin = Math.max(out.loMin, Math.round(out.etaMin * v/Math.max(v-s, v*0.3)));
-  } else if(d0 <= rEff){
-    out.state = "over";
-    out.leaveMin = Math.max(1, Math.round((-b + Math.sqrt(disc))/u2));
   } else {
-    out.state = "miss";
-    out.etaMin = Math.max(0, Math.round(tStar));
-    out.missKm = Math.max(1, Math.round(dMin - rEff));
-    out.missBearing = smer8(pe, pn);
-    out.pe = pe; out.pn = pn;
+    /* Nejbližší průlet na trajektorii: t* = −(c·u)/|u|², shora omezený nulou. */
+    var tStar = b >= 0 ? 0 : Math.max(0, -b/u2);
+    var pe = ce + ue*tStar, pn = cn + un*tStar;
+    var dMin = Math.sqrt(pe*pe + pn*pn);
+    var disc = Math.max(0, b*b - u2*(d0*d0 - rEff*rEff)); /* diskriminant |c+ut|²=r² */
+    if(dMin <= rEff && d0 > rEff){
+      out.state = "hit";
+      out.etaMin = Math.max(1, Math.round((-b - Math.sqrt(disc))/u2));
+      /* Rozptyl rychlosti z odhadu pohybu → rozpětí ETA (jako panel „Kdy“).
+         U driftu rozptyl není — rozpětí se prostě neukáže. */
+      if(motionSrc === "field" && mo.spreadKmh != null){
+        var v = mo.speedKmh, s = Math.min(mo.spreadKmh || 0, v*0.7);
+        out.loMin = Math.max(1, Math.round(out.etaMin * v/(v+s)));
+        out.hiMin = Math.max(out.loMin, Math.round(out.etaMin * v/Math.max(v-s, v*0.3)));
+      }
+    } else if(d0 <= rEff){
+      out.state = "over";
+      out.leaveMin = Math.max(1, Math.round((-b + Math.sqrt(disc))/u2));
+    } else {
+      out.state = "miss";
+      out.etaMin = Math.max(0, Math.round(tStar));
+      out.missKm = Math.max(1, Math.round(dMin - rEff));
+      out.missBearing = smer8(pe, pn);
+      out.pe = pe; out.pn = pn;
+    }
+  }
+  /* Mrholení nad obcí (≥0.1 mm/h) má přednost: verdikt říká, co je
+     nad tebou; původní geometrie buňky zůstává v `geo` a text ji
+     použije jako doplněk. Právě tady dřív vznikal rozpor „kompas:
+     nedoletí“ vs „panel: za 5 min“. */
+  if(vMm != null && vMm >= 0.1){
+    out.geo = out.state;
+    out.state = "overhead";
   }
   return out;
 }
@@ -3427,24 +3493,59 @@ function renderCompass(){
   var snowTxt = C.snow ? " (sníh)" : "";
   var src = "radar RainViewer · dosah ~" + C.reachKm + " km";
   if(radarState && radarState !== "error" && radarState.ageMin != null) src += " · snímek " + Math.round(radarState.ageMin) + " min";
+  if(C.motionSrc === "drift") src += " · pohyb z dráhy buňky";
+  /* REKONCILIACE: když geometrie říká „mine/stojí“, ale vlastní radarová
+     osa (advekce + růst pole) práh překročí, spor se nezamlčí — přiletá
+     jiná (nová) buňka, ne ta naměřená. Přesně ten rozpor z pravého
+     panelu: kompas „nedoletí“, panel „za 5–43 min“. */
+  var recon = "";
+  if((C.state === "miss" || C.state === "standing") && radarTimeline && radarTimeline.length){
+    for(var ti=0; ti<radarTimeline.length; ti++){
+      if(radarTimeline[ti].mmh >= 0.1){
+        recon = " Radarová osa ale čeká " + (radarTimeline[ti].mmh >= 0.2 ? "déšť" : "slabé srážky")
+              + " za ~<b>" + radarTimeline[ti].dt + " min</b> — nejspíš se staví nová buňka nad tebou.";
+        break;
+      }
+    }
+  }
   if(C.state === "empty"){
     verd = "V dosahu nic."; cls = "miss";
     expl = "V okruhu ~<b>" + C.reachKm + " km</b> radar nevidí žádné srážky — k tobě nic neletí.";
   } else {
-    /* Echo: elipsa na skutečné pozici, velikost = reálný poloměr buňky. */
-    var ex = px(C.ePos), ey = py(C.nPos);
-    var er = Math.max(C.radiusKm/C.reachKm*RE, 3);
-    var a = (0.18 + 0.45*Math.min(1, C.mmh/3)).toFixed(2);
-    svg += '<ellipse cx="' + ex.toFixed(1) + '" cy="' + ey.toFixed(1) + '" rx="' + er.toFixed(1)
-      + '" ry="' + er.toFixed(1) + '" fill="rgba(168,228,255,' + a + ')" stroke="rgba(168,228,255,.85)" stroke-width=".8"/>';
-    if(C.state === "hit"){
+    /* Echo: elipsa na skutečné pozici, velikost = reálný poloměr buňky.
+       U mrholí nad obcí bez zachytitelné buňky se elipsa nekreslí. */
+    var ex = 50, ey = 50, er = 3;
+    if(C.radiusKm != null){
+      ex = px(C.ePos); ey = py(C.nPos);
+      er = Math.max(C.radiusKm/C.reachKm*RE, 3);
+      var a = (0.18 + 0.45*Math.min(1, C.mmh/3)).toFixed(2);
+      svg += '<ellipse cx="' + ex.toFixed(1) + '" cy="' + ey.toFixed(1) + '" rx="' + er.toFixed(1)
+        + '" ry="' + er.toFixed(1) + '" fill="rgba(168,228,255,' + a + ')" stroke="rgba(168,228,255,.85)" stroke-width=".8"/>';
+    }
+    if(C.state === "overhead"){
+      /* Mrholí/právě prší nad obcí — tohle je prim, geometrie buňky
+         (C.geo) je jen doplněk. Dřív kompas tuhle situaci hlásil
+         jako „Nepřiletí brzy“ a rozpor s panelem Kdy práskal. */
+      verd = C.vMm >= 0.2 ? "Právě nad tebou." : "Nad tebou mrholí."; cls = "hit";
+      expl = "Radar vidí ~<b>" + fmtMM(C.vMm) + " mm/h</b> přímo nad tebou" + snowTxt + ".";
+      if(C.geo === "hit" && C.etaMin != null)
+        expl += " Silnější buňka <b>" + C.distKm + " km " + C.bearingFrom + "</b> přiletí za ~<b>"
+              + (C.etaMin <= 60 ? C.etaMin + " min" : (Math.round(C.etaMin/6)/10) + " h") + "</b>.";
+      else if(C.geo === "over" && C.leaveMin != null && C.speedKmh > 0)
+        expl += " Pole odchází k " + C.heading + " — u tebe to odezní za ~<b>" + C.leaveMin + " min</b>.";
+      else if(C.geo === "standing")
+        expl += " Nejsilnější buňka <b>" + C.distKm + " km " + C.bearingFrom + "</b> stojí — tohle je jinde.";
+    } else if(C.state === "hit"){
       verd = "Přiletí k tobě."; cls = "hit";
       var mmh = compassMmAt(C.etaMin, C.mmh);
+      var etaTxt = C.etaMin <= 60 ? "~" + C.etaMin + " min" : "~" + (Math.round(C.etaMin/6)/10) + " h";
       expl = "Nejsilnější echo <b>" + C.distKm + " km " + C.bearingFrom
         + "</b> od tebe letí <b>" + C.speedKmh + " km/h</b> k " + C.heading
-        + " — nad tebou za <b>~" + C.etaMin + " min</b>";
+        + " — nad tebou za <b>" + etaTxt + "</b>";
       if(C.hiMin > C.loMin && C.hiMin !== C.etaMin) expl += " (" + C.loMin + "–" + C.hiMin + ")";
-      expl += ". U tebe čekám ~<b>" + (mmh != null ? fmtMM(mmh) : "?") + " mm/h</b>" + snowTxt + ".";
+      expl += mmh != null
+        ? ". U tebe čekám ~<b>" + fmtMM(mmh) + " mm/h</b>" + snowTxt + "."
+        : ". Intenzitu u tebe v takové dálce už neumím odhadnout.";
     } else if(C.state === "over"){
       verd = "Právě nad tebou."; cls = "hit";
       expl = "Echo je přímo nad tebou, ~<b>" + fmtMM(C.mmh) + " mm/h</b>" + snowTxt + ".";
@@ -3453,17 +3554,17 @@ function renderCompass(){
       verd = "Tě mine."; cls = "miss";
       expl = "Prolétne <b>" + C.missKm + " km " + C.missBearing + "</b> od tebe";
       if(C.etaMin > 0) expl += ", nejbližší průlet za ~<b>" + C.etaMin + " min</b>";
-      expl += ". Z tohohle echa u tebe déšť nečekám" + (C.heading ? " — jde to k " + C.heading : "") + ".";
+      expl += ". Z tohohle echa u tebe déšť nečekám" + (C.heading ? " — jde to k " + C.heading : "") + "." + recon;
       /* Přerušovaná trať k nejbližšímu bodu průletu + značka tam. */
       var mx2 = px(C.pe), my2 = py(C.pn);
       svg += '<line x1="' + ex.toFixed(1) + '" y1="' + ey.toFixed(1) + '" x2="' + mx2.toFixed(1)
         + '" y2="' + my2.toFixed(1) + '" stroke="rgba(168,228,255,.45)" stroke-width=".8" stroke-dasharray="2 2"/>'
         + '<circle cx="' + mx2.toFixed(1) + '" cy="' + my2.toFixed(1) + '" r="1.6" fill="rgba(255,255,255,.55)"/>';
-    } else { /* standing */
-      verd = "Nepřiletí brzy."; cls = "miss";
-      expl = "Echo <b>" + C.distKm + " km " + C.bearingFrom + "</b> od tebe se pohybuje pomalu"
+    } else { /* standing: ani pole, ani buňka se nepohybují */
+      verd = "Ta buňka k tobě nedoletí."; cls = "miss";
+      expl = "Echo <b>" + C.distKm + " km " + C.bearingFrom + "</b> od tebe se prakticky nepohybuje"
         + (C.speedKmh > 0 ? " (~" + C.speedKmh + " km/h)" : "")
-        + " — k tobě brzy nedoletí.";
+        + " — k tobě za hodinu nedojde." + recon;
     }
     /* Šipka směru pohybu od středu echa (16 px), jen když letí. */
     if(C.state !== "empty" && C.speedKmh > 0 && C.ue != null && (C.ue || C.un)){
