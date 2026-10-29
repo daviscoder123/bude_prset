@@ -359,8 +359,13 @@ html.compact{--fit:1}
    lineárně se šířkou displeje a u ~430 px se zastaví. Velikost
    textu tak závisí JEN na fyzické šířce displeje — stejný telefon
    vykreslí PŘI KAŽDÉM NAČTENÍ stejnou velikost (nic se nepočítá
-   z obsahu) a text vyplní panely „akorát": na malém telefonu
-   akorát, na velkém o kousek větší, vždy se stejnými poměry. */
+   z obsahu) a text vyplní panely „akorát".
+   Kolo 8d — HARMONIZACE škály (screenshot 22:31): dominantní číslo
+   vedle drobných popisků působilo roztřeseně. Nová pravidla:
+   - nejmenší text (buňky, popisky lišty) má STROU pod 11 px;
+   - hlavní číslo je jen ~2,5–2,9násobek popisků (dřív ~4násobek);
+   - sousední úrovně škály se liší o ~15–25 %, ne o skok 40 %+;
+   - poměry jsou STEJNÉ na každé šířce — škála roste jako celek. */
 /* Mobil je JEDNA obrazovka: hlavička, tabulka, hlavní věta a lišta
    souhrnů se musejí vejít vedle sebe na displej bez posouvání stránky.
    Výškový řetězec html→body je v procentech záměrně (ne vw/dvh):
@@ -403,37 +408,37 @@ html.compact .when{grid-column:2}
 html.compact .stats{grid-column:1/-1;grid-template-columns:repeat(4,1fr);gap:0;padding:8px 2px;border-radius:14px}
 html.compact .stat{min-width:0;overflow:hidden;padding:0 8px}
 html.compact .stat + .stat{border-left:1px solid var(--line)}
-html.compact .stat .k{font-size:calc(clamp(10px,2.9vw,12px)*var(--fit,1));letter-spacing:.03em;line-height:1.25;white-space:nowrap}
-html.compact .stat .v{font-size:calc(clamp(13.5px,3.8vw,16px)*var(--fit,1));white-space:nowrap;margin-top:2px}
+html.compact .stat .k{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));letter-spacing:.03em;line-height:1.25;white-space:nowrap}
+html.compact .stat .v{font-size:calc(clamp(13.5px,3.8vw,15px)*var(--fit,1));white-space:nowrap;margin-top:2px}
 /* Hlavní panel na mobilu dýchá hustěji, ať zbude místo pro tabulku
    i lištu — čitelnost hlídají zvětšené řádky, ne vzduch kolem. */
 html.compact .solo .hero{padding:calc(clamp(13px,3.6vw,16px)*var(--fit,1)) calc(clamp(14px,3.9vw,17px)*var(--fit,1)) calc(clamp(11px,3.1vw,14px)*var(--fit,1))}
-html.compact .solo .pill{font-size:calc(clamp(10.5px,3vw,12px)*var(--fit,1));letter-spacing:.08em}
-html.compact .solo .sub{margin-top:8px;font-size:calc(clamp(13px,3.6vw,15px)*var(--fit,1))}
+html.compact .solo .pill{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));letter-spacing:.08em}
+html.compact .solo .sub{margin-top:8px;font-size:calc(clamp(13px,3.6vw,14.5px)*var(--fit,1))}
 html.compact .solo .wart{width:62px;height:62px;margin:-2px -2px 0 0}
-html.compact .solo .big{font-size:calc(clamp(34px,11vw,52px)*var(--fit,1))}
+html.compact .solo .big{font-size:calc(clamp(30px,8.5vw,40px)*var(--fit,1))}
 html.compact .solo .says{padding:10px 13px 0;gap:8px}
 html.compact .solo .say{padding-left:11px}
-html.compact .solo .say .tag{margin-bottom:3px;font-size:calc(clamp(10px,2.9vw,11.5px)*var(--fit,1))}
-html.compact .solo .say p{font-size:calc(clamp(15px,4.2vw,17.5px)*var(--fit,1))}
+html.compact .solo .say .tag{margin-bottom:3px;font-size:calc(clamp(10.5px,3vw,12px)*var(--fit,1))}
+html.compact .solo .say p{font-size:calc(clamp(14px,4vw,16px)*var(--fit,1))}
 html.compact .solo .facts{padding:9px 13px 0;gap:4px}
-html.compact .solo .facts span{font-size:calc(clamp(11.5px,3.3vw,13.5px)*var(--fit,1));padding:4px 8px}
-html.compact .solo .talk{margin:9px 13px 0;padding:9px 0 0;font-size:calc(clamp(12.5px,3.5vw,14.5px)*var(--fit,1))}
-html.compact .solo .src{padding:7px 13px 11px;font-size:calc(clamp(10.5px,3vw,12px)*var(--fit,1))}
+html.compact .solo .facts span{font-size:calc(clamp(12px,3.4vw,14px)*var(--fit,1));padding:4px 8px}
+html.compact .solo .talk{margin:9px 13px 0;padding:9px 0 0;font-size:calc(clamp(12.5px,3.6vw,15px)*var(--fit,1))}
+html.compact .solo .src{padding:7px 13px 11px;font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
 html.compact{--cell-h:calc(clamp(20px,5.4vw,24px)*var(--fit,1))}
 html.compact .matrix{padding:6px;border-radius:10px}
-html.compact .mhead h2{font-size:calc(clamp(13px,3.7vw,15px)*var(--fit,1))}
-html.compact .mhead .u{font-size:calc(clamp(9.5px,2.7vw,11px)*var(--fit,1))}
+html.compact .mhead h2{font-size:calc(clamp(13.5px,3.8vw,15.5px)*var(--fit,1))}
+html.compact .mhead .u{font-size:calc(clamp(10px,2.8vw,11.5px)*var(--fit,1))}
 html.compact table{border-spacing:2px}
-html.compact th{font-size:calc(clamp(10px,2.75vw,11px)*var(--fit,1))}
+html.compact th{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
 html.compact th.model{width:68px}
 html.compact th.sum{width:32px}
-html.compact td{font-size:calc(clamp(10px,2.75vw,11px)*var(--fit,1));border-radius:3px;overflow:hidden}
-html.compact td.name .n{font-size:calc(clamp(10.5px,3vw,12px)*var(--fit,1))}
+html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));border-radius:3px;overflow:hidden}
+html.compact td.name .n{font-size:calc(clamp(11.5px,3.3vw,13px)*var(--fit,1))}
 html.compact td.name .a{display:none}
 html.compact td.name .flag{display:none}
 html.compact tr.national .badge{display:none}
-html.compact td.sumcell{font-size:calc(clamp(9.5px,2.7vw,11px)*var(--fit,1))}
+html.compact td.sumcell{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
 html.compact .verdict, html.compact .when{padding:10px;border-radius:10px}
 html.compact .verdict .pct{font-size:32px}
 html.compact .verdict .word{font-size:12px}
@@ -453,11 +458,11 @@ html.compact .mb-slogan{font-size:9px}
 html.compact{--cell-h:calc(clamp(20px,5.4vw,24px)*var(--fit,1));font-size:calc(15px*var(--fit,1))}
 html.compact body{overflow-x:hidden}
 html.compact #app{overflow-x:hidden}
-html.compact td{font-size:calc(clamp(10px,2.75vw,11px)*var(--fit,1))}
-html.compact th{font-size:calc(clamp(10px,2.75vw,11px)*var(--fit,1))}
+html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
+html.compact th{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
 html.compact th.model{width:68px}
 html.compact th.sum{width:32px}
-html.compact td.name .n{font-size:calc(clamp(10.5px,3vw,12px)*var(--fit,1))}
+html.compact td.name .n{font-size:calc(clamp(11.5px,3.3vw,13px)*var(--fit,1))}
 html.compact table{border-spacing:1.5px}
 
 </style>

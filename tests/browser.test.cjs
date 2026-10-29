@@ -288,16 +288,16 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
     assert.ok(state.adjust===true||state.computedAdjust==='100%','chybi text-size-adjust:100%: '+diag);  /* pojistka proti nafouknuti fontu */
     assert.ok(/max-width:\s*100%/.test(state.appRule)&&/min-height:\s*100%/.test(state.appRule),
       'compact #app musi pouzivat procenta, ne vw/dvh: '+diag);
-    /* .n je od 29. 10. 2026 cíleně 10,5 px (čitelnost na mobilu); pojistka
-       hlídá iOS inflaci (~zdvojnásobení na ~19-21 px), ne přesnou hodnotu. */
-    assert.ok(state.font!==null&&state.font<=12,'inflated font: '+diag);
-    /* Kolo 8c: fluidni skala + deterministicke --fit. Na beznych
+    /* .n je od kola 8d cíleně 11,5–13 px (harmonizovaná škála); pojistka
+       hlídá iOS inflaci (~zdvojnásobení na ~19-26 px), ne přesnou hodnotu. */
+    assert.ok(state.font!==null&&state.font<=14,'inflated font: '+diag);
+    /* Kolo 8c+8d: fluidni skala + harmonizace. Na beznych
        telefonech (tady 375x900) se --fit vubec nesmi spustit — velikost
        textu zalezi jen na sirce displeje, takze kazde nacteni vypada
-       stejne. A pisma musi byt „pomerne velka": popisky >=10 px,
-       hodnoty >=13,4 px, hlavni cislo >=34 px. */
+       stejne. Pisma po harmonizaci: popisky >=11 px, hodnoty >=13,4 px,
+       hlavni cislo 30-40 px (už ne osamoceně obří ~2,7násobek popisků). */
     assert.equal(state.fit,'','--fit se nadmerne spustil na bezkem telefonu: '+diag);
-    assert.ok(state.kf>=10&&state.vf>=13.4&&state.bigf>=34,'mala pisma po zmene skaly: '+diag);
+    assert.ok(state.kf>=11&&state.vf>=13.4&&state.bigf>=30,'mala pisma po zmene skaly: '+diag);
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });
@@ -342,9 +342,10 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
       assert.ok(s.over<=1.02,'horizontal overflow na '+w+'px: '+JSON.stringify(s));
       assert.ok(s.fits===true,'appka se nevesla na jednu obrazovku '+w+'x'+h+': '+JSON.stringify(s));
       assert.ok(f>=0.8,'--fit zbesil na '+w+'px: '+JSON.stringify(s));
-      /* pomerne velka pisma — prahy pocitane po pripadnem --fit,
-         at zustava ctitelnost i na nejkratsim displeji */
-      assert.ok(s.k>=10*f-0.05&&s.v>=13.4*f-0.05&&s.n>=10.4*f-0.05&&s.big>=33*f-0.05,
+      /* harmonizovana skala (kolo 8d): prahy pocitane po pripadnem --fit,
+         at zustava ctitelnost i na nejkratsim displeji; hlavni cislo
+         uz neni 4nasobek popisku, ale ~2,5-2,9násobek */
+      assert.ok(s.k>=11*f-0.05&&s.v>=13.4*f-0.05&&s.n>=11.4*f-0.05&&s.big>=30*f-0.05,
         'mala pisma na '+w+'px: '+JSON.stringify(s));
       assert.deepEqual(errors,[],'page errors '+w+'px: '+errors.join(' | '));
     }finally{await ctx.close();}
