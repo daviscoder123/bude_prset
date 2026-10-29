@@ -284,9 +284,10 @@ html.compact .ensrow{font-size:9px;margin-top:4px}
 .when .until b{color:var(--rain)}
 
 /* ---------- RADAROVÝ KOMPAS ---------- */
-.compass{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(8px,1.4vh,14px);display:flex;gap:clamp(8px,1vw,14px);align-items:center;overflow:hidden}
+.compass{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(8px,1.4vh,14px);display:flex;flex-wrap:wrap;gap:clamp(8px,1vw,14px);align-items:center;overflow:hidden}
 .compass[hidden]{display:none}
 html.compact .compass{display:none}
+.compass .label{flex:0 0 100%;font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .compass svg{flex:none}
 .compass .ct{min-width:0;flex:1}
 .compass .ct .verd{font-weight:800;font-size:clamp(11px,1.65vh,14px);letter-spacing:-.01em}
@@ -3398,7 +3399,8 @@ function renderCompass(){
   if(!el) return;
   if(radarCoverage === "none"){
     el.hidden = false;
-    el.innerHTML = '<div class="ct">'
+    el.innerHTML = '<div class="label">Radar</div>'
+      + '<div class="ct">'
       + '<div class="verd">Radar sem nedosahuje.</div>'
       + '<div class="expl">Nejbližší radary tě nezahlédnou, takže okolí nemám z čeho kreslit. O vyhlídce řeknou jen modely dole v tabulce.</div>'
       + '</div>';
@@ -3449,7 +3451,7 @@ function renderCompass(){
       if(C.leaveMin != null && C.speedKmh > 0 && C.heading) expl += " Odchází k " + C.heading + ", změzne za ~<b>" + C.leaveMin + " min</b>.";
     } else if(C.state === "miss"){
       verd = "Tě mine."; cls = "miss";
-      expl = "Prolétne <b>" + C.missKm + " km " + C.missBearing + "</b> od teba";
+      expl = "Prolétne <b>" + C.missKm + " km " + C.missBearing + "</b> od tebe";
       if(C.etaMin > 0) expl += ", nejbližší průlet za ~<b>" + C.etaMin + " min</b>";
       expl += ". Z tohohle echa u tebe déšť nečekám" + (C.heading ? " — jde to k " + C.heading : "") + ".";
       /* Přerušovaná trať k nejbližšímu bodu průletu + značka tam. */
@@ -3459,7 +3461,7 @@ function renderCompass(){
         + '<circle cx="' + mx2.toFixed(1) + '" cy="' + my2.toFixed(1) + '" r="1.6" fill="rgba(255,255,255,.55)"/>';
     } else { /* standing */
       verd = "Nepřiletí brzy."; cls = "miss";
-      expl = "Echo <b>" + C.distKm + " km " + C.bearingFrom + "</b> od tebu se pohybuje pomalu"
+      expl = "Echo <b>" + C.distKm + " km " + C.bearingFrom + "</b> od tebe se pohybuje pomalu"
         + (C.speedKmh > 0 ? " (~" + C.speedKmh + " km/h)" : "")
         + " — k tobě brzy nedoletí.";
     }
@@ -3478,7 +3480,7 @@ function renderCompass(){
     }
   }
   svg += '</svg>';
-  el.innerHTML = svg
+  el.innerHTML = '<div class="label">Radar</div>' + svg
     + '<div class="ct"><div class="verd ' + cls + '">' + verd + '</div>'
     + '<div class="expl">' + expl + '</div>'
     + '<div class="src">' + src + '</div></div>';
