@@ -403,8 +403,15 @@ test('model without data gets a note under the table (kolo 8f)',async()=>{
     const note=await p.locator('#mnote').innerText();
     assert.match(note,/1 z 8 nejbližších modelů neodpověděl/,
       'poznámka o chybějícím modelu se nezobrazila: "'+note+'"');
-    assert.equal(await p.locator('#body tr').count(),rowsFull-1,
-      'chybějící model musí ubrat právě jeden řádek');
+    /* Pool je záměrně hluboký („rezerva za modely bez dat"): když jeden
+       model vypadne, jeho místo v osmičce zaujme další dostupný —
+       tabulka tedy zůstane plná a poznámka říká, kdo neodpověděl.
+       Hlídáme tedy poznámku + jmenovatel shody, ne počet řádků. */
+    const rows1=await p.locator('#body tr').count();
+    assert.ok(rows1>0,'tabulka nemuze byt prazdna');
+    const shoda=await p.locator('#body tr.consensus td.cell').first().innerText();
+    assert.ok(shoda.endsWith('/'+(rows1-1)),
+      'shoda musi pocitat jen odpovezene modely: '+shoda);
     const nfit=await p.evaluate(()=>{
       for(const n of document.querySelectorAll('#body td.name .n'))
         if(n.scrollWidth>n.clientWidth+1) return false;

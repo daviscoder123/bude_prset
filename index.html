@@ -2881,7 +2881,13 @@ function render(j, allModels, generation){
     /* Na mobilu krátký název (ns), ať se model vejde do úzkého sloupce
        bez useknutí — dlouhé názvy („ICON-D2 · střední Evropa" apod.)
        si přečte desktop, kde je sloupec široký. */
-    tr.innerHTML = "<td class=\"name\"><div class=\"n\">" + (fl ? fl + "&nbsp;" : "")
+    /* Kolo 8g: na mobilu odpadá i VLAJKA. Vlajka + pevná mezera stojí
+       ~18 px a je to rozdíl mezi „ICON-D2“, které se do sloupce vejde,
+       a „🇨🇿 ICON-D2“, které usekne na „ICON…“ — reálně změřené v
+       Chromiumu; odhad šířky vlajky z kola 8e byl o ~40 % menší než
+       skutečnost. Zemi modelu na mobilu nikdo nepostrádá, popisek
+       (skrytý) i desktop plnou podobu vlajky mají. */
+    tr.innerHTML = "<td class=\"name\"><div class=\"n\">" + (fl && !NARROW.matches ? fl + "&nbsp;" : "")
       + (NARROW.matches && pm.m.ns ? pm.m.ns : pm.m.n)
       + (pm.m.national ? "<span class=\"badge\">NÁRODNÍ</span>" : "")
       + "</div><div class=\"a\">"+pm.m.a+"</div></td>" + cells
