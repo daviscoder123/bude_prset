@@ -2158,6 +2158,16 @@ function resetForecastState(){
   metnoNow = null; metnoNowNote = "";
   wmsncState = null; wmsncNote = ""; wmsncSrc = null;
   eumetState = null; eumetNote = ""; satState = null; satNote = "";
+  /* Blesky Blitzortung se počítají KOLEM ZVOLENÉ LOKALITY (okruh 200 km
+     kolem souřadnic uzavřených ve spojení). Když uživatel přepne obec,
+     musí se celá session zavřít — jinak by nová předpověď dědila počty
+     úderů (a filtr vzdálenosti!) po té staré. Handler onclose se ruší
+     PŘED close(), aby uzavřený socket neprovedl reconnect s filtrem
+     starých souřadnic; recomputeWhen si pak podle nové polohy řekne
+     o čerstvé spojení přes blitzMaybeStart(). */
+  blitzState = null; blitzHits = [];
+  if(blitzWs){ try{ blitzWs.onclose = null; blitzWs.close(); }catch(e){} blitzWs = null; }
+  blitzStarted = false; blitzTries = 0; blitzHostIdx = 0; blitzLastRenderMs = 0;
 }
 function showForecastLoading(){
   ["hdr","body","word","ensrow","vextra","whenUntil","whenSrc","updated",

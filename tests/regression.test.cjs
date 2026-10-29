@@ -92,17 +92,27 @@ test('current precipitation uses reported interval and unit',()=>{
 test('new load clears complete state before starting any data source',()=>{
   const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={textContent:'old',style:{},dataset:{},hidden:false})});
   const never=()=>new Promise(()=>{});
+  /* Kolo 4: bleskový modul Blitzortung drží otevřený socket pro JEDNU
+     lokalitu. Při přepnutí obce se musí session zavřít — jinak by nová
+     předpověď dědila počty úderů z okruhu 200 km kolem té staré. */
+  let blitzClosed=0;
+  const blitzWsStub={onclose:'stará lokalita',close(){blitzClosed++;}};
   const c=context(['load','isStale','resetForecastState','showForecastLoading'],{
     reqId:1,cur:{name:'Old'},input:{},$:id=>nodes[id],
     lastJ:{old:true},lastModels:[],lastForecastId:1,
     modelState:{old:true},verdictState:{old:true},orogState:{factor:1.5},
     threshFor:()=>0.2,status:()=>{},pickModels:()=>[],MODELS:[],HOURS_END:24,
     cachedJson:never,loadEnsemble:()=>{},
+    blitzState:{n10:4,n60:9},blitzHits:[{ms:1}],blitzStarted:true,
+    blitzTries:1,blitzHostIdx:1,blitzLastRenderMs:99,blitzWs:blitzWsStub,
     loadRadar:()=>{
       for(const key of ['lastJ','lastModels','lastForecastId','modelState','verdictState',
         'whenState','lastBlendTimeline','orogState','radarState','modelCurrent',
         'obsMetar','ensState','atmoState','placeTimeZone','satState'])
         assert.equal(c[key],null,key);
+      assert.equal(c.blitzState,null,'blitzState po staré lokalitě');
+      assert.equal(c.blitzHits.length,0,'blitzHits se vynulovaly');
+      assert.equal(c.blitzStarted,false,'nova lokalita si muze otevrit novy socket');
     }
   });
   c.load({name:'New',lat:51,lon:15,cc:'CZ'},true);
@@ -110,6 +120,10 @@ test('new load clears complete state before starting any data source',()=>{
   assert.equal(c.reqId,2);
   assert.equal(nodes.body.textContent,'');
   assert.equal(nodes.soloPillTxt.textContent,'Načítám');
+  assert.equal(blitzClosed,1);          /* socket staré lokality se zavřel, */
+  assert.equal(blitzWsStub.onclose,null); /* ...a handler smůly už nemůže reconnectnout starý filtr */
+  assert.equal(c.blitzWs,null);
+  assert.equal(c.blitzTries,0);         /* nová lokalita začíná s čistým počítadlem zrcadel */
   c.lastJ={old:true}; c.lastForecastId=c.reqId; c.modelState={old:true};
   c.load(c.cur,true);
   assert.equal(c.reqId,3);
@@ -130,6 +144,10 @@ test('model-only current and native/interpolated minutely signals cannot confirm
     altNowcast:[{t:Date.now()/1000,mmh:0.4}],modelCurrent:{mmh:0.4,code:61},
     native15:true,obsMetar:null,chmiState:null,metnoNow:null,regioNowcast:null,satState:null,
     modelState:{},whenState:null,THRESH_OBS:0.2,setTimeout:()=>{},fitPanels:()=>{},
+    /* Kolo 4: recomputeWhen si pájí živé blesky (Blitzortung) a kontroluje
+       výšku paprsku radaru vůči METAR stanici. V vm kontextu jsou to stuby —
+       testují se rozhodovací větve, ne síťová vrstva. */
+    radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
     buildBlendTimeline:()=>[],wmoType:()=>({t:'déšť'}),sourceCaveat:()=>'',renderSolo:()=>{}
   });
   for(const native of [true,false]){
@@ -137,7 +155,9 @@ test('model-only current and native/interpolated minutely signals cannot confirm
     c.recomputeWhen();
     assert.equal(c.whenState.mode,'maybe');
     assert.equal(c.whenState.indep,0);
-    assert.match(nodes.whenSub.textContent,/není potvrzen/);
+    /* Věta je od kola 4 formátovaná HTML (poznámka o blescích obsahuje <b>),
+       takže test čte innerHTML — v prohlížeči z něj innerText stejně vyjde. */
+    assert.match(nodes.whenSub.innerHTML,/není potvrzen/);
   }
 });
 test('radar plus METAR still confirms rain; model intensity and labels stay out of verified data',()=>{
@@ -148,6 +168,7 @@ test('radar plus METAR still confirms rain; model intensity and labels stay out 
     native15:true,obsMetar:{wx:'RA',name:'Test station',km:1},chmiState:null,
     metnoNow:null,regioNowcast:null,satState:null,modelState:{},whenState:null,
     setTimeout:()=>{},fitPanels:()=>{},
+    radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
     THRESH_OBS:0.2,MAX_SANE_MMH:500,
     buildBlendTimeline:()=>[],wmoType:()=>({t:'déšť',i:'test'}),
     metarHasPrecip:()=>true,metarType:()=>({t:'déšť',i:'test'}),
@@ -162,25 +183,43 @@ test('radar plus METAR still confirms rain; model intensity and labels stay out 
 test('radar-detected approaching rain sets "soon" state and renders the mobile panel',()=>{
   const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
   let soloCalls=0;
-  const c=context(['recomputeWhen','saneMm','cap'],{
+  const verdicts=[];
+  const c=context(['recomputeWhen','saneMm','cap','locKeyOf','verdictProb'],{
     $:id=>nodes[id],modelState:{},whenState:null,
+    cur:{lat:50.1,lon:15.3,cc:'CZ'},
+    radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
     radarState:null,radarTimeline:null,stormMotion:null,altNowcast:null,
     modelCurrent:{mmh:0,code:0},obsMetar:null,chmiState:null,metnoNow:null,
     regioNowcast:null,satState:null,atmoState:null,precipMix:null,
+    ensState:null,probSeries:null,HOURS:48,
     setTimeout:()=>{},fitPanels:()=>{},THRESH_OBS:0.2,MAX_SANE_MMH:500,
     buildBlendTimeline:()=>[{dt:15,mmh:0.3,parts:['radar','model']}],
     blendMeta:{arrival:{min:15,lo:12,hi:22,n:2,obsN:1}},
     chmiFirstEchoMin:()=>null,chmiSaysDry:()=>false,
     wmoType:()=>({t:'déšť',i:'test'}),fmtMM:String,
-    sourceCaveat:()=>'',renderRainEnd:()=>{},renderSolo:()=>{soloCalls++}
+    sourceCaveat:()=>'',renderRainEnd:()=>{},renderSolo:()=>{soloCalls++},
+    enqueueVerdict:(locKey,lat,lon,cc,targetMs,prob)=>verdicts.push({locKey,targetMs,prob})
   });
+  const t0=Date.now();
   c.recomputeWhen();
   assert.equal(soloCalls,1);
   assert.equal(c.whenState.mode,'soon');
   assert.equal(c.whenState.etaMin,15);
-  assert.equal(c.whenState.lo,12);
-  assert.equal(c.whenState.hi,22);
+  /* Rozpětí už není průchod hodnot 12–22 z konsenzu zdrojů: od kola 4 se
+     překrývající se složky nejistoty sčítají ve ČTVERCÍCH (rozpočet
+     rozptylu). Zde vstupuje jediná složka — neshoda zdrojů 12–22 minut
+     vůči mediánu 15 min, tedy σ = 10/(2·15) = 1/3:
+     lo = 15/1,33 ≈ 11 min, hi = 15·1,33 = 20 min. */
+  assert.equal(c.whenState.lo,11);
+  assert.equal(c.whenState.hi,20);
   assert.deepEqual(c.whenState.parts,['radar','model']);
+  /* Verdikt pro pozdější Brierovu kalibraci: "za ~15 min prší s P=75 %" —
+     dva zdroje se shodly a jeden z nich je pozorování, ensemble nedává
+     žádnou pravděpodobnost (v vm kontextu není). */
+  assert.equal(verdicts.length,1);
+  assert.equal(verdicts[0].locKey,'50.0,15.5');   /* mřížka 0,5° — locKeyOf */
+  assert.ok(Math.abs(verdicts[0].targetMs-t0-15*60000)<3000);
+  assert.equal(verdicts[0].prob,0.75);
 });
 
 
@@ -312,7 +351,12 @@ test('blend skill starts neutral, shrinks with few samples and saturates with ma
 test('learned blend multipliers rescale weights only for the region with data',()=>{
   const store={};
   const ls={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v;},removeItem:()=>{}};
-  const c=context(['blendBucket','blendWeights','getBlendMult','recordBlendError','lsGet','lsSet'],{localStorage:ls,BLEND_KEY:'bpBlend_v1'});
+  const c=context(['blendBucket','blendWeights','blendRegimeKey','convectiveFrac','getBlendMult','recordBlendError','lsGet','lsSet'],
+    {localStorage:ls,BLEND_KEY:'bpBlend_v1',stormRisk:null,precipMix:null,CAPE_CONV_LO:400,CAPE_CONV_HI:2000});
+  /* Kolo 4: blendWeights si režim (standardní/konvektivní počasí) určí
+     sama přes blendRegimeKey ← convectiveFrac; v vm kontextu bez dat
+     o atmosféře je to standardní režim. */
+  assert.equal(c.blendRegimeKey(),'std');
   const base30=c.blendWeights(30,null), base45=c.blendWeights(45,null);
   assert.deepEqual(c.blendWeights(30,'CZ'),base30);  /* bez dat stejné váhy */
   for(let i=0;i<40;i++)c.recordBlendError('CZ','30','radar',0.7);
@@ -321,6 +365,40 @@ test('learned blend multipliers rescale weights only for the region with data',(
   assert.ok(base45.radar<base30.radar);              /* váhy přirozeně klesají s horizontem */
   assert.equal(w.model,base30.model);                /* netestovaný zdroj nedotčen */
   assert.equal(c.blendWeights(45,'CZ').radar,base45.radar); /* jiný bucket bez dat */
+  c.stormRisk={cape:2000};
+  assert.equal(c.blendRegimeKey(),'conv');           /* plně konvektivní atmosféra přepíná režim */
+});
+test('blend multipliers learn per convective regime, not one curve for all weather',()=>{
+  const store={};
+  const ls={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v;},removeItem:()=>{}};
+  const c=context(['blendBucket','blendRegimeKey','convectiveFrac','getBlendMult','recordBlendError','lsGet','lsSet'],
+    {localStorage:ls,BLEND_KEY:'bpBlend_v1',stormRisk:null,precipMix:null,CAPE_CONV_LO:400,CAPE_CONV_HI:2000});
+  /* Přeháňkový radar je systematicky jiná bestie než frontální déšť —
+     proto si každý režim vede vlastní křivku. Konvekce: radar nadhodnocuje;
+     standardní počasí: podhodnocuje. Obě zkušenosti nesmí jedna druhou
+     přemazat. */
+  for(let i=0;i<60;i++)c.recordBlendError('CZ','30','radar',0.7,'conv');
+  for(let i=0;i<60;i++)c.recordBlendError('CZ','30','radar',-0.7,'std');
+  const conv=c.getBlendMult('CZ',30,'radar','conv');
+  const std=c.getBlendMult('CZ',30,'radar','std');
+  assert.ok(conv<1,'konvektivní křivka sérii nadhodnocení tlumí');
+  assert.ok(std>1,'standardní křivka sérii podhodnocení posiluje');
+  assert.ok(conv<std,'režimy se NEmíchají');
+  assert.equal(c.getBlendMult('CZ',45,'radar','conv'),1);  /* režim bez vzorků nezhlaví */
+  const total=c.getBlendMult('CZ',30,'radar');
+  assert.ok(total>1,'celková křivka zůstává zálohou pro neznámé režimy');
+});
+test('Brier verdict probability is honest without ensemble and calibrated with it',()=>{
+  const c=context(['verdictProb'],{ensState:null,probSeries:null,HOURS:48});
+  assert.equal(c.verdictProb(1,0),0.5);   /* jediný zdroj = nejistota, ne jistota */
+  assert.equal(c.verdictProb(2,0),0.7);
+  assert.equal(c.verdictProb(2,1),0.75);  /* pozorovaný zdroj posiluje důvěru */
+  assert.equal(c.verdictProb(3,0),0.8);
+  assert.equal(c.verdictProb(4,0),0.9);
+  const ens=context(['verdictProb'],{ensState:{prob:65},probSeries:[80,null,50],HOURS:48});
+  assert.equal(ens.verdictProb(2,0),0.8); /* okolí mřížky mluví hlasitěji než bod */
+  const grid=context(['verdictProb'],{ensState:null,probSeries:[30,10],HOURS:48});
+  assert.equal(grid.verdictProb(2,0),0.3); /* mřížka s 30 % vydává 30 %, ne domněnku */
 });
 test('AIFS joins the model pool as its own family next to ECMWF IFS',()=>{
   assert.match(script,/id:\s*"ecmwf_aifs025_single"[^\n]*fam:\s*"AIFS"/);
