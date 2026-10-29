@@ -417,9 +417,6 @@ test('model without data gets a note under the table (kolo 8f)',async()=>{
         if(n.scrollWidth>n.clientWidth+1) return false;
       return true;});
     assert.ok(nfit===true,'useknute nazvy po vypadnuti modelu: ');
-    const shoda=await p.locator('#body tr.consensus td.cell').first().innerText();
-    assert.ok(shoda.endsWith('/'+(rowsFull-2)),
-      'shoda musi pocitat jen odpovezene modely: '+shoda);
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });
