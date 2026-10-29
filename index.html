@@ -514,6 +514,15 @@ var MODEL_POOL = [
   {id:"ecmwf_aifs025_single", n:"ECMWF AIFS",    a:"ML model ECMWF · 0,25°",    hl:51.4, hg:-0.9,  fam:"AIFS",      cc:"EU"},
   {id:"gfs_seamless",         n:"NOAA GFS",      a:"Národní met. služba USA",   hl:38.9, hg:-77.0,  fam:"NOAA",       cc:"US"},
   {id:"icon_seamless",        n:"DWD ICON",      a:"Německá met. služba",       hl:50.1, hg:8.7,    fam:"DWD",        cc:"DE"},
+  /* AICON — AI předpověď DWD na globální mřížce (~13 km). Stejný trik jako
+     u AIFS: vlastní rodina (fam), aby ho deduplikace "jedna agentura = jeden
+     řádek" nesebrala jako dvojkartu ICONu. AI model má JINÉ chyby než
+     fyzikální (umí skvrny lépe položit, ale občas si vymyslí vítr) —
+     právě proto je jeho srovnání s ICONem nejcennější, a to jen když zůstane
+     samostatný řádek. Kdyby open-meteo pod tímhle id model nevedlo,
+     nevrátí data a appka ho vyfiltruje úplně stejně jako doménové modely
+     mimo svoji oblast — nikam se nerozsype. */
+  {id:"aicon_global",         n:"DWD AICON",    a:"AI model DWD · ~13 km",     hl:50.1, hg:8.7,    fam:"AICON",      cc:"DE"},
   {id:"meteofrance_seamless", n:"Météo-France",  a:"ARPEGE / AROME",            hl:43.6, hg:1.4,    fam:"MeteoFrance",cc:"FR"},
   {id:"ukmo_seamless",        n:"UK Met Office", a:"Britská met. služba",       hl:50.7, hg:-3.5,   fam:"UKMO",       cc:"GB"},
   {id:"knmi_seamless",        n:"KNMI",          a:"Nizozemská met. služba",    hl:52.1, hg:5.2,    fam:"KNMI",       cc:"NL"},
@@ -1168,6 +1177,7 @@ var MAX_SANE_MMH = 150;
    informace navíc, zato ve čtvrtinovém dosahu. */
 var Z_INTENSITY = 7;   /* detail intenzity — nativní maximum */
 var Z_MOTION    = 6;   /* odhad pohybu — na naší šířce dosah 75 km, strop 132 km/h */
+var Z_NEAR      = 7;   /* zpřesnění pohybu pro blízké buňky — ~0,8 km/px, dosah ~38 km */
 
 /* poslední znak: snow=1 zapne sněhový příznak v datech (viz readTilePatch) */
 var RV_OPTS = "/0/0_1.png";
@@ -1369,6 +1379,89 @@ function lsSet(key, val){
   try{ localStorage.setItem(key, JSON.stringify(val)); }
   catch(e){ /* soukromý režim prohlížeče / plné úložiště — tiše ignorovat */ }
 }
+/* ==== INDEXEDDB — když localStorage nestačí ====
+   Fronta predikcí (bpPending) se dá LinkedIn jen stovkami vzorků:
+   localStorage má v řádech jednotek MB a každý zápis znamená serializaci
+   CELÉ fronty. Ověřování potřebuje tisíce vzorků (každá hodina každé
+   lokality = jeden), ať má učení z čeho růst — proto se fronta stěhuje
+   do IndexedDB, kde záznamy leží samostatně a limit je v řádech desítek
+   MB. Schválně se ale nezavádí "asynchronní lsGet všude": IDB se použije
+   JEN pro klíče, které deklarují, že do ní patří (pending fronta);
+   malé ručně psané věci (bias faktor, váhy blendu) v localStorage
+   zůstávají, protože tam je synchronní čtení jednodušší a rozsah malý.
+   Fallback: když IDB není (starý prohlížeč, soukromé okno), jede se
+   dál přes localStorage — jen se drží menší limit. */
+var IDB_NAME = "budePrset", IDB_STORE = "kv";
+var idbDb = null, idbTried = false;
+function idbOpen(){
+  if(idbDb) return Promise.resolve(idbDb);
+  if(idbTried || !window.indexedDB) return Promise.resolve(null);
+  idbTried = true;
+  return new Promise(function(resolve){
+    try{
+      var rq = window.indexedDB.open(IDB_NAME, 1);
+      rq.onupgradeneeded = function(){
+        try{ rq.result.createObjectStore(IDB_STORE); }catch(e){}
+      };
+      rq.onsuccess = function(){ idbDb = rq.result; resolve(idbDb); };
+      rq.onerror = function(){ resolve(null); };
+      rq.onblocked = function(){ resolve(null); };
+      /* Safari občas nezavolá ani success ani error (požadavek visí) —
+         pojistka vrátí null po třech sekundách a fallback převezme. */
+      setTimeout(function(){ resolve(idbDb || null); }, 3000);
+    }catch(e){ resolve(null); }
+  });
+}
+function idbGet(key){
+  return idbOpen().then(function(db){
+    if(!db) throw new Error("no-idb");
+    return new Promise(function(resolve, reject){
+      try{
+        var tx = db.transaction(IDB_STORE, "readonly");
+        var rq = tx.objectStore(IDB_STORE).get(key);
+        rq.onsuccess = function(){ (rq.result === undefined) ? reject(new Error("miss")) : resolve(rq.result); };
+        rq.onerror = function(){ reject(rq.error || new Error("idb-get")); };
+      }catch(e){ reject(e); }
+    });
+  });
+}
+function idbSet(key, val){
+  return idbOpen().then(function(db){
+    if(!db) throw new Error("no-idb");
+    return new Promise(function(resolve, reject){
+      try{
+        var tx = db.transaction(IDB_STORE, "readwrite");
+        tx.objectStore(IDB_STORE).put(val, key);
+        tx.oncomplete = function(){ resolve(true); };
+        tx.onerror = function(){ reject(tx.error || new Error("idb-put")); };
+        tx.onabort = function(){ reject(tx.error || new Error("idb-abort")); };
+      }catch(e){ reject(e); }
+    });
+  });
+}
+/* Fronta predikcí: IDB s limitem 5000, fallback localStorage s 600.
+   get vždy uspěje (fallback []), set píše do IDB a při selhání do LS. */
+var PENDING_CAP_IDB = 5000, PENDING_CAP_LS = 600;
+var pendingUseIdb = null;   /* true/false po prvním pokusu; null = nevědět */
+function pendingGet(){
+  return idbGet(PENDING_KEY).then(function(v){
+    pendingUseIdb = true;
+    return (Array.isArray(v) ? v : []);
+  }, function(){
+    pendingUseIdb = false;
+    return lsGet(PENDING_KEY, []);
+  });
+}
+function pendingSet(q){
+  var cap = PENDING_CAP_IDB;
+  if(q.length > cap) q = q.slice(q.length - cap);
+  return idbSet(PENDING_KEY, q).then(function(){ pendingUseIdb = true; },
+    function(){
+      pendingUseIdb = false;
+      if(q.length > PENDING_CAP_LS) q = q.slice(q.length - PENDING_CAP_LS);
+      lsSet(PENDING_KEY, q);
+    });
+}
 function locKeyOf(lat, lon){
   return (Math.round(lat*2)/2).toFixed(1) + "," + (Math.round(lon*2)/2).toFixed(1);
 }
@@ -1403,51 +1496,90 @@ function recordBiasSample(locKey, lat, lon, modelId, logRatio){
    zemích (regioNowcast má jinou kvalitu v každé zemi). Váhu zdroje pak
    přenásobíme 1 + (exp(-ema)-1)·n/(n+15): nadhodnocující zdroj slábne,
    podhodnocující sílí, a při málo vzorcích je vliv smrštěný skoro k nule —
-   řídké používání appky nic nepokazí. Clamp [0,5; 1,5] drží extrémy. */
-var BLEND_KEY = "bpBlend_v1";
+   řídké používání appky nic nepokazí. Clamp [0,5; 1,5] drží extrémy.
+
+   NOVĚ: REŽIM. Radarová advekce a národní nowcasty excelují na frontách
+   (spořádaný posun pole), ale při vznikající konvekci tápou — a naopak
+   modely s CAPE vstupem konvekci vedí dřív než radar. Učení podle průměru
+   přes oba režimy to zamíchá: chybu jednoho režimu rozřeří i do druhého.
+   Každý vzorek proto nese příznak "conv"/"std" (podle konvektivního
+   zlomku v okamžiku předpovědi) a učení si vede obě křivky zvlášť —
+   vedle celkové, která zachovává dřívější chování. Struktura se mění,
+   proto klíč v2 a stará jednorežimová data se zahodí. */
+var BLEND_KEY = "bpBlend_v2";
+try{ localStorage.removeItem("bpBlend_v1"); }catch(e){}
+/* Klíč režimu: konvektivní zlomek > 0,5 = v místě a čase předpovědi
+   dominovaly přeháňky. Null/nízký → "std". */
+function blendRegimeKey(){
+  var cf = convectiveFrac();
+  return (cf != null && cf > 0.5) ? "conv" : "std";
+}
 function blendBucket(dt){ return dt <= 37.5 ? "30" : (dt <= 52.5 ? "45" : "60"); }
-function getBlendMult(cc, dt, src){
+function getBlendMult(cc, dt, src, regime){
   if(!cc) return 1;
   var store = lsGet(BLEND_KEY, {regions:{}});
   var reg = store.regions && store.regions[cc], b = blendBucket(dt);
   var e = reg && reg[b] && reg[b][src];
   if(!e || !e.n) return 1;                        /* žádné zkušenosti → ruční váhy */
-  var raw = Math.exp(-Math.max(-2, Math.min(2, e.ema || 0)));
+  /* Nejdřív křivka pro TENTO režim; když režim ještě nemá vlastní vzorky,
+     spadne se na celkovou — učení tím nikdy nezhlavatí na nedostatku dat. */
+  var sub = (regime && e.r && e.r[regime] && e.r[regime].n) ? e.r[regime] : e;
+  var raw = Math.exp(-Math.max(-2, Math.min(2, sub.ema || 0)));
   raw = Math.max(0.5, Math.min(2, raw));          /* extrémní ema nesmí shltit vše */
-  var mult = 1 + (raw - 1) * (e.n / (e.n + 15));  /* smrštění: málo dat = malý vliv */
+  var mult = 1 + (raw - 1) * (sub.n / (sub.n + 15));  /* smrštění: málo dat = malý vliv */
   return Math.max(0.5, Math.min(1.5, mult));
 }
-function recordBlendError(cc, bucket, src, logRatio){
+function recordBlendError(cc, bucket, src, logRatio, regime){
   if(!cc || !bucket || !src) return;
   var store = lsGet(BLEND_KEY, {regions:{}});
   if(!store.regions[cc]) store.regions[cc] = {};
   if(!store.regions[cc][bucket]) store.regions[cc][bucket] = {};
+  if(!store.regions[cc][bucket][src]) store.regions[cc][bucket][src] = {n: 0, ema: null};
   var e = store.regions[cc][bucket][src];
-  if(!e) e = store.regions[cc][bucket][src] = {n: 0, ema: null};
-  e.n = Math.min(500, e.n + 1);
-  e.ema = (e.ema == null) ? logRatio : 0.9*e.ema + 0.1*logRatio;
+  /* jediná EMA smyčka pro celkovou i režimovou křivku */
+  function push(sub){
+    sub.n = Math.min(500, sub.n + 1);
+    sub.ema = (sub.ema == null) ? logRatio : 0.9*sub.ema + 0.1*logRatio;
+  }
+  push(e);
+  var rk = regime || "std";
+  if(!e.r) e.r = {};
+  if(!e.r[rk]) e.r[rk] = {n:0, ema:null};
+  push(e.r[rk]);
   lsSet(BLEND_KEY, store);
 }
-/* Zařadí čerstvé predikce (jen nejbližší 4 h — realisticky ověřitelné) do fronty na pozdější kontrolu. */
+/* Zařadí čerstvé predikce (jen nejbližší 4 h — realisticky ověřitelné) do fronty na pozdější kontrolu.
+   Fronta žije v IndexedDB (viz výše), proto je zápis asynchronní; jednotlivé
+   zápisy se řetězí přes pendingChain, ať si dvě souběžné fronty (predikce +
+   snapshot blendu) neseberou vzájemně uložená data. */
+var pendingChain = Promise.resolve();
+function pendingEnqueue(step){
+  pendingChain = pendingChain.then(step).catch(function(){});
+}
 function enqueuePredictions(locKey, lat, lon, times, perModel){
-  var q = lsGet(PENDING_KEY, []);
+  var items = [];
   var maxIdx = Math.min(4, times.length);
   for(var i=0;i<maxIdx;i++){
     perModel.forEach(function(pm){
       if(pm.vals[i] == null) return;
-      q.push({locKey:locKey, lat:lat, lon:lon, model:pm.m.id,
+      items.push({locKey:locKey, lat:lat, lon:lon, model:pm.m.id,
               targetTime: times[i].getTime(), predictedMm: pm.vals[i]});
     });
   }
-  if(q.length > 600) q = q.slice(q.length - 600);
-  lsSet(PENDING_KEY, q);
+  if(!items.length) return;
+  pendingEnqueue(function(){
+    return pendingGet().then(function(q){
+      items.forEach(function(it){ q.push(it); });
+      return pendingSet(q);
+    });
+  });
 }
 /* Snapshot míchané osy pro budoucí verifikaci: co v horizontu 30/45/60 min
    tvrdil každý zdroj zvlášť. Ověřovací kolo pak každému zdroji přisoudí jeho
    vlastní chybu proti METAR — a blend se naučí, komu věřit víc. */
 function enqueueBlendSnapshots(locKey, cc, lat, lon, now, tl){
   if(!tl || !tl.length) return;
-  var q = lsGet(PENDING_KEY, []);
+  var items = [];
   [30,45,60].forEach(function(b){
     var e = null;
     for(var i=0;i<tl.length;i++) if(tl[i].dt === b){ e = tl[i]; break; }
@@ -1459,11 +1591,83 @@ function enqueueBlendSnapshots(locKey, cc, lat, lon, now, tl){
       if(raw[k] != null) srcs[k] = Math.round(raw[k]*1000)/1000;
     });
     if(!Object.keys(srcs).length) return;
-    q.push({kind:"blend", cc: cc || "--", locKey: locKey, lat: lat, lon: lon,
-            targetTime: now + b*60000, bucket: String(b), srcs: srcs});
+    items.push({kind:"blend", cc: cc || "--", locKey: locKey, lat: lat, lon: lon,
+            targetTime: now + b*60000, bucket: String(b), srcs: srcs,
+            regime: blendRegimeKey()});   /* snapshot si nese režim — viz ⑦ */
   });
-  if(q.length > 600) q = q.slice(q.length - 600);
-  lsSet(PENDING_KEY, q);
+  if(!items.length) return;
+  pendingEnqueue(function(){
+    return pendingGet().then(function(q){
+      items.forEach(function(it){ q.push(it); });
+      return pendingSet(q);
+    });
+  });
+}
+/* ==== KALIBRACE PRAVDĚPODOBNOSTI — BRIER SKÓRE ====
+   Appka dnes říká "za 25 min" a "ensemble 70 %", ale nikdo neměří, jestli
+   těch 70 % znamená, že prší v 70 % případů. Tohle je sběr dat pro
+   kalibraci: každý verdikt ("déšť přiletí, pravděpodobnost P v čase T")
+   se zařadí do fronty, časem se ověří proti METAR a zapíše se Brierovo
+   skóre (P − výsledek)². dokonale kalibrovaný prediktor má průměr ~0,
+   předstíraná jistota (vždy 0 nebo 1) ho má nejhorší. Výstup jde do
+   bpDiag() — dokud vzorků není dost, NIKDO se podle toho neřídí;
+   nejdřív se musí ukázat, jak moc si veredikty věří zbytečně. */
+var BRIER_KEY = "bpBrier_v1", VERDICT_STAMP_KEY = "bpVerdictStamp_v1";
+var VERDICT_EVERY_MS = 45*60000;   /* jeden verdikt na lokalitu za 45 min —
+                                      jinak by klíčová věta vygenerovala deset
+                                      korelovaných vzorků za jednu přeháňku */
+function brierStore(){ return lsGet(BRIER_KEY, {n:0, sum:0, bins:{}}); }
+function recordBrier(prob, outcome){
+  var s = brierStore();
+  var b = Math.max(0, Math.min(0.9, Math.floor(prob*10)/10)).toFixed(1);
+  s.n++;
+  s.sum += (prob - (outcome ? 1 : 0))*(prob - (outcome ? 1 : 0));
+  if(!s.bins) s.bins = {};
+  if(!s.bins[b]) s.bins[b] = {n:0, hit:0};
+  s.bins[b].n++;
+  if(outcome) s.bins[b].hit++;
+  lsSet(BRIER_KEY, s);
+}
+/* Pravděpodobnost, kterou verdikt nese: nejlepší dostupný odhad v okamžiku
+   vyslovení. Ensemble a Open-Meteo pravděpodobnost jsou modelové; když
+   nic z toho není (ensemble nedostupný), zbyde škála podle počtu zdrojů,
+   které se na čase shodly — bedlivě pod 1, protože jeden zdroj není
+   žádná jistota. */
+function verdictProb(agree, obsN){
+  var p = null;
+  if(ensState && typeof ensState.prob === "number") p = ensState.prob/100;
+  if(probSeries && probSeries.length){
+    var om = 0;
+    for(var i=0;i<probSeries.length && i<HOURS;i++) if(probSeries[i] != null && probSeries[i] > om) om = probSeries[i];
+    if(om > 0 && (p == null || om/100 > p)) p = om/100;
+  }
+  if(p != null) return Math.max(0.05, Math.min(0.98, p));
+  if(agree >= 4) return 0.9;
+  if(agree === 3) return 0.8;
+  if(agree === 2) return (obsN || 0) >= 1 ? 0.75 : 0.7;
+  return 0.5;
+}
+function enqueueVerdict(locKey, lat, lon, cc, targetMs, prob){
+  /* dedup: klíčová věta se přepočítává po každém dorazivším zdroji —
+     bez razítka by jeden déšť zaplnil frontu deseti kopiemi sebe sama */
+  var stamps = lsGet(VERDICT_STAMP_KEY, {});
+  var last = stamps[locKey] || 0;
+  if(Date.now() - last < VERDICT_EVERY_MS) return;
+  stamps[locKey] = Date.now();
+  var keys = Object.keys(stamps);
+  if(keys.length > 80){   /* paměť neteče do nekončena ani tady */
+    keys.sort(function(a,b){ return stamps[a] - stamps[b]; });
+    for(var i=0;i<keys.length-60;i++) delete stamps[keys[i]];
+  }
+  lsSet(VERDICT_STAMP_KEY, stamps);
+  pendingEnqueue(function(){
+    return pendingGet().then(function(q){
+      q.push({kind:"verdict", cc: cc || "--", locKey: locKey, lat: lat, lon: lon,
+              targetTime: targetMs, prob: Math.round(prob*1000)/1000,
+              regime: blendRegimeKey()});
+      return pendingSet(q);
+    });
+  });
 }
 /* Hrubý odhad mm/h z METAR kategorie — jen pro srovnání, nikde se nezobrazuje. */
 function metarApproxMm(wx){
@@ -1475,78 +1679,93 @@ function metarApproxMm(wx){
   if(w.indexOf("-") >= 0 || w.indexOf("DZ") >= 0) return 0.3;
   return 1.5;
 }
-/* Ověří predikce starší než ~20 min proti METAR pozorování. Max jednou za otevření appky. */
+/* Ověří predikce starší než ~20 min proti METAR pozorování. Max jednou za otevření appky.
+   Fronta žije v IndexedDB, takže celé kolo běží jako asynchronní krok
+   v pendingChain — nové predikce se zařadí až po dokončení ověření,
+   ať si ověřování nepřepíše právě přidané vzorky. */
 function runBiasVerification(){
   if(biasVerifiedThisSession) return;
   biasVerifiedThisSession = true;
-  var q = lsGet(PENDING_KEY, []);
-  if(!q.length) return;
-  var now = Date.now(), GRACE = 20*60*1000, EXPIRE = 48*3600*1000;
-  var due = [], keep = [];
-  q.forEach(function(item){
-    var age = now - item.targetTime;
-    if(age < GRACE){ keep.push(item); return; }
-    if(age > EXPIRE) return;                     /* moc staré na ověření → zahodit */
-    due.push(item);
+  pendingEnqueue(function(){
+    return pendingGet().then(function(q){
+      if(!q || !q.length) return null;
+      var now = Date.now(), GRACE = 20*60*1000, EXPIRE = 48*3600*1000;
+      var due = [], keep = [];
+      q.forEach(function(item){
+        var age = now - item.targetTime;
+        if(age < GRACE){ keep.push(item); return; }
+        if(age > EXPIRE) return;                     /* moc staré na ověření → zahodit */
+        due.push(item);
+      });
+      var groups = {};
+      due.forEach(function(item){
+        if(!groups[item.locKey]) groups[item.locKey] = {lat:item.lat, lon:item.lon, items:[]};
+        groups[item.locKey].items.push(item);
+      });
+      var locKeys = Object.keys(groups), gi = 0;
+      return new Promise(function(resolve){
+        (function next(){
+          if(gi >= locKeys.length){ pendingSet(keep).then(resolve, resolve); return; }
+          var g = groups[locKeys[gi]]; gi++;
+          var oldest = Math.min.apply(null, g.items.map(function(it){ return it.targetTime; }));
+          var hoursSpan = Math.min(48, Math.max(2, Math.ceil((now - oldest)/3600000) + 1));
+          cachedJson("https://aviationweather.gov/api/data/metar?format=json&hours="+hoursSpan
+            + "&bbox="+metarBbox(g.lat, g.lon), 3600000)
+            .then(function(arr){
+              g.items.forEach(function(item){
+                /* JEN STANICE, KTERÉ UMÍ HLÁSIT POČASÍ.
+                   Bez tohohle filtru se appka učí z ticha bójí, že modely
+                   nadhodnocují — a začne déšť potlačovat. Viz komentář
+                   u staniceHlasiPocasi(). */
+                var best = null, bestDt = 1e9;
+                (arr||[]).forEach(function(o){
+                  if(o.obsTime == null) return;
+                  if(!staniceHlasiPocasi(o)) return;
+                  var dt = Math.abs(o.obsTime*1000 - item.targetTime);
+                  if(dt < bestDt && dt <= 40*60*1000){ bestDt = dt; best = o; }
+                });
+                if(!best){
+                  /* NEPŘÍTOMNOST ZPRÁVY NENÍ SUCHO — a není ani důvod vzorek
+                     zahodit navždy. METAR chodí nepravidelně; při dalším
+                     otevření appky už tam být může. Laborka přesně tímhle
+                     zahazováním přišla o tisíce vzorků. */
+                  item.pokusu = (item.pokusu || 0) + 1;
+                  if(item.pokusu < 4) keep.push(item);
+                  return;
+                }
+                var observed = metarApproxMm(best.wxString || "");
+                if(item.kind === "verdict"){
+                  /* Brier skóre: verdikt tvrdil pravděpodobnost P, že kolem
+                     cílového času začne pršet. Výsledek 1/0 dává METAR
+                     nejblíž cíli (±40 min) — hrubé, ale počestné: učí to
+                     kalibraci, ne tofu. */
+                  recordBrier(item.prob, metarHasPrecip(best.wxString || ""));
+                  return;
+                }
+                if(item.kind === "blend"){
+                  /* Vzorek blendu: každý zdroj dostává svou vlastní chybu,
+                     protože ve směsi hraje každý jinou roli. */
+                  var obsB = Math.max(0.05, Math.min(50, observed));
+                  Object.keys(item.srcs || {}).forEach(function(src){
+                    var p = Math.max(0.05, Math.min(50, item.srcs[src]));
+                    recordBlendError(item.cc || "--", item.bucket, src,
+                                     Math.max(-2, Math.min(2, Math.log(p/obsB))),
+                                     item.regime);
+                  });
+                  return;
+                }
+                var pred = Math.max(0.05, Math.min(50, item.predictedMm));
+                var obs  = Math.max(0.05, Math.min(50, observed));
+                var logRatio = Math.max(-2, Math.min(2, Math.log(pred/obs)));
+                recordBiasSample(item.locKey, item.lat, item.lon, item.model, logRatio);
+              });
+              next();
+            })
+            .catch(function(){ next(); });
+        })();
+      });
+    });
   });
-  if(!due.length){ lsSet(PENDING_KEY, keep); return; }
-
-  var groups = {};
-  due.forEach(function(item){
-    if(!groups[item.locKey]) groups[item.locKey] = {lat:item.lat, lon:item.lon, items:[]};
-    groups[item.locKey].items.push(item);
-  });
-  var locKeys = Object.keys(groups), gi = 0;
-  (function next(){
-    if(gi >= locKeys.length){ lsSet(PENDING_KEY, keep); return; }
-    var g = groups[locKeys[gi]]; gi++;
-    var oldest = Math.min.apply(null, g.items.map(function(it){ return it.targetTime; }));
-    var hoursSpan = Math.min(48, Math.max(2, Math.ceil((now - oldest)/3600000) + 1));
-    cachedJson("https://aviationweather.gov/api/data/metar?format=json&hours="+hoursSpan
-      + "&bbox="+metarBbox(g.lat, g.lon), 3600000)
-      .then(function(arr){
-        g.items.forEach(function(item){
-          /* JEN STANICE, KTERÉ UMÍ HLÁSIT POČASÍ.
-             Bez tohohle filtru se appka učí z ticha bójí, že modely
-             nadhodnocují — a začne déšť potlačovat. Viz komentář
-             u staniceHlasiPocasi(). */
-          var best = null, bestDt = 1e9;
-          (arr||[]).forEach(function(o){
-            if(o.obsTime == null) return;
-            if(!staniceHlasiPocasi(o)) return;
-            var dt = Math.abs(o.obsTime*1000 - item.targetTime);
-            if(dt < bestDt && dt <= 40*60*1000){ bestDt = dt; best = o; }
-          });
-          if(!best){
-            /* NEPŘÍTOMNOST ZPRÁVY NENÍ SUCHO — a není ani důvod vzorek
-               zahodit navždy. METAR chodí nepravidelně; při dalším
-               otevření appky už tam být může. Laborka přesně tímhle
-               zahazováním přišla o tisíce vzorků. */
-            item.pokusu = (item.pokusu || 0) + 1;
-            if(item.pokusu < 4) keep.push(item);
-            return;
-          }
-          var observed = metarApproxMm(best.wxString || "");
-          if(item.kind === "blend"){
-            /* Vzorek blendu: každý zdroj dostává svou vlastní chybu,
-               protože ve směsi hraje každý jinou roli. */
-            var obsB = Math.max(0.05, Math.min(50, observed));
-            Object.keys(item.srcs || {}).forEach(function(src){
-              var p = Math.max(0.05, Math.min(50, item.srcs[src]));
-              recordBlendError(item.cc || "--", item.bucket, src,
-                               Math.max(-2, Math.min(2, Math.log(p/obsB))));
-            });
-            return;
-          }
-          var pred = Math.max(0.05, Math.min(50, item.predictedMm));
-          var obs  = Math.max(0.05, Math.min(50, observed));
-          var logRatio = Math.max(-2, Math.min(2, Math.log(pred/obs)));
-          recordBiasSample(item.locKey, item.lat, item.lon, item.model, logRatio);
-        });
-        next();
-      })
-      .catch(function(){ next(); });
-  })();
 }
 /* Zmenší obsah panelu tak, aby se vždy vešel do rámečku (bez přetečení). */
 function fitPanel(el){
@@ -2459,6 +2678,57 @@ function renderEnsembleRow(ens, agreeProb, pk){
     if(kdy >= 0) parts.push("<span>Open-Meteo <b>" + Math.round(mx) + " %</b></span>");
   }
 
+  /* ⑨ KŘIVKA PRAVDĚPODOBNOSTI PO HODINÁCH — jedno číslo neřekne, KDE
+     vrchol je ani jestli křivka stoupá, nebo už padá. Mini graf do řádku:
+     plná linka = Open-Meteo precipitation_probability (0–100 % po
+     hodinách), tečkovaná = ensemble (podíl členů nad prahem v 3×3
+     okolí). Když se obě křivky rozcházejí, je to vidět rovnou tady. */
+  (function(){
+    if(!probSeries || !probSeries.length) return;
+    var W = 84, H2 = 18, nH = Math.min(HOURS, probSeries.length, (ens && ens.perHour ? ens.perHour.length : HOURS));
+    if(nH < 2) return;
+    function bodyPath(vals, scale){
+      var pts = [];
+      for(var i=0;i<nH;i++){
+        var v = vals[i];
+        if(v == null) v = 0;
+        pts.push((i*(W/(nH-1))).toFixed(1)+","+(H2 - Math.max(0, Math.min(100, v*scale))*H2/100).toFixed(1));
+      }
+      return pts.join(" ");
+    }
+    var svg2 = '<svg viewBox="0 0 '+W+' '+H2+'" width="'+W+'" height="'+H2+'" aria-hidden="true" style="vertical-align:middle">'
+      + '<line x1="0" y1="'+(H2-1)+'" x2="'+W+'" y2="'+(H2-1)+'" stroke="rgba(255,255,255,.2)" stroke-width=".6"/>'
+      + '<line x1="0" y1="'+(H2/2)+'" x2="'+W+'" y2="'+(H2/2)+'" stroke="rgba(255,255,255,.08)" stroke-width=".6"/>';
+    if(ens && ens.perHour && ens.perHour.length >= nH)
+      svg2 += '<polyline points="'+bodyPath(ens.perHour, 100)+'" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1" stroke-dasharray="2 2"/>';
+    svg2 += '<polyline points="'+bodyPath(probSeries, 1)+'" fill="none" stroke="#A8E4FF" stroke-width="1.3"/>'
+      + '</svg>';
+    parts.push('<span title="pravděpodobnost po hodinách: plná = Open-Meteo, tečkovaná = ensemble">pravděpodobnost po hodinách '+svg2+'</span>');
+  })();
+
+  /* ⑩ V OBCI vs V OKRUHU ~11 KM — hlavní číslo ensemblu je NEP přes
+     3×3 body (přesně proto, že přeháňka nemusí trefit bod). U konvekce
+     je ale rozdíl "tady" a "někde poblíž" desítky procent a uživatel
+     si zaslouží vidět obě čísla: point = členové NAD TEBOU, okruh =
+     členové kdekoli do ~11 km. Když je rozdíl malý, nic se neukazuje —
+     text musí nést informaci, ne dekorační čísla. */
+  if(ens && ens.memberCvals && ens.idx != null){
+    var cntP = 0, wetP = 0;
+    ens.memberCvals.forEach(function(m){
+      if(m.cvals == null || m.cvals[ens.idx] == null) return;
+      cntP++;
+      if(m.cvals[ens.idx] >= THRESH) wetP++;
+    });
+    if(cntP >= 5){
+      var pPoint = Math.round(100*wetP/cntP), pArea = ens.prob;
+      var cfP = convectiveFrac();
+      if(cfP != null && cfP > 0.4 && (pArea - pPoint) >= 10){
+        parts.push("<span>v obci <b>" + pPoint + " %</b> · někde do ~11 km <b>" + pArea
+                 + " %</b> — přeháňky jsou skvrnité</span>");
+      }
+    }
+  }
+
   if(ens) parts.push("<span>" + ens.members + " členů · " + ens.model + "</span>");
 
   /* Rozejdou-li se odhady výrazně, řekni to nahlas. */
@@ -2553,6 +2823,7 @@ var stormMotion = null;  /* {dirDeg, speedKmh, etaMin, mmh} z posunu radarových
 var radarTimeline = null; /* [{dt,mmh}] hustá extrapolace na dt=5..60 min z vlastní advekce */
 var radarTrendRate = null; /* frakční změna intenzity za minutu — sílí/slábne */
 var radarCompass = null; /* radarový kompas: kde je echo, kam letí a přiletí/tě mine | null */
+var imergCompass = null; /* satelitní kompas z GPM IMERG — jen kde radar nedosahuje (⑫) */
 var waterState = null;   /* {kind:"sea"|"lake", bearingToWaterDeg, name?} | null | "error" */
 var waterCache = {};     /* poloha je statická vlastnost místa — nemá smysl ptát se pokaždé znovu */
 var atmoState   = null;  /* {pTrend, cape, lightning} — tlakový trend a konvekce */
@@ -2675,6 +2946,25 @@ function bpDiag(){
     "bouřkové riziko / 8 h": stormRisk
       ? "CAPE " + Math.round(stormRisk.cape) + " J/kg, blesky " + (stormRisk.lightning||0).toFixed(1)
       : "nenačteno",
+    "blesky (Blitzortung)": blitzState === "error" ? "spojení selhalo (zrcadla nedostupná)"
+      : blitzState
+        ? blitzState.n10 + " za 10 min · " + blitzState.n60 + " za 60 min"
+          + (blitzState.nearestKm != null ? " · nejbližší " + Math.round(blitzState.nearestKm) + " km" : "")
+          + " · " + blitzState.host
+        : (blitzTries >= BLITZ_GIVEUP ? "vzdáno po " + BLITZ_GIVEUP + " pokusech" : "nepřipojeno (bez konvektivního potenciálu)"),
+    "satelit IMERG (mimo radar)": imergCompass
+      ? imergNote + (imergCompass.state ? " · stav " + imergCompass.state : "")
+      : (imergNote || "nepoužito (radar dosahuje)"),
+    "kalibrace (Brier)": (function(){
+      var s = brierStore();
+      if(!s.n) return "žádné vzorky — sběr běží, verdikty se ověřují proti METAR";
+      var out = s.n + " vzorků · průměrné Brierovo skóre " + (s.sum/s.n).toFixed(3);
+      Object.keys(s.bins||{}).sort().forEach(function(b){
+        var e = s.bins[b];
+        out += "\n    hlášené " + (Math.round(b*100)) + " %: reálně " + Math.round(100*e.hit/e.n) + " % (" + e.n + "×)";
+      });
+      return out;
+    })(),
     "verdikt: špičková shoda": (modelState && modelState.peak && modelState.peak.idx >= 0)
       ? modelState.peak.count + "/" + modelState.N + " v " + fmtHr(modelState.times[modelState.peak.idx])
         + " → " + Math.round(modelState.peak.prob*100) + " %"
@@ -2829,7 +3119,7 @@ function loadRadar(lat, lon, myId){
   altNowcast = null;
   stormMotion = null;
   radarTimeline = null; radarTrendRate = null;
-  radarCompass = null; renderCompass();
+  radarCompass = null; imergCompass = null; renderCompass();
   gridNowcast = null;
 
   /* blízkost velké vodní plochy — vlastnost místa, klidně z paměti opakovaně */
@@ -3067,6 +3357,9 @@ function loadRadar(lat, lon, myId){
       readCoverage(host, lat, lon).then(function(cov){
         if(isStale(myId)) return;
         radarCoverage = cov;
+        /* Mimo dosah radarů nastupuje satelit GPM IMERG (⑫): globální
+           měření srážek z družic, hrubé a opožděné, ale lepší než nic. */
+        if(cov === "none") loadImerg(lat, lon, myId);
         recomputeWhen();
       });
 
@@ -3092,21 +3385,53 @@ function loadRadar(lat, lon, myId){
         }).catch(function(){ if(!isStale(myId)) rvNowcast = "error"; });
       } else { rvNowcast = "error"; }
 
-      /* ---- POHYB POLE: hrubý zoom ----
+      /* ---- POHYB POLE: hrubý zoom + jemný zoom ----
          Na zoomu 8 nešlo změřit rychlost nad 33 km/h, což je pomaleji
          než běžná studená fronta, a výřez končil 19 km od obce, takže
          advekce dojela za 23 minut. Na zoomu 6 je strop 132 km/h
          a dosah 75 km. Stejná dlaždice, jen jiné číslo v URL. */
       var R = 48;
-      var motionPromise = Promise.all(past.map(function(f){
-        return readTilePatch(rvTile(host, f.path, tcM), tcM.px, tcM.py, R)
+      /* Jemný zoom (7): ~0,8 km/px, dosah ~38 km, poslední tři snímky.
+         Pro buňku, která už je BLÍZKO, je chyba rychlosti hlavní chybou
+         času přiletu — sub-pixel tip na jemném zoomu udává 0,4 km místo
+         0,8 km na bod. Download probíhá souběžně s hrubým zoomem. */
+      var tcN = tileCoords(lat, lon, Z_NEAR);
+      var z7Promise = Promise.all(past.slice(-3).map(function(f){
+        return readTilePatch(rvTile(host, f.path, tcN), tcN.px, tcN.py, R)
           .then(function(pt){ return {t:f.time, patch:pt}; });
-      })).then(function(ps){
-        ps = ps.filter(function(p){ return p.patch; });
+      })).then(function(ps7){
+        ps7 = ps7.filter(function(p){ return p.patch; });
+        ps7.sort(function(a,b){ return a.t - b.t; });
+        return ps7;
+      });
+      var motionPromise = Promise.all([
+        Promise.all(past.map(function(f){
+          return readTilePatch(rvTile(host, f.path, tcM), tcM.px, tcM.py, R)
+            .then(function(pt){ return {t:f.time, patch:pt}; });
+        })),
+        z7Promise
+      ]).then(function(both){
+        var ps = both[0].filter(function(p){ return p.patch; });
         if(ps.length < 2) return null;
         ps.sort(function(a,b){ return a.t - b.t; });
-        var mo = estimateMotion(ps, tcM.kmPerPx, 14);
-        return {frames:ps, motion:mo};
+        /* Korelace (celé pole + 4 kvadranty na pár) běží ve WORKERU —
+           viz motionFromFrames; výsledek je identický se synchronním
+           estimateMotion, jen hlavní vlákno mezitím nekuchtí. */
+        return motionFromFrames(ps, tcM.kmPerPx, 14).then(function(mo){
+          /* Dvouškálové zpřesnění: jemný zoom hledá posun jen v okolí
+             tipu z hrubého zoomu (priorV) — volné okno ±14 px na
+             0,8 km/px by pokrylo jen ~67 km/h, s tipem se stejně malé
+             okno otočí kolem správného místa a pokryje vše. */
+          var nearMo = null;
+          var ps7 = both[1];
+          if(mo && ps7.length >= 3 && mo.speedKmh >= 2 && mo.speedKmh <= 200){
+            var m7 = estimateMotion(ps7, tcN.kmPerPx, 14, {vx:mo.vx, vy:mo.vy});
+            if(m7 && m7.speedKmh >= 2 && m7.speedKmh <= 200 && m7.samples >= 2){
+              nearMo = m7;
+            }
+          }
+          return {frames:ps, motion:mo, near:nearMo, kmNear:tcN.kmPerPx};
+        });
       });
 
       /* ---- INTENZITA: jemný zoom, jen poslední snímek ---- */
@@ -3138,7 +3463,7 @@ function loadRadar(lat, lon, myId){
         if(!mp || !mp.motion){
           /* Bez odhadu pohybu zbývá jen odečíst, co je nad hlavou teď. */
           radarState = detail ? readNow(detail, frameAgeMin, 0, 0, tcI.kmPerPx) : "error";
-          radarCompass = computeRadarCompass(mp && mp.frames ? mp.frames : null, null, tcM);
+          radarCompass = computeRadarCompass(mp && mp.frames ? mp.frames : null, null, tcM, null);
           renderCompass();
           recomputeWhen(); return;
         }
@@ -3177,7 +3502,13 @@ function loadRadar(lat, lon, myId){
 
            Je to standardní "time-lagged ensemble" a nestojí to ani jeden
            dotaz navíc — snímky už jsou stažené. */
-        var DT = [5,10,15,20,25,30,35,40,45,50,55,60];
+        /* Osa se prodlužuje na DVĚ hodiny: kompas potřebuje intenzitu
+           u tebe v čase přiletu i pro pomalé a vzdálené buňky (70 min
+           je u fronty úplně běžné), blend ale čte jen klíče do 60 min,
+           takže se míchanka nezmění o nic. Za hodinu krok zhrubne na
+           10–15 min — tam už stejně rozhoduje spíš model než advekce. */
+        var DT = [5,10,15,20,25,30,35,40,45,50,55,60,
+                  70,80,90,100,110,120];
         var ensSpread = {};
         radarTimeline = DT.map(function(dt){
           var rKmS = smoothRadiusKm(dt);
@@ -3189,7 +3520,7 @@ function loadRadar(lat, lon, myId){
             if(!fr.patch) return;
             var ageI = Math.max(0, (Date.now()/1000 - fr.t)/60);
             var s = sampleAdvected(fr.patch, tcM.kmPerPx, vxKm, vyKm, dt + ageI, cM, cM,
-                                   rKmS/tcM.kmPerPx);
+                                   rKmS/tcM.kmPerPx, mo.quads);
             if(s == null) return;
             mimoVsem = false;
             clenove.push(s.mean + (s.max - s.mean)*pw);
@@ -3200,7 +3531,7 @@ function loadRadar(lat, lon, myId){
           var vDetail = null;
           if(detail){
             var sd = sampleAdvected(detail, tcI.kmPerPx, vxKm, vyKm, dt + frameAgeMin, cI, cI,
-                                    rKmS/tcI.kmPerPx);
+                                    rKmS/tcI.kmPerPx, mo.quads);
             if(sd != null){
               mimoVsem = false;
               vDetail = sd.mean + (sd.max - sd.mean)*pw;
@@ -3245,8 +3576,11 @@ function loadRadar(lat, lon, myId){
                        etaMin: firstHit ? firstHit.dt : null,
                        mmh: firstHit ? firstHit.mmh : persistMm};
         /* Radarový kompas: kde je nejsilnější echo v okolí, kam letí
-           a podle geometrie trajektorie přiletí k tobě, nebo tě mine. */
-        radarCompass = computeRadarCompass(ps, mo, tcM);
+           a podle geometrie trajektorie přiletí k tobě, nebo tě mine.
+           Čtvrtý argument je JEMNÝ pohyb ze zoomu 7 — kompas ho použije,
+           když je buňka blízko (viz computeRadarCompass). */
+        radarCompass = computeRadarCompass(ps, mo, tcM,
+          mp.near ? {mo: mp.near, kmPerPx: mp.kmNear} : null);
         renderCompass();
         recomputeWhen();
       });
@@ -3307,9 +3641,10 @@ function radarEchoStats(patch, kmPerPx){
   return {e:ce, n:cn, mm:mx, radiusKm:Math.max(1.6, rms)};
 }
 
-function computeRadarCompass(frames, mo, tcM){
+function computeRadarCompass(frames, mo, tcM, near){
   /* frames = [{t[s], patch}] z hrubého zoomu (6), mo = odhad pohybu
-     {vx, vy [km/min], speedKmh, spreadKmh}. Vrací stav kompasu. */
+     {vx, vy [km/min], speedKmh, spreadKmh}, near = volitelný jemný pohyb
+     ze zoomu 7 {mo, kmPerPx} pro buňky do 35 km. Vrací stav kompasu. */
   if(!frames || !frames.length) return null;
   var kmPerPx = tcM.kmPerPx;
   var reachKm = Math.round(kmPerPx * Math.floor((frames[0].patch ? frames[0].patch.n : 97)/2));
@@ -3344,23 +3679,56 @@ function computeRadarCompass(frames, mo, tcM){
   };
   if(vMm == null && VM.length) vMm = med(VM);
 
+  /* ---- ŘETĚZ BUŇKY: sledování identity ----
+     Centroid každého snímku je NEJSILNĚJŠÍ echo PŘESNĚ V TU CHVÍLI —
+     a to může být pokaždé jiná buňka (nová přeháňka vzplane vedle té
+     staré a hned má větší intenzitu). Kompas by pak drift i růst
+     počítal přes dvě různé buňky a výsledek byl hluchý.
+     Řetěz pospojuje centroidy dozadu od posledního snímku pravidlem
+     nejbližšího souseda s prahem 25 km: centroid posunutý o víc než
+     tohle za deset minut už spíš není táž buňka. Když se řetěz
+     nepodaří, nic se nerozbije — prostě se drift a růst počítají jen
+     z toho, co spolehlivě táž buňka je. */
+  var chain = null;
+  if(RAW.length >= 3){
+    var ch = [RAW[RAW.length-1]];
+    for(var ci = RAW.length-2; ci >= 0; ci--){
+      var lastC = ch[ch.length-1], cand = RAW[ci];
+      var dd = Math.sqrt((cand.e-lastC.e)*(cand.e-lastC.e)
+                       + (cand.n-lastC.n)*(cand.n-lastC.n));
+      if(dd > 25) break;                  /* mezera = jiná buňka, řetěz končí */
+      ch.push(cand);
+    }
+    if(ch.length >= 3){ ch.reverse(); chain = ch; }   /* časově vzestupně */
+  }
+
   /* ---- DRIFT BUŇKY: druhý názor na pohyb, když pole „stojí“ ----
      Block matching koreluje celé pole najednou; při vznikající konvekci
      se pole přestavuje, korelace padají pod 0,3 a rychlost se vynuluje.
      Centroid téže buňky se ale posouvá plynule, i když jen o zlomek
-     pixelu za pár minut. Theil–Sen (medián směrnic všech párů snímků)
-     z osmi snímků vytáhne drift, kterému korelační okno nestačilo —
-     a kompas pak místo „stojí“ řekne „posouvá se k severu“. */
+     pixelu za pár minut. Theil–Sen (medián směrnic párů snímků) z osmi
+     snímků vytáhne drift, kterému korelační okno nestačilo.
+
+     NOVĚ SE POČÍTÁ POUZE Z ŘETĚZU (identity): dřív bral všechny páry
+     centroidů, takže když vedle staré buňky vzplála nová, průměr
+     směrnic ukazoval "od staré k nové" — pohyb, který neudělala žádná
+     buňka. Řetěz to vylučuje; když řetěz není dost dlouhý, spadne se
+     na dřívější chování přes vše (lepší než nic). */
   if(!speedOk && RAW.length >= 4){
-    var spanMin = (RAW[RAW.length-1].t - RAW[0].t)/60;
-    if(spanMin >= 10){
+    var driftSrc = null;
+    if(chain && chain.length >= 3 && (chain[chain.length-1].t - chain[0].t)/60 >= 10){
+      driftSrc = chain;
+    } else if((RAW[RAW.length-1].t - RAW[0].t)/60 >= 10){
+      driftSrc = RAW;
+    }
+    if(driftSrc){
       var se = [], sn = [];
-      for(var pi=0; pi<RAW.length; pi++){
-        for(var pj=pi+1; pj<RAW.length; pj++){
-          var dtM = (RAW[pj].t - RAW[pi].t)/60;
+      for(var pi=0; pi<driftSrc.length; pi++){
+        for(var pj=pi+1; pj<driftSrc.length; pj++){
+          var dtM = (driftSrc[pj].t - driftSrc[pi].t)/60;
           if(dtM <= 0) continue;
-          se.push((RAW[pj].e - RAW[pi].e)/dtM);
-          sn.push((RAW[pj].n - RAW[pi].n)/dtM);
+          se.push((driftSrc[pj].e - driftSrc[pi].e)/dtM);
+          sn.push((driftSrc[pj].n - driftSrc[pi].n)/dtM);
         }
       }
       var due = med(se), dun = med(sn);
@@ -3391,17 +3759,38 @@ function computeRadarCompass(frames, mo, tcM){
     return {state:"empty", reachKm:reachKm, snow:snowy, vMm:vMm};
   }
   var ce = med(CE), cn = med(CN), mmh = med(MM), rad = med(RD);
+  /* ---- JEMNÝ POHYB PRO BLÍZKÉ BUŇKY ----
+     Když je buňka do 35 km, rozhoduje o "za kolik minut" hlavně chyba
+     rychlosti (ETA = d/v). Vektor ze zoomu 7 má díky polovičnímu pixelu
+     zhruba poloviční chybu rychlosti — a blízko se přesnost počítá
+     násobně, protože trať je krátká. Dál než 35 km jemný výřez nedosáhne,
+     tam zůstává hrubý zoom (a jeho větší dosah je stejně potřeba). */
+  if(near && near.mo && near.mo.speedKmh >= 2 && near.mo.speedKmh <= 200
+     && Math.sqrt(ce*ce + cn*cn) <= 35){
+    ue = near.mo.vx; un = -near.mo.vy; motionSrc = "field7";
+    CE = []; CN = [];
+    RAW.forEach(function(r){
+      var ageMin = Math.max(0, (nowS - r.t)/60);
+      CE.push(r.e + ue*ageMin);
+      CN.push(r.n + un*ageMin);
+    });
+    ce = med(CE); cn = med(CN);
+  }
   var d0 = Math.sqrt(ce*ce + cn*cn);            /* vzdálenost středu echa od obce */
   var u2 = ue*ue + un*un;                       /* |u|² */
   var b = ce*ue + cn*un;                        /* c·u */
   var rEff = Math.max(rad, 2.2) + 1.6;          /* poloměr buňky + hrubá kvantizace pixelu zoomu 6 */
   var speedKmh = Math.round(Math.sqrt(u2)*60);
+  /* který odhad pohybu právě vede — kvadrantový (field), jemný (field7)
+     nebo drift — aby se rozpětí ETA počítalo ze stejného zdroje jako ETA */
+  var srcMo = (motionSrc === "field") ? mo
+            : (motionSrc === "field7" && near) ? near.mo : null;
   var out = {state:"", geo:"", reachKm:reachKm, snow:snowy, mmh:mmh, radiusKm:rad,
              vMm:vMm, motionSrc:motionSrc,
              ePos:ce, nPos:cn, ue:ue, un:un,
              distKm:Math.round(d0), bearingFrom:smer8(ce, cn),
              speedKmh:speedKmh,
-             spreadKmh:(motionSrc === "field" && mo.spreadKmh != null) ? mo.spreadKmh : null,
+             spreadKmh:(srcMo && srcMo.spreadKmh != null) ? srcMo.spreadKmh : null,
              heading:speedKmh >= 1 ? smer8(ue, un) : null,
              etaMin:null, loMin:null, hiMin:null,
              missKm:null, missBearing:null, leaveMin:null};
@@ -3419,8 +3808,8 @@ function computeRadarCompass(frames, mo, tcM){
       out.etaMin = Math.max(1, Math.round((-b - Math.sqrt(disc))/u2));
       /* Rozptyl rychlosti z odhadu pohybu → rozpětí ETA (jako panel „Kdy“).
          U driftu rozptyl není — rozpětí se prostě neukáže. */
-      if(motionSrc === "field" && mo.spreadKmh != null){
-        var v = mo.speedKmh, s = Math.min(mo.spreadKmh || 0, v*0.7);
+      if(srcMo && srcMo.spreadKmh != null){
+        var v = srcMo.speedKmh, s = Math.min(srcMo.spreadKmh || 0, v*0.7);
         out.loMin = Math.max(1, Math.round(out.etaMin * v/(v+s)));
         out.hiMin = Math.max(out.loMin, Math.round(out.etaMin * v/Math.max(v-s, v*0.3)));
       }
@@ -3433,6 +3822,21 @@ function computeRadarCompass(frames, mo, tcM){
       out.missKm = Math.max(1, Math.round(dMin - rEff));
       out.missBearing = smer8(pe, pn);
       out.pe = pe; out.pn = pn;
+    }
+  }
+  /* ---- RŮST BUŇKY Z ŘETĚZU (per-buňkový, ④) ----
+     growthFactor v radarTimeline míří LAGRANGEOVSKY trend CELÉHO pole;
+     u jedné buňky je ale poctivější míra, jak sílí právě ona — řetěz
+     identity dává sekvenci jejích špiček v čase. Projekce do času
+     přiletu má stejný saturující tvar (buňka nekvetne do nekonečna,
+     po ~25 min růst vycítí). V renderCompass se pak průměruje s hodnotou
+     z časové osy — dvě nezávislé míry růstu jsou lepší než jedna. */
+  out.cellRate = null; out.cellMmAt = null;
+  if(chain && chain.length >= 3 && out.state === "hit" && out.etaMin != null){
+    var dtC = (chain[chain.length-1].t - chain[0].t)/60;
+    if(dtC >= 10 && chain[0].mm > 0.05){
+      out.cellRate = (chain[chain.length-1].mm/chain[0].mm - 1)/dtC;
+      out.cellMmAt = mmh * growthFactor(out.cellRate, out.etaMin);
     }
   }
   /* Mrholení nad obcí (≥0.1 mm/h) má přednost: verdikt říká, co je
@@ -3448,7 +3852,7 @@ function computeRadarCompass(frames, mo, tcM){
 
 function compassMmAt(dtMin, fallback){
   /* Intenzita v čase přiletu interpolovaná z vlastní advekční časové osy
-     (dt 5..60 min, zahrnuje růst/útlum i ensemble) — číslo, ne just so. */
+     (dt 5..120 min od ③, zahrnuje růst/útlum i ensemble) — číslo, ne just so. */
   var tl = radarTimeline;
   if(!tl || !tl.length) return fallback;
   for(var i=0; i<tl.length-1; i++){
@@ -3457,23 +3861,31 @@ function compassMmAt(dtMin, fallback){
       return tl[i].mmh + (tl[i+1].mmh - tl[i].mmh)*f;
     }
   }
-  return dtMin > tl[tl.length-1].dt ? null : fallback; /* za hodinu radar nevidí */
+  return dtMin > tl[tl.length-1].dt ? null : fallback; /* za dvě hodiny radar nevidí */
 }
 
 function renderCompass(){
   var el = document.getElementById("compass");
   if(!el) return;
   if(radarCoverage === "none"){
-    el.hidden = false;
-    el.innerHTML = '<div class="label">Radar</div>'
-      + '<div class="ct">'
-      + '<div class="verd">Radar sem nedosahuje.</div>'
-      + '<div class="expl">Nejbližší radary tě nezahlédnou, takže okolí nemám z čeho kreslit. O vyhlídce řeknou jen modely dole v tabulce.</div>'
-      + '</div>';
-    return;
+    /* ⑫: kde radar nedosahuje, kreslí kompas satelit GPM IMERG —
+       hrubý (10 km) a opožděný (hodiny), ale poctivý: měření, ne model.
+       Bez něj zůstává původní hláška. */
+    if(imergCompass){
+      /* padá dál společným kódem níže (viaSat) */
+    } else {
+      el.hidden = false;
+      el.innerHTML = '<div class="label">Radar</div>'
+        + '<div class="ct">'
+        + '<div class="verd">Radar sem nedosahuje.</div>'
+        + '<div class="expl">Nejbližší radary tě nezahlédnou, takže okolí nemám z čeho kreslit. O vyhlídce řeknou jen modely dole v tabulce.</div>'
+        + '</div>';
+      return;
+    }
   }
-  if(!radarCompass){ el.hidden = true; el.innerHTML = ""; return; }
-  var C = radarCompass;
+  var viaSat = (radarCoverage === "none" && imergCompass) && !radarCompass;
+  var C = viaSat ? imergCompass : radarCompass;
+  if(!C){ el.hidden = true; el.innerHTML = ""; return; }
   var RE = 46, CX = 50, CY = 50;                 /* dosah kreslený v SVG px */
   var px = function(e){ return CX + e/C.reachKm*RE; };
   var py = function(n){ return CY - n/C.reachKm*RE; };
@@ -3491,16 +3903,24 @@ function renderCompass(){
     + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF"/>';
   var verd = "", expl = "", cls = "";
   var snowTxt = C.snow ? " (sníh)" : "";
-  var src = "radar RainViewer · dosah ~" + C.reachKm + " km";
-  if(radarState && radarState !== "error" && radarState.ageMin != null) src += " · snímek " + Math.round(radarState.ageMin) + " min";
+  var src = viaSat
+    ? "satelit GPM IMERG · rozlišení ~10 km · dosah ~" + C.reachKm + " km"
+      + " · snímek až ~5 h starý (advekce to dohání, ale ber s rezervou)"
+    : "radar RainViewer · dosah ~" + C.reachKm + " km";
+  if(!viaSat && radarState && radarState !== "error" && radarState.ageMin != null) src += " · snímek " + Math.round(radarState.ageMin) + " min";
   if(C.motionSrc === "drift") src += " · pohyb z dráhy buňky";
+  if(C.motionSrc === "field7") src += " · pohyb z jemného zoomu (0,8 km/px)";
   /* REKONCILIACE: když geometrie říká „mine/stojí“, ale vlastní radarová
      osa (advekce + růst pole) práh překročí, spor se nezamlčí — přiletá
      jiná (nová) buňka, ne ta naměřená. Přesně ten rozpor z pravého
-     panelu: kompas „nedoletí“, panel „za 5–43 min“. */
+     panelu: kompas „nedoletí“, panel „za 5–43 min“.
+     Čte se jen do 60. minuty — osa sice jde teď do 120 (kvůli intenzitě
+     u pomalých buněk), ale u sporu o NEJBLIŽŠÍ hodinu je "čeká za 90 min"
+     jiná věta, ne rozpor, a řeč by se pletla. */
   var recon = "";
   if((C.state === "miss" || C.state === "standing") && radarTimeline && radarTimeline.length){
     for(var ti=0; ti<radarTimeline.length; ti++){
+      if(radarTimeline[ti].dt > 60) break;
       if(radarTimeline[ti].mmh >= 0.1){
         recon = " Radarová osa ale čeká " + (radarTimeline[ti].mmh >= 0.2 ? "déšť" : "slabé srážky")
               + " za ~<b>" + radarTimeline[ti].dt + " min</b> — nejspíš se staví nová buňka nad tebou.";
@@ -3510,7 +3930,8 @@ function renderCompass(){
   }
   if(C.state === "empty"){
     verd = "V dosahu nic."; cls = "miss";
-    expl = "V okruhu ~<b>" + C.reachKm + " km</b> radar nevidí žádné srážky — k tobě nic neletí.";
+    expl = "V okruhu ~<b>" + C.reachKm + " km</b> " + (viaSat ? "satelit" : "radar")
+         + " nevidí žádné srážky — k tobě nic neletí.";
   } else {
     /* Echo: elipsa na skutečné pozici, velikost = reálný poloměr buňky.
        U mrholí nad obcí bez zachytitelné buňky se elipsa nekreslí. */
@@ -3538,6 +3959,11 @@ function renderCompass(){
     } else if(C.state === "hit"){
       verd = "Přiletí k tobě."; cls = "hit";
       var mmh = compassMmAt(C.etaMin, C.mmh);
+      /* Dvě nezávislé míry intenzity v čase přiletu: advekční osa
+         (růst CELÉHO pole, ensemble, vyhlazení) a per-buňková projekce
+         z řetězu identity. Průměr, protože každá ví něco, co druhá neví. */
+      if(mmh != null && C.cellMmAt != null) mmh = 0.5*mmh + 0.5*C.cellMmAt;
+      else if(C.cellMmAt != null) mmh = C.cellMmAt;
       var etaTxt = C.etaMin <= 60 ? "~" + C.etaMin + " min" : "~" + (Math.round(C.etaMin/6)/10) + " h";
       expl = "Nejsilnější echo <b>" + C.distKm + " km " + C.bearingFrom
         + "</b> od tebe letí <b>" + C.speedKmh + " km/h</b> k " + C.heading
@@ -3545,7 +3971,7 @@ function renderCompass(){
       if(C.hiMin > C.loMin && C.hiMin !== C.etaMin) expl += " (" + C.loMin + "–" + C.hiMin + ")";
       expl += mmh != null
         ? ". U tebe čekám ~<b>" + fmtMM(mmh) + " mm/h</b>" + snowTxt + "."
-        : ". Intenzitu u tebe v takové dálce už neumím odhadnout.";
+        : ". Intenzitu takhle daleko dopředu už neumím odhadnout.";
     } else if(C.state === "over"){
       verd = "Právě nad tebou."; cls = "hit";
       expl = "Echo je přímo nad tebou, ~<b>" + fmtMM(C.mmh) + " mm/h</b>" + snowTxt + ".";
@@ -3581,7 +4007,7 @@ function renderCompass(){
     }
   }
   svg += '</svg>';
-  el.innerHTML = '<div class="label">Radar</div>' + svg
+  el.innerHTML = '<div class="label">' + (viaSat ? "Satelit" : "Radar") + '</div>' + svg
     + '<div class="ct"><div class="verd ' + cls + '">' + verd + '</div>'
     + '<div class="expl">' + expl + '</div>'
     + '<div class="src">' + src + '</div></div>';
@@ -3594,17 +4020,62 @@ function renderCompass(){
    47–52 km/h, je odhad příchodu spolehlivý. Když vyjde 20–90 km/h, je to
    hádání — a uživatel má právo to vědět. Vracejí se i jednotlivé posuny,
    protože z nich jde spočítat, jestli pole cestou sílí (viz níže). */
-function estimateMotion(patches, kmPerPx, maxShift){
+/* Výřez jednoho kvadrantu (2×2 mřížka) z celého patche. Data se KOPÍRUJÍ,
+   neodkazují — korelace čte přímé indexování a podpatch musí být spojitý
+   blok v row-major pořadí. Sníh chybí u satelitních patchů → false. */
+function quadrantPatch(patch, qx, qy){
+  var n = patch.n, half = Math.floor(n/2);
+  var x0 = qx ? (n - half) : 0, y0 = qy ? (n - half) : 0;
+  var d = patch.data, mm = patch.mm, sn = patch.snow;
+  var nd = new Array(half*half), nmm = new Array(half*half), nsn = new Array(half*half);
+  for(var y=0; y<half; y++){
+    for(var x=0; x<half; x++){
+      var si = (y0+y)*n + (x0+x), di = y*half + x;
+      nd[di] = d[si]; nmm[di] = (mm ? mm[si] : null); nsn[di] = (sn ? sn[si] : false);
+    }
+  }
+  return {data:nd, mm:nmm, snow:nsn, n:half};
+}
+/* Odhad posunu pole mezi snímky — celé pole + ČTYŘI KVADRANTY (2×2).
+   Jeden vektor pro 150km výřez je průměr přes věci, které letí různě —
+   nejčastěji malá konvektivní buňka vedle klidné oblohy. Kvadranty dají
+   pohyb "po kusech" a sampleAdvected() si pak vybere vektor podle toho,
+   ODKUD přilétající echo přiletá. Stojí to 5× víc korelací na pár snímků,
+   proto běží korelace normálně ve workeru (motionFromFrames) a jen
+   v nouzovém synchronním režimu na hlavním vlákně. */
+function estimateMotion(patches, kmPerPx, maxShift, priorV){
+  /* priorV = volitelný hrubý odhad {vx, vy} [km/min]: když ho známe,
+     hledá se posun jen v jeho okolí (±maxShift px od tipu). Používá
+     dvouškálový pohyb — jemný zoom by při volném okně pokryl jen zlomek
+     rychlostí, protože jeho pixel je dvakrát menší. Kvadranty se
+     v priorovacím režimu nepočítají — tam jde o jedinou pečlivou korelaci. */
   var vxs = [], vys = [], pairs = [];
+  var qvx = [[],[],[],[]], qvy = [[],[],[],[]], qncc = [[],[],[],[]];
   for(var i=1;i<patches.length;i++){
     var dtMin = (patches[i].t - patches[i-1].t)/60;
     if(dtMin <= 0) continue;
-    var sh = estimateShift(patches[i-1].patch, patches[i].patch, maxShift);
+    var cx = priorV ? Math.round(priorV.vx*dtMin/kmPerPx) : null;
+    var cy = priorV ? Math.round(priorV.vy*dtMin/kmPerPx) : null;
+    var sh = cx != null ? estimateShift(patches[i-1].patch, patches[i].patch, maxShift, cx, cy)
+                        : estimateShift(patches[i-1].patch, patches[i].patch, maxShift);
     if(!sh) continue;
     vxs.push(sh.dx*kmPerPx/dtMin);          /* rychlost ze sub-pixelového posunu */
     vys.push(sh.dy*kmPerPx/dtMin);
     /* Do trendu jde CELOČÍSELNÝ posun — používá se jako index do pole. */
     pairs.push({i:i, dx:sh.dxi, dy:sh.dyi, dtMin:dtMin, ncc:sh.ncc});
+    if(priorV) continue;
+    for(var qy=0; qy<2; qy++){
+      for(var qx=0; qx<2; qx++){
+        var qi = qy*2 + qx;
+        var qa = quadrantPatch(patches[i-1].patch, qx, qy);
+        var qb = quadrantPatch(patches[i].patch, qx, qy);
+        var qh = estimateShift(qa, qb, maxShift);
+        if(!qh) continue;
+        qvx[qi].push(qh.dx*kmPerPx/dtMin);
+        qvy[qi].push(qh.dy*kmPerPx/dtMin);
+        qncc[qi].push(qh.ncc);
+      }
+    }
   }
   if(!vxs.length) return null;
   var speeds = vxs.map(function(vx,k){
@@ -3618,8 +4089,70 @@ function estimateMotion(patches, kmPerPx, maxShift){
   var spread = speeds.length >= 2
     ? (speeds[speeds.length-1] - speeds[0]) / 2
     : null;
+  var quads = [];
+  for(var q=0; q<4; q++){
+    if(!qvx[q].length){ quads.push(null); continue; }
+    quads.push({vx: med(qvx[q].slice().sort(function(a,b){ return a-b; })),
+                vy: med(qvy[q].slice().sort(function(a,b){ return a-b; })),
+                n: qvx[q].length,
+                ncc: med(qncc[q].slice().sort(function(a,b){ return a-b; }))});
+  }
   return {vx: med(sx), vy: med(sy), samples: vxs.length,
-          speedKmh: med(speeds), spreadKmh: spread, pairs: pairs};
+          speedKmh: med(speeds), spreadKmh: spread, pairs: pairs, quads: quads};
+}
+/* ===== WEB WORKER PRO KORELACE (NCC) =====
+   Odhad pohybu teď stojí 5 korelací na pár snímků (celé pole + 4 kvadranty)
+   po 8 snímcích — na mobilu řádově stovky milisekund. Všechny tyhle smyčky
+   jsou čistá aritmetika nad poli, žádný DOM, takže patří do workera: UI
+   zůstane plynulé i na pomalém telefonu a tiles se mezitím stahují dál.
+
+   Trik, díky kterému se worker nemůže rozejit s hlavním vláknem: zdroják
+   workera se POSTAVÍ Z VLASTNÍCH FUNKCÍ (toString()) — parabolicPeak,
+   estimateShift, quadrantPatch i estimateMotion putují do Blobu doslova
+   v té verzi, ve které právě běží appka. Žádná druhá kopie kódu, která
+   by zestárnula. Fallback: bez Worker/Blob/URL (staří prohlížeči, nabídky
+   CSP) se prostě spočítá synchronně — stejný výsledek, jen to chvíli trvá. */
+var motionWorker = null, motionQueue = [];
+function motionWorkerSrc(){
+  return [parabolicPeak.toString(), estimateShift.toString(),
+          quadrantPatch.toString(), estimateMotion.toString(),
+          "self.onmessage = function(ev){",
+          "  try{",
+          "    var r = estimateMotion(ev.data.patches, ev.data.kmPerPx, ev.data.maxShift);",
+          "    self.postMessage({ok:true, res:r});",
+          "  }catch(e){ self.postMessage({ok:false, msg:String(e)}); }",
+          "};"].join("\n");
+}
+function motionFromFrames(patches, kmPerPx, maxShift){
+  return new Promise(function(resolve){
+    var fallback = function(){ resolve(estimateMotion(patches, kmPerPx, maxShift)); };
+    if(typeof Worker === "undefined" || typeof Blob === "undefined"
+       || typeof URL === "undefined" || !URL.createObjectURL){ fallback(); return; }
+    if(!motionWorker){
+      try{
+        motionWorker = new Worker(URL.createObjectURL(
+          new Blob([motionWorkerSrc()], {type: "text/javascript"})));
+        /* worker zpracovává joby FIFO; výsledek si každý job přebere sám */
+        motionWorker.onmessage = function(ev){
+          var job = motionQueue.shift();
+          if(job) job(ev.data && ev.data.ok ? (ev.data.res || null) : null);
+        };
+        motionWorker.onerror = function(){
+          var job = motionQueue.shift();
+          if(job) job(null);
+        };
+      }catch(e){ fallback(); return; }
+    }
+    /* posílají se jen pole čísel a t — patche můžou být velké, ale
+       structured clone je levnější než JSON a worker je stejně jediný */
+    var msg = {patches: patches.map(function(p){
+                 return {t:p.t, patch:(p.patch ? {data:p.patch.data, mm:p.patch.mm,
+                       snow:p.patch.snow, n:p.patch.n} : null)};
+               }), kmPerPx:kmPerPx, maxShift:maxShift};
+    motionQueue.push(function(res){ (res != null) ? resolve(res) : fallback(); });
+    try{ motionWorker.postMessage(msg); }
+    catch(e){ motionQueue.pop(); fallback(); }
+  });
 }
 /* Sílí, nebo slábne? — LAGRANGEOVSKY, tedy podél trajektorie.
 
@@ -3696,10 +4229,40 @@ function growthFactor(rate, dtMin){
    se táhne od špičky k plošnému průměru — zjednodušená obdoba škálové
    kaskády, na které stojí provozní nowcasty (S-PROG, STEPS, PySTEPS).
    Vrací se obojí (`max` i `mean`), rozhodnutí o mixu dělá volající.     */
-function sampleAdvected(patch, kmPerPx, vx, vy, dtMin, cx, cy, rPx){
+function sampleAdvected(patch, kmPerPx, vx, vy, dtMin, cx, cy, rPx, quads){
   if(!patch) return null;
   var n = patch.n;
   var dxPx = (vx*dtMin)/kmPerPx, dyPx = (vy*dtMin)/kmPerPx;
+  /* ---- BLOKOVÝ OPTICAL FLOW ----
+     Dřív se celý výřez posouval JEDNÝM vektorem — průměrem přes věci,
+     které letí různě. Teď má korelace k dispozici vektory čtyř
+     kvadrantů a tady se vybere ten, ODKUD vzorek reálně přilétá:
+     zdrojový bod se nejprve najde s průměrným vektorem a v něm se
+     Gaussovsky (sigma = půlka výřezu, žádné hrany mezi kvadranty)
+     vyhodnotí lokální pole. Jedna iterační oprava stačí — vektor
+     se mezi kvadranty mění o dost míň, než je délka samotného skoku. */
+  if(quads && quads.length){
+    var halfP = Math.floor(n/2);
+    var fx0 = cx - dxPx, fy0 = cy - dyPx;
+    var ctr = [halfP/2, n - halfP/2];
+    var wsum = 0, lvx = 0, lvy = 0;
+    for(var qy=0; qy<2; qy++){
+      for(var qx=0; qx<2; qx++){
+        var q = quads[qy*2 + qx];
+        if(!q) continue;
+        var ddx = fx0 - ctr[qx], ddy = fy0 - ctr[qy];
+        var wq = Math.exp(-(ddx*ddx + ddy*ddy)/(2*halfP*halfP));
+        wsum += wq; lvx += wq*q.vx; lvy += wq*q.vy;
+      }
+    }
+    if(wsum > 0){
+      var nvx = lvx/wsum, nvy = lvy/wsum;
+      if(isFinite(nvx) && isFinite(nvy) && (Math.abs(nvx - vx) > 1e-9 || Math.abs(nvy - vy) > 1e-9)){
+        dxPx = (nvx*dtMin)/kmPerPx;
+        dyPx = (nvy*dtMin)/kmPerPx;
+      }
+    }
+  }
   var fx = cx - dxPx, fy = cy - dyPx;
 
   /* --- bodová hodnota bilineárně --- */
@@ -3845,6 +4408,9 @@ function phaseShiftMin(modelOnset, radarOnset, motion){
   return Math.max(0, Math.min(45, modelOnset - radarOnset));
 }
 function blendWeights(dt, cc){
+  /* Režim konvekce se posuzuje JEDNOU na volání — uvnitř getBlendMult by se
+     počítal sedmkrát po pořádku a mohl by se i rozjet v čase mezi klíči. */
+  var regime = blendRegimeKey();
   var w = {
     radar:   Math.exp(-dt/40),          /* vlastní advekce z dlaždic */
     rvcast:  0.85*Math.exp(-dt/55),     /* nowcast RainVieweru — cizí optical flow */
@@ -3868,7 +4434,7 @@ function blendWeights(dt, cc){
      je multiplikátor 1 — váhy zůstávají ruční. */
   if(cc){
     ["radar","rvcast","natcast","metno","regio","nowcast","model"].forEach(function(k){
-      w[k] = w[k] * getBlendMult(cc, dt, k);
+      w[k] = w[k] * getBlendMult(cc, dt, k, regime);
     });
   }
   return w;
@@ -3955,7 +4521,12 @@ function parabolicPeak(cm1, c0, cp1){
    Korelační funkce má ale kolem maxima hladký vrchol. Proložením paraboly
    třemi sousedními hodnotami se maximum najde MEZI pixely — stejný trik,
    jaký používá subpixelový PIV i optical flow.                          */
-function estimateShift(prev, cur, maxShift){
+function estimateShift(prev, cur, maxShift, cx, cy){
+  /* cx, cy = volitelný střed hledání (default 0 = klasika). Používá se,
+     když už hrubý odhad řekne, kam polarity zhruba letí, a jemný zoom má
+     hledat jen v okolí toho tipu (viz dvouškálový pohyb v loadRadar). */
+  if(cx == null) cx = 0;
+  if(cy == null) cy = 0;
   if(!prev || !cur || prev.n !== cur.n) return null;
   var n = prev.n, best = null, bestScore = -2;
   var maxCnt = 0;
@@ -3963,8 +4534,8 @@ function estimateShift(prev, cur, maxShift){
   var nccGrid = new Array(W*W);                  /* korelační plocha pro sub-pixel */
   for(var gi=0; gi<nccGrid.length; gi++) nccGrid[gi] = null;
 
-  for(var sy=-maxShift; sy<=maxShift; sy++){
-    for(var sx=-maxShift; sx<=maxShift; sx++){
+  for(var sy=cy-maxShift; sy<=cy+maxShift; sy++){
+    for(var sx=cx-maxShift; sx<=cx+maxShift; sx++){
       var sa=0, sb=0, sab=0, saa=0, sbb=0, cnt=0;
       for(var y=maxShift; y<n-maxShift; y+=2){
         for(var x=maxShift; x<n-maxShift; x+=2){
@@ -3982,7 +4553,7 @@ function estimateShift(prev, cur, maxShift){
       var den = Math.sqrt(Math.max(0, cnt*saa - sa*sa) * Math.max(0, cnt*sbb - sb*sb));
       if(den <= 0) continue;
       var ncc = num/den;                           /* −1 … +1 */
-      nccGrid[(sy+maxShift)*W + (sx+maxShift)] = ncc;
+      nccGrid[(sy-(cy-maxShift))*W + (sx-(cx-maxShift))] = ncc;
       var score = ncc * Math.sqrt(cnt);            /* širší překryv váží víc */
       if(score > bestScore){ bestScore = score; best = {dx:sx, dy:sy, ncc:ncc, cnt:cnt}; }
     }
@@ -3996,7 +4567,7 @@ function estimateShift(prev, cur, maxShift){
      nesmyslem — tam se zpřesnění vynechá. Celočíselný posun se zachová
      zvlášť: `estimateFieldTrend()` s ním indexuje pole a desetinné číslo
      by z něj udělalo `undefined`. */
-  var gx = best.dx + maxShift, gy = best.dy + maxShift;
+  var gx = best.dx - (cx-maxShift), gy = best.dy - (cy-maxShift);
   var ddx = 0, ddy = 0;
   if(gx > 0 && gx < W-1){
     ddx = parabolicPeak(nccGrid[gy*W + gx-1], best.ncc, nccGrid[gy*W + gx+1]);
@@ -5291,14 +5862,28 @@ function wmsncSeries(nowMs){
    a jako varování, když radar mlčí, ale nad hlavou se něco staví.     */
 
 var EUMET_WMS = "https://view.eumetsat.int/geoserver/wms";
-var EUMET_LAYER_CANDS = ["meteosat:msg_ir108", "meteosat:msg_ir108_3995",
+/* RSS (Rapid Scan) — Meteosat-11 skenuje Evropu po 5 minutách místo 15.
+   To pro nowcasting znamená tři červrtě čekání méně: buňka, která vzniká,
+   se na třech snímcích za 15 minut jeví jako "trend", na 5min řadě jako
+   "růst přímo před očima". Jména RSS vrstev v EUMETView nejsou stejně
+   dokumentovaná jako plnodiskové, proto se zkoušejí PRVÍ a při neúspěchu
+   (GetMap nevrátí pixel) se seznam tiše propadá na ověřené plné disky. */
+var EUMET_LAYER_CANDS = ["meteosat:msg_rss_ir108", "meteosat:rss_ir108",
+                         "meteosat:msg_ir108", "meteosat:msg_ir108_3995",
                          "meteosat:msg_convection", "meteosat:msg_cth"];
 /* Meteosat-0° vidí Evropu, Afriku a Atlantik. Za okrajem disku je šum. */
 var EUMET_AREA = {latMin:-60, latMax:70, lonMin:-60, lonMax:60};
 var EUMET_HALFKM = 60;      /* širší výřez — konvekce se staví v desítkách km */
 var EUMET_PX = 15;
-var EUMET_FRAMES = 4;       /* kolik snímků zpět na trend */
+var EUMET_FRAMES = 4;       /* kolik snímků zpět na trend (plný disk) */
 var EUMET_STEP_MIN = 15;    /* MSG plný disk chodí po 15 minutách */
+/* RSS varianta: 5min kroky, kratší zpoždění i větší počet snímků, ať má
+   trend stejnou časovou roztez jako plný disk. Všechno se odvozuje od
+   toho, jaká vrstva nakonec vyhrála kandidáty výše. */
+function eumetIsRss(layer){ return !!(layer && layer.indexOf("rss") >= 0); }
+function eumetStepFor(layer){ return eumetIsRss(layer) ? 5 : EUMET_STEP_MIN; }
+function eumetFramesFor(layer){ return eumetIsRss(layer) ? 6 : EUMET_FRAMES; }
+function eumetLagMsFor(layer){ return (eumetIsRss(layer) ? 6 : 20)*60000; }
 
 var eumetState = null;      /* {ordNow, ordMin, trend, coolRate, layer, ageMin} | "off" | "error" */
 var eumetNote = "";
@@ -5319,9 +5904,12 @@ function eumetUrl(layer, lat, lon, validMs){
     + "&WIDTH=" + EUMET_PX + "&HEIGHT=" + EUMET_PX
     + "&FORMAT=image/png&TRANSPARENT=TRUE&TIME=" + isoZ(validMs);
 }
-function eumetBaseMs(){
-  /* 15minutový raster plus rezerva na zpracování a přenos */
-  return Math.floor((Date.now() - 20*60000) / (EUMET_STEP_MIN*60000)) * (EUMET_STEP_MIN*60000);
+function eumetBaseMs(layer){
+  /* krok rastru plus rezerva na zpracování a přenos — u RSS poloviční,
+     protože zpracování 5min snímku trvá i pět minut (RSS je nejpilnější
+     režim, co EUMETSAT provozuje) */
+  var step = eumetStepFor(layer) * 60000;
+  return Math.floor((Date.now() - eumetLagMsFor(layer)) / step) * step;
 }
 function eumetLoadScale(layer){
   if(eumetScale !== undefined) return Promise.resolve(eumetScale);
@@ -5343,8 +5931,10 @@ function loadEumetsat(lat, lon, myId){
     eumetState = "off"; eumetNote = "GIBS tuhle oblast pokrývá (umí i kelviny)"; return;
   }
 
-  var base = eumetBaseMs();
+  var base = eumetBaseMs(null);
   function tryLayer(i){
+    /* výběr vrstvy se jednou za session najde a pamatuje — jinak by každou
+       změbu obce appka zdržovala sondováním mrtvých jmen vrstev */
     if(eumetLayerOk) return Promise.resolve(eumetLayerOk);
     if(i >= EUMET_LAYER_CANDS.length) return Promise.resolve(null);
     var L = EUMET_LAYER_CANDS[i];
@@ -5361,14 +5951,18 @@ function loadEumetsat(lat, lon, myId){
       eumetNote = "žádná vrstva Meteosatu nevrátila obrázek (název vrstvy, nebo chybí CORS)";
       return;
     }
+    /* Vrstva byla hledána s obecným krokem; teď, když víme, jestli jde o
+       RSS (5 min) nebo plný disk (15 min), se základní čas přepočte
+       na její raster — jinak by RSS snímky chodily o čtvrt hodiny vedle. */
+    base = eumetBaseMs(layer);
     return eumetLoadScale(layer).then(function(scale){
       if(isStale(myId)) return;
       if(!scale){
         eumetState = "error"; eumetNote = "legenda EUMETView se nenačetla";
         return;
       }
-      return Promise.all([0,1,2,3].slice(0, EUMET_FRAMES).map(function(k){
-        var ms = base - k*EUMET_STEP_MIN*60000;
+      return Promise.all([0,1,2,3,4,5].slice(0, eumetFramesFor(layer)).map(function(k){
+        var ms = base - k*eumetStepFor(layer)*60000;
         return wmsncReadPx(eumetUrl(layer, lat, lon, ms)).then(function(px){
           if(!px) return null;
           /* U IR je zajímavý NEJCHLADNĚJŠÍ vrchol ve výřezu. Který konec
@@ -5430,6 +6024,127 @@ function eumetGrowthNudge(){
   if(eumetState.trend === "roste") return 1.12;
   if(eumetState.trend === "slábne") return 0.92;
   return 1;
+}
+
+/* ==================== BLESKY (Blitzortung.org) ====================
+
+   K ČEMU. Radar vidí kapky, modely počítají CAPE — ale žádný z nich neříká
+   "nad tebou už to PRÁSKÁ". Komunitní síť Blitzortung.org vysílá každý
+   detekovaný úder blesku přes WebSocket prakticky v reálném čase. Když
+   údery padají blízko, konvektivní předpověď se potvrzuje sama — to je
+   pozorování, ne model.
+
+   JAK TO FUNGUJE (reverse-engineerované, žádné oficiální API):
+   připojí se na wss zrcadla (port 443, cesta /), po otevření se pošle
+   {"a":111} — 111 je Evropa — a každá zpráva je JEDEN úder, ovšem
+   zabalný per-message LZW kompresí na kódových bodech. Dekodér níže je
+   port dekodéru z live mapy Blitzortungu (lbr.js); po rozbalení je to
+   JSON {"lat","lon","time" (unix ns),"pol",…}. Zprávy bez souřadnic
+   (keepalive) se tiše zahazují. HTTP rozhraní vyžaduje login — nepoužívá.
+
+   POCTIVOST: blesky jen DOPLŇUJÍ text, nikdy nemění čísla — je to
+   potvrzení "konvekce skutečně běží", které se ukáže u verdiktu.
+   Bez konvektivního potenciálu (CAPE < 800 J/kg, bleskový potenciál < 5)
+   se spojení vůbec neotevírá: za klidného počasí nemá smysl držet
+   otevřený socket. Selže-li zrcadlo třikrát, appka to vzdá do příštího
+   otevření — žádné nekonečné reconnect smyčky. */
+var BLITZ_HOSTS = ["wss://ws1.blitzortung.org", "wss://ws7.blitzortung.org"];
+var BLITZ_RADIUS_KM = 200;   /* zajímají nás bouřky v dohledu, ne celá Evropa */
+var BLITZ_GIVEUP = 3;
+var blitzState = null;       /* {host, n10, n60, lastKm, lastPol} | "error" | null */
+var blitzWs = null, blitzTries = 0, blitzHostIdx = 0, blitzHits = [];
+var blitzLastRenderMs = 0, blitzStarted = false;
+
+function blitzLzwDecode(s){
+  /* kódy 0–255 = literální bajt, ≥256 = odkaz do slovníku budovaného
+     během dekódování; KwKwK případ (odkaz na položku, která se právě
+     definuje) = f + poslední znak. Práce je na kódových bodech, protože
+     slovník vstupuje kompresor přes UTF-8 znaky. */
+  if(!s || !s.length) return null;
+  var cps = [], i = 0;
+  while(i < s.length){
+    var cp = s.codePointAt(i);
+    cps.push(cp);
+    i += (cp > 0xFFFF) ? 2 : 1;
+  }
+  if(!cps.length || cps[0] >= 256) return null;
+  var out = [String.fromCodePoint(cps[0])];
+  var dict = [], f = String.fromCodePoint(cps[0]), c = cps[0] & 255;
+  for(var b = 1; b < cps.length; b++){
+    var code = cps[b], a;
+    if(code < 256){ a = String.fromCodePoint(code); }
+    else {
+      var idx = code - 256;
+      a = (idx < dict.length) ? dict[idx] : (f + String.fromCharCode(c));
+    }
+    out.push(a);
+    var nc = a.codePointAt(0);
+    dict.push(f + String.fromCodePoint(nc));
+    f = a; c = nc;
+  }
+  return out.join("");
+}
+function blitzCounts(lat, lon){
+  var now = Date.now(), n10 = 0, n60 = 0, nearest = null;
+  blitzHits.forEach(function(h){
+    var age = now - h.ms;
+    if(age > 60*60000) return;
+    n60++;
+    if(age <= 10*60000) n10++;
+    if(nearest == null || h.km < nearest) nearest = h.km;
+  });
+  return {n10:n10, n60:n60, nearestKm:nearest};
+}
+function blitzNote(){
+  if(!blitzState || blitzState === "error") return "";
+  if(!blitzState.n60) return "";
+  var km = (blitzState.lastKm != null) ? " Poslední úder " + Math.round(blitzState.lastKm) + " km." : "";
+  return " ⚡ Blesky potvrzují bouřku: <b>" + blitzState.n10 + "</b> úderů za 10 min"
+       + " (za hodinu " + blitzState.n60 + ") do " + BLITZ_RADIUS_KM + " km." + km;
+}
+function blitzMaybeStart(lat, lon){
+  if(blitzStarted || blitzTries >= BLITZ_GIVEUP) return;
+  /* Jen když na to má atmosféra: bez potenciálu je socket zbytečný. */
+  var cape = (stormRisk && typeof stormRisk.cape === "number") ? stormRisk.cape : 0;
+  var lp   = (stormRisk && typeof stormRisk.lightning === "number") ? stormRisk.lightning : 0;
+  if(cape < 800 && lp < 5) return;
+  blitzStarted = true;
+  (function connect(){
+    if(blitzTries >= BLITZ_GIVEUP){ blitzState = "error"; return; }
+    var ws;
+    try{ ws = new WebSocket(BLITZ_HOSTS[blitzHostIdx % BLITZ_HOSTS.length]); }
+    catch(e){ blitzState = "error"; return; }
+    blitzWs = ws;
+    ws.onopen = function(){
+      blitzTries = 0;                          /* spojené zrcadlo vynuluje počítadlo smůl */
+      try{ ws.send('{"a":111}'); }catch(e){}    /* 111 = Evropa */
+    };
+    ws.onmessage = function(ev){
+      try{
+        var txt = blitzLzwDecode(String(ev.data));
+        if(!txt) return;
+        var o = JSON.parse(txt);
+        if(o.lat == null || o.lon == null) return;   /* keepalive, ne úder */
+        var d = distKm(lat, lon, o.lat, o.lon);
+        if(d > BLITZ_RADIUS_KM) return;
+        var tMs = (o.time != null) ? o.time/1e6 : Date.now();  /* ns → ms */
+        blitzHits.push({ms: tMs, km: d, pol: o.pol});
+        if(blitzHits.length > 400) blitzHits = blitzHits.slice(-400);
+        var c = blitzCounts(lat, lon);
+        blitzState = {host: BLITZ_HOSTS[blitzHostIdx % BLITZ_HOSTS.length],
+                      n10: c.n10, n60: c.n60, nearestKm: c.nearestKm,
+                      lastKm: d, lastPol: o.pol};
+        /* úderů může přijít deset za sekundu — render se nepřekresluje
+           kvůli každému, ale nejvýš jednou za minutu */
+        if(Date.now() - blitzLastRenderMs > 60000){
+          blitzLastRenderMs = Date.now();
+          recomputeWhen();
+        }
+      }catch(e){ /* jedny špatné zprávy nesmí zřítit celý modul */ }
+    };
+    ws.onclose = function(){ blitzTries++; blitzHostIdx++; connect(); };
+    ws.onerror = function(){ try{ ws.close(); }catch(e){} };
+  })();
 }
 
 /* ==================== DRUŽICE (NASA GIBS) ====================
@@ -5686,6 +6401,205 @@ function satVerifyAgainstMetar(){
   if(!obsMetar || obsMetar === "error") return;
   satRecordOutcome(satState.tbMin != null && satState.tbMin <= SAT_TB_CONVECTIVE,
                    metarHasPrecip(obsMetar.wx));
+}
+
+/* ==================== GPM IMERG — SRÁŽKY TAM, KDE RADAR NEDOSÁHNE ====================
+
+   PROČ. Radar pokrývá pevninu bohatých zemí; Sahel, Amazonie, Kavkaz či
+   Islandský oceán zůstávají pro "bude pršet?" bez pomoci. NASA GPM IMERG
+   slučuje mikrovlnné sondy celé družicové konstelace do globálního pole
+   srážek v mm/h každou půlhodinu, 0,1° (~10 km) — dost hrubé, ale je to
+   MĚŘENÍ po celém světě. GIBS to publikuje jako dlaždice přesně ve
+   formátu, který appka už umí číst (readSatPatch), jen s jinou paletou
+   a jiným rastrem času.
+
+   POCTIVOST (tohle se nezapře):
+   · latence: IMERG v GIBS běžně zaostává ~5–6 hodin (Worldview to říká
+     narovinu). Kompenzuje se to advekcí posunutou o stáří snímku —
+     trajektorie buňky se extrapoluje do současnosti — ale chyba roste
+     s každým dnem životnosti buňky, proto rozpětí u satelitního kompasu
+     neexistuje a text mluví o "odhadu z dálky";
+   · rozlišení ~10 km: přeháňka pod tímto rozlišením neexistuje, kompas
+     vidí jen buňky a fronty velikosti okresu;
+   · váhy: IMERG NIKDY nemluví do blendu ani do verdiktu — je to jen
+     obrázková informace "co krouží v okolí", vykreslená stejným
+     kompasem. Jediné, co z něj appka vyvozuje, je vidětelné na place.
+
+   PALETA se NEHÁDÁ stejně jako u IR: NASA publikuje XML, tady se ale
+   čekají milimetry za hodinu (0–150), ne kelviny. Nesedí-li rozsah,
+     modul se nepoužije. */
+var IMERG_LAYERS = ["GPM_3IMERGHH"];   /* kandidáti vrstev — první, co vrátí data, vyhrává */
+var IMERG_Z = 5;                       /* ~3,2 km/px na 49° — u 10km dat dvojnásobný nadvzorek,
+                                          dosah ~153 km: fronty se mají kde otočit */
+var IMERG_R = 48;                      /* výřez ±48 px (97×97) */
+var IMERG_MAX_AGE_H = 7;               /* starsni snímky už nejsou pro nowcast nic */
+var IMERG_FRAMES = 4;                  /* 2 h historie na pohyb (půlhodinové kroky) */
+var imergNote = "";
+var imergColormapCache = {};
+
+function imergTimeStr(ms){
+  /* IMERG je půlhodinový produkt — zaokrouhlení na 30 min, ne na 10. */
+  var d = new Date(Math.floor(ms/1800000)*1800000);
+  function p(x){ return (x<10?"0":"")+x; }
+  return d.getUTCFullYear()+"-"+p(d.getUTCMonth()+1)+"-"+p(d.getUTCDate())
+       + "T"+p(d.getUTCHours())+":"+p(d.getUTCMinutes())+":00Z";
+}
+function loadImergColormap(layerId){
+  if(imergColormapCache[layerId] !== undefined) return Promise.resolve(imergColormapCache[layerId]);
+  return fetchT("https://gibs.earthdata.nasa.gov/colormaps/v1.3/"+layerId+".xml", null, 12000)
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); })
+    .then(function(txt){
+      var doc = new DOMParser().parseFromString(txt, "text/xml");
+      var nodes = doc.getElementsByTagName("ColorMapEntry");
+      var entries = [];
+      for(var i=0;i<nodes.length;i++){
+        var el = nodes[i];
+        if((el.getAttribute("transparent")||"") === "true") continue;
+        var rgb = (el.getAttribute("rgb")||"").split(",").map(Number);
+        var raw = el.getAttribute("value") || el.getAttribute("sourceValue") || "";
+        var nums = raw.match(/-?\d+(\.\d+)?/g);
+        if(rgb.length !== 3 || !nums || !nums.length) continue;
+        var lo = parseFloat(nums[0]), hi = nums.length>1 ? parseFloat(nums[1]) : lo;
+        if(!isFinite(lo) || !isFinite(hi)) continue;
+        if(Math.abs(lo) > 9000) continue;                 /* -9999 = chybí data */
+        entries.push({r:rgb[0], g:rgb[1], b:rgb[2], v:(lo+hi)/2});
+      }
+      if(entries.length < 8) throw new Error("paleta má jen "+entries.length+" položek");
+      var vs = entries.map(function(e){ return e.v; });
+      var mn = Math.min.apply(null, vs), mx = Math.max.apply(null, vs);
+      /* Kontrola rozsahu: mm/h. Ne kelviny, ne dBZ — jiná veličina → nepoužít. */
+      if(mn < -0.01 || mn > 5 || mx < 5 || mx > 160)
+        throw new Error("rozsah "+mn.toFixed(1)+"–"+mx.toFixed(1)+" nesedí na mm/h");
+      var cm = {entries:entries};
+      imergColormapCache[layerId] = cm;
+      return cm;
+    })
+    .catch(function(e){
+      console.warn("[bp] paleta IMERG se nenačetla ("+layerId+"): "+(e&&e.message||e));
+      imergColormapCache[layerId] = null;
+      return null;
+    });
+}
+/* Nejbližší barva v paletě → mm/h. Bez fyzikálního filtru rozsahu: ten
+   dělá už validace palety; tady jen horní pojistka proti šumu. */
+function imergDecode(cm, r, g, b){
+  var best = null, bestD = 1e9;
+  for(var i=0;i<cm.entries.length;i++){
+    var e = cm.entries[i];
+    var d = (e.r-r)*(e.r-r) + (e.g-g)*(e.g-g) + (e.b-b)*(e.b-b);
+    if(d < bestD){ bestD = d; best = e; }
+  }
+  if(bestD > 3*40*40) return null;                 /* barva v paletě není */
+  if(best.v < 0 || best.v > 150) return null;
+  return best.v;
+}
+/* Načte výřez a dekóduje na mm/h — stejný formát patche jako radar,
+   aby mohl jet stejný kompas (computeRadarCompass je na zdroj agnostická).
+   Kromě mm se dosazuje i pseudodBZ (inverzní Marshall–Palmer), protože
+   korelační okno estimateShift pracuje v dBZ a NCC v logaritmické
+   škále méně zpychuje na špičkách než v mm. */
+function readImergPatch(url, px, py, r, cm){
+  return new Promise(function(resolve){
+    var img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function(){
+      try{
+        var c = document.createElement("canvas");
+        c.width = 256; c.height = 256;
+        var ctx = c.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        var x0 = Math.max(0, Math.min(255-2*r, px-r));
+        var y0 = Math.max(0, Math.min(255-2*r, py-r));
+        var n = 2*r+1;
+        var d = ctx.getImageData(x0, y0, n, n).data;
+        var out = new Array(n*n), dat = new Array(n*n), snw = new Array(n*n);
+        var any = false;
+        for(var i=0,k=0; i<d.length; i+=4, k++){
+          snw[k] = false;
+          if(d[i+3] === 0){ out[k] = null; dat[k] = null; continue; }
+          var v = imergDecode(cm, d[i], d[i+1], d[i+2]);
+          out[k] = v;
+          if(v != null && v >= 0.2){
+            any = true;
+            /* inverze Z = 200·R^1,6 → dBZ, ať korelace vidí tutéž škálu */
+            dat[k] = 10*Math.log10(200*Math.pow(v, 1.6));
+          } else {
+            dat[k] = (v != null && v > 0) ? 10*Math.log10(200*Math.pow(v, 1.6)) : 0;
+          }
+        }
+        resolve(any ? {mm:out, data:dat, snow:snw, n:n, snowSeen:false} : null);
+      }catch(e){ resolve(null); }
+    };
+    img.onerror = function(){ resolve(null); };
+    img.src = url;
+  });
+}
+function loadImerg(lat, lon, myId){
+  imergCompass = null; imergNote = "";
+  var tc = tileCoords(lat, lon, IMERG_Z);
+  var tms = SAT_TMS;   /* stejná schránka jako u IR: dlaždice jsou stejné */
+  function imergUrl(layer, ms){
+    return SAT_HOST+"/"+layer+"/default/"+imergTimeStr(ms)+"/"+tms
+         + "/"+IMERG_Z+"/"+tc.ty+"/"+tc.tx+".png";   /* GIBS: řádek PŘED sloupcem */
+  }
+  function tryLayer(i){
+    if(i >= IMERG_LAYERS.length){
+      imergNote = "žádná vrstva IMERG neodpověděla";
+      return;
+    }
+    var L = IMERG_LAYERS[i];
+    loadImergColormap(L).then(function(cm){
+      if(isStale(myId)) return;
+      if(!cm){ imergNote = "paleta IMERG nesedí na mm/h"; tryLayer(i+1); return; }
+      /* Najdi nejnovější existující snímek: zpravidla ~5–6 h starý.
+         Zkouší se od nejnovějšího půlhodinového slotu zpět (max 7 h). */
+      var slot = null, k = 0;
+      (function probe(){
+        if(isStale(myId)) return;
+        if(k > 2*IMERG_MAX_AGE_H){ imergNote = "žádný čerstvý snímek IMERG"; tryLayer(i+1); return; }
+        var ms = Date.now() - k*1800000;
+        readImergPatch(imergUrl(L, ms), tc.px, tc.py, IMERG_R, cm).then(function(patch){
+          if(isStale(myId)) return;
+          if(!patch){ k++; probe(); return; }
+          /* Nejnovější snímek nalezen — dobereme tři starší kvůli pohybu. */
+          slot = ms;
+          var frames = [{t:ms/1000, patch:patch}];
+          var need = IMERG_FRAMES - 1, k2 = 1;
+          (function older(){
+            if(isStale(myId)) return;
+            if(need <= 0 || k2 > 2*IMERG_MAX_AGE_H){ finish(); return; }
+            var ms2 = slot - k2*1800000;
+            readImergPatch(imergUrl(L, ms2), tc.px, tc.py, IMERG_R, cm).then(function(p2){
+              if(isStale(myId)) return;
+              if(p2){ frames.push({t:ms2/1000, patch:p2}); need--; k2++; older(); }
+              else { k2++; older(); }
+            });
+          })();
+          function finish(){
+            if(isStale(myId)) return;
+            frames.sort(function(a,b){ return a.t - b.t; });
+            if(frames.length < 2){ imergNote = "jen 1 snímek IMERG — pohyb nezjistím"; renderCompass(); return; }
+            var kmPerPx = tc.kmPerPx;
+            /* Půlhodinové kroky na 3,2 km/px: posun 14 px = 45 km
+               → okno pokryje ~90 km/h, což na frontu stačí; korelace
+               jede ve stejném workeru jako radar (motionFromFrames). */
+            motionFromFrames(frames, kmPerPx, 14).then(function(mo){
+              if(isStale(myId)) return;
+              imergCompass = computeRadarCompass(frames, mo, tc, null);
+              imergNote = "GPM IMERG · snímek "
+                        + Math.round((Date.now() - slot)/60000) + " min starý · "
+                        + frames.length + " snímky";
+              renderCompass();
+            }).catch(function(){
+              if(isStale(myId)) return;
+              imergNote = "pohyb z IMERG nešel spočítat";
+            });
+          }
+        });
+      })();
+    });
+  }
+  tryLayer(0);
 }
 
 /* ---- MÍCHANÁ ČASOVÁ OSA (horizont 60 min, krok 5 min) ----
@@ -6065,6 +6979,7 @@ function recomputeWhen(){
   var big = $("whenBig"), sub = $("whenSub"), srcEl = $("whenSrc");
   if(!modelState){ return; }
   setTimeout(fitPanels, 0);
+  if(cur) blitzMaybeStart(cur.lat, cur.lon);   /* blesky jen při konvektivním potenciálu */
 
   var now = Date.now();
   var ms = modelState;
@@ -6121,6 +7036,23 @@ function recomputeWhen(){
                     + (tr.kind === "TEMPO" ? "přechodně" : "postupně") + ").";
       }
     }
+  }
+
+  /* ---- VÝŠKA PAPRSKU RADARU (proč radar říká sucho, ač stanice prší) ----
+     Radarový paprsek se od antény zvedá nad obzor a s rostoucí vzdáleností
+     sleduje mete stovky metrů až kilometry nad zemí. Mrholení, mlha nebo
+     děšť z nízké stratusy pod paprskem proto globální kompozit NEMUSÍ
+     vidět, i když na zemi padá — u vzdálenějších lokalit je to dokonce
+     běžné. Vzdálenost konkrétního radaru appka nezná (kompozit míchá
+     desítky sítí), takže se nezdržuje výpočtem přesné výšky: řekne
+     jen PRINCIP, a to jediné v situaci, kdy k nesouladu došlo —
+     suchý radar + mokrá stanice. Jinak by poznámka byla jen šum. */
+  var beamNote = "";
+  if(radarCoverage !== "none" && radarState && radarState !== "error"
+     && (radarNow == null || radarNow < 0.05)
+     && obsMetar && obsMetar !== "error" && metarHasPrecip(obsMetar.wx)){
+    beamNote = " Radar přitom vidí sucho: paprsek sleduje mete i stovky metrů"
+             + " nad zemí, takže slabé mrholení pod ním uniká — stanice ho ale naměřila.";
   }
 
   /* zdroj F: národní radar ČHMÚ.
@@ -6190,7 +7122,8 @@ function recomputeWhen(){
     big.className = "big";
     big.innerHTML = cap(typeGuess.t) + " <small>právě teď</small>";
     sub.innerHTML = "Intenzita <b>" + fmtMM(med) + " mm/h</b> · " + typeGuess.i + "."
-      + stationNote + " Potvrzeno <b>" + indepVotes + "</b> nezávislými zdroji." + trendPhrase;
+      + stationNote + " Potvrzeno <b>" + indepVotes + "</b> nezávislými zdroji." + trendPhrase
+      + beamNote + blitzNote();
     var observedVotes = votes.filter(function(v){ return v.indexOf("model") < 0; });
     srcEl.textContent = "ověřeno: " + observedVotes.join(" + ") + sourceCaveat();
     renderRainEnd(now, 0, blendTimeline);
@@ -6205,7 +7138,8 @@ function recomputeWhen(){
   if(votes.length >= 1 && indepVotes < 2){
     big.className = "big";
     big.innerHTML = "Možná <small>mrholí</small>";
-    sub.textContent = "Signál srážek: " + votes.join(", ") + ". Déšť není potvrzen dvěma nezávislými pozorovacími zdroji.";
+    sub.innerHTML = "Signál srážek: " + votes.join(", ") + ". Déšť není potvrzen dvěma nezávislými pozorovacími zdroji."
+      + beamNote + blitzNote();
     srcEl.textContent = "nepotvrzeno · nezávislá potvrzení: " + indepVotes + sourceCaveat();
     if($("whenUntil")) $("whenUntil").innerHTML = "";
     whenState = {mode:"maybe", votes:votes, indep:indepVotes, now:now};
@@ -6314,34 +7248,40 @@ function recomputeWhen(){
     var tp = typeGuess || wmoType(modelCurrent && modelCurrent !== "error" ? modelCurrent.code : null, estMm);
     estMm = saneMm(estMm); if(estMm == null) estMm = 0.1;
 
-    /* ---- ROZPĚTÍ MÍSTO PŘEDSTÍRANÉ PŘESNOSTI ----
-       Rychlost pole se odhaduje z několika dvojic snímků. Když se shodnou,
-       je odhad příchodu spolehlivý; když se rozcházejí, je to hádání.
-       Ten rozptyl se dřív spočítal a zahodil.
+    /* ---- JEDNOTNÝ ROZPOČET NEJISTOTY (už žádné vrstvené roztahování) ----
+       Dřív se rozpětí lo/hi roztahovalo ČTYŘMI kaskádovitými kroky po sobě:
+       rozptyl rychlosti, pak neshoda zdrojů (min/max), pak rozptyl
+       time-lagged ensemblu (×0,35/×0,45) a nakonec přeháňky (×0,75/×1,35).
+       Jenže tyhle složky NEJSOU nezávislé — rozptyl rychlosti je většinou
+       příčinou neshody zdrojů a rozptyl ensemblu z téhož pramení — takže
+       se skutečná nejistota započítala dvakrát až třikrát. U přeháňek
+       z toho lezlo rozpětí "za 3–98 min", které nebylo poctivé, ale
+       panické: čím víc kroků, tím širší pás, bez ohledu na to, že se
+       kroky překrývají.
 
-       Vzdálenost je pevná, takže čas příchodu jde s rychlostí obráceně:
-       t = d/v. Rychlejší okraj odhadu dá dřívější příchod a naopak. */
-    var lo = null, hi = null;
+       Nástroj na tohle existuje: rozpočet rozptylu (variance budget).
+       Každý efekt přispěje relativní směrodatnou odchylkou σ a ty se
+       sčítají ve ČTVERCÍCH — korelované složky se tím nepřičítají
+       lineárně, ale slaběji. Výsledné σ pak ohraničí pás ~p10–p90
+       jako t/(1+σ) až t·(1+σ) — jednou, ne vrstveně. */
+    var sig2 = 0;
+    /* 1) nejistota rychlosti pole: t = d/v, takže relativní rozptyl času
+           je roven relativnímu rozptylu rychlosti. */
     if(stormMotion && stormMotion.spreadKmh != null && stormMotion.speedKmh > 5
        && stormMotion.samples >= 2){
-      var v = stormMotion.speedKmh, s = Math.min(stormMotion.spreadKmh, v*0.7);
-      lo = Math.round(mins * v/(v+s));
-      hi = Math.round(mins * v/Math.max(v-s, v*0.3));
+      var v = stormMotion.speedKmh, sv = Math.min(stormMotion.spreadKmh, v*0.7);
+      var relV = sv / Math.max(v, 1);
+      sig2 += relV*relV;
     }
-    /* ---- NESHODA ZDROJŮ JE TAKY ROZPTYL ----
-       Když radar čeká déšť za 12 minut a model za 40, je pravdivá
-       odpověď "za 12 až 40 minut", ne medián vydávaný za jistotu.
-       Tenhle rozptyl se dřív vůbec nepočítal — průměrování ho schovalo. */
+    /* 2) neshoda zdrojů na čase příchodu: když radar říká 12 a model 40,
+           je pravda "12 až 40" — polovina rozpětí vůči mediánu je σ. */
     if(arr && arr.n >= 2 && (arr.hi - arr.lo) >= 5){
-      var aLo = Math.round(arr.lo), aHi = Math.round(arr.hi);
-      lo = (lo == null) ? aLo : Math.min(lo, aLo);
-      hi = (hi == null) ? aHi : Math.max(hi, aHi);
+      var relA = Math.min(0.6, (arr.hi - arr.lo) / (2*Math.max(arr.min, 5)));
+      sig2 += relA*relA;
     }
-
-    /* ---- ROZPTYL ENSEMBLU RADARU ----
-       Osm snímků posunutých do stejného cíle dá osm odhadů. Když se
-       rozejdou, je to NAMĚŘENÁ nejistota — na rozdíl od rozpětí
-       odvozeného z rozptylu rychlosti je spočítaná přímo z intenzit. */
+    /* 3) time-lagged ensemble radaru: když se osm posunutých snímků
+           neshodne na síle, nemusí se shodnout ani na čase. Dřívější
+           0,35/0,45 se tady z half-rozptylu stává σ jednou. */
     if(radarTimeline && radarTimeline.length){
       var blizky = null;
       radarTimeline.forEach(function(r){
@@ -6349,24 +7289,19 @@ function recomputeWhen(){
         if(blizky == null || Math.abs(r.dt - mins) < Math.abs(blizky.dt - mins)) blizky = r;
       });
       if(blizky && blizky.spread > 0.05 && blizky.mmh > 0){
-        /* Relativní rozptyl intenzity se promítne do rozpětí času:
-           čím míň si jsou snímky jisté silou, tím míň i časem. */
-        var rel = Math.min(0.6, blizky.spread / Math.max(0.05, blizky.mmh));
-        if(rel > 0.15){
-          if(lo == null){ lo = mins; hi = mins; }
-          lo = Math.max(1, Math.round(lo*(1 - rel*0.35)));
-          hi = Math.round(hi*(1 + rel*0.45));
-        }
+        var relE = Math.min(0.6, blizky.spread / Math.max(0.05, blizky.mmh));
+        if(relE > 0.15){ var rE = relE*0.40; sig2 += rE*rE; }
       }
     }
-
-    /* Přeháňky jsou malé a krátkodobé — i při dokonale změřené rychlosti
-       pole se buňka může minout o pár kilometrů, a to je pár minut.
-       Rozpětí proto roztáhneme podle podílu konvektivních srážek. */
-    if(precipMix && precipMix.showerFrac > 0.6){
-      if(lo == null){ lo = mins; hi = mins; }
-      lo = Math.max(1, Math.round(lo*0.75));
-      hi = Math.round(hi*1.35);
+    /* 4) přeháňky: malá buňka se může o pár kilometrů minout a to je
+           pár minut. Fixní σ 0,35 (dřívější ×0,75/×1,35 byl právě
+           klasický dvojnásobný součet — tady vstupuje jednou). */
+    if(precipMix && precipMix.showerFrac > 0.6){ sig2 += 0.35*0.35; }
+    var lo = null, hi = null;
+    if(sig2 > 0){
+      var sig = Math.min(1.2, Math.sqrt(sig2));   /* strop: rozpětí max ~2,2× */
+      lo = Math.max(1, Math.round(mins/(1 + sig)));
+      hi = Math.round(mins*(1 + sig));
     }
     var wide = (lo != null && hi != null && hi - lo >= 3 && lo >= 1);
 
@@ -6377,7 +7312,7 @@ function recomputeWhen(){
     sub.innerHTML = (tp ? cap(tp.t) : "Srážky") + " ~<b>" + fmtMM(estMm) + " mm/h</b>"
       + (agree >= 2 ? " · shoda " + agree + " zdrojů" : " · zatím jen jeden zdroj, ber s rezervou")
       + (wide ? " · srážkové pole postupuje nepravidelně, proto rozpětí" : "") + "."
-      + stationNote;
+      + stationNote + blitzNote();
     /* Když národní radar do hodiny nic nevidí, ale míchanka déšť hlásí,
        je to spor dvou dobrých zdrojů. Appka ho nezamlčí a nerozhodne
        silou — jen otevře rozpětí a řekne to. */
@@ -6394,6 +7329,11 @@ function recomputeWhen(){
     whenState = {mode:"soon", etaMin: estMin, mmh: estMm, now: now,
                  lo: lo, hi: hi, arr: (blendMeta && blendMeta.arrival) || null,
                  parts: partsTxt};
+    /* Verdikt do fronty na kalibraci (Brier): "kolem času T prší s
+       pravděpodobností P". Ověří se proti METAR, až T proběhne. */
+    if(cur) enqueueVerdict(locKeyOf(cur.lat, cur.lon), cur.lat, cur.lon, cur.cc,
+                           now + Math.max(1, estMin)*60000,
+                           verdictProb(agree, (arr && arr.obsN) || 0));
     renderRainEnd(now, mins, blendTimeline);
     renderSolo();
     return;
@@ -6469,6 +7409,10 @@ function recomputeWhen(){
   renderRainEnd(now, Math.max(0, minM), blendTimeline);
   whenState = {mode:"model", etaMin: minM, now: now, idx: idx,
                agree: maxC, N: ms.N, mmh: ms.perHourMax[idx], at: ms.times[idx]};
+  /* Modelový verdikt taky patří do kalibrace — je hlášena shoda maxC/N
+     modelů, což je sám o sobě pravděpodobnostní soud. */
+  if(cur) enqueueVerdict(locKeyOf(cur.lat, cur.lon), cur.lat, cur.lon, cur.cc,
+                         t, Math.max(0.05, Math.min(0.98, maxC/ms.N)));
   renderSolo();
 }
 </script>
