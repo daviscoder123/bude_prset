@@ -217,21 +217,29 @@ test('mobile compact layout keeps fonts uninflated and never shrinks via zoom',a
     await p.evaluate(()=>new Promise(res=>requestAnimationFrame(()=>requestAnimationFrame(res))));
     const state=await p.evaluate(()=>{
       const n=document.querySelector('#body tr td.name .n');
-      const css=[...document.styleSheets[0].cssRules].map(r=>r.cssText).join('\n');
+      const rules=[...document.styleSheets[0].cssRules].map(r=>r.cssText);
+      const css=rules.join('\n');
+      /* Chromium serializuje -webkit-text-size-adjust bud s prefixem, nebo
+         jako unprefixed text-size-align alias — overime obě podoby. */
+      const cs=getComputedStyle(document.documentElement);
       return {
         zoom:document.body.style.zoom,
         over:document.documentElement.scrollWidth/window.innerWidth,
-        adjust:/-webkit-text-size-adjust:\s*100%/.test(css),
+        adjust:/(-webkit-)?text-size-adjust:\s*100%/.test(css),
+        computedAdjust:cs.getPropertyValue('-webkit-text-size-adjust')||cs.getPropertyValue('text-size-adjust'),
+        htmlRule:(rules.find(t=>/^html\s*,\s*body\s*\{/.test(t))||'NO RULE'),
         appRule:(css.match(/html\.compact #app\s*\{[^}]*\}/g)||[]).join(' '),
         font:n?parseFloat(getComputedStyle(n).fontSize):null
       };
     });
-    assert.equal(state.zoom,'');                    /* fitGuard nesmi nic zmensit */
-    assert.ok(state.over<=1.02,'horizontal overflow: '+state.over);
-    assert.equal(state.adjust,true);                /* pojistka proti nafouknuti fontu */
+    const diag=JSON.stringify(state);
+    console.log('mobile compact state:',diag);
+    assert.equal(state.zoom,'','fitGuard nesmi nic zmensit: '+diag);   /* fitGuard nesmi nic zmensit */
+    assert.ok(state.over<=1.02,'horizontal overflow: '+diag);
+    assert.ok(state.adjust===true||state.computedAdjust==='100%','chybi text-size-adjust:100%: '+diag);  /* pojistka proti nafouknuti fontu */
     assert.ok(/max-width:\s*100%/.test(state.appRule)&&/min-height:\s*100%/.test(state.appRule),
-      'compact #app musi pouzivat procenta, ne vw/dvh: '+state.appRule);
-    assert.ok(state.font!==null&&state.font<=10,'inflated font: '+state.font);
-    assert.deepEqual(errors,[]);
+      'compact #app musi pouzivat procenta, ne vw/dvh: '+diag);
+    assert.ok(state.font!==null&&state.font<=10,'inflated font: '+diag);
+    assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });
