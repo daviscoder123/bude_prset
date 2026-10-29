@@ -2171,12 +2171,17 @@ function fitGuard(){
         var overH = app ? Math.max(app.scrollHeight, app.offsetHeight)
                           / window.innerHeight : 1;
         var mx = document.querySelector(".matrix");
-        if(mx && mx.scrollHeight > mx.clientHeight + 1)
+        var mxOver = (mx && mx.scrollHeight > mx.clientHeight + 1)
+          ? (mx.scrollHeight - mx.clientHeight) : 0;
+        if(mxOver > 1)
           overH = Math.max(overH,
-            (window.innerHeight + mx.scrollHeight - mx.clientHeight)
-            / window.innerHeight);
+            (window.innerHeight + mxOver) / window.innerHeight);
         var over = Math.max(overW, overH);
-        if(over <= 1.02) break;
+        /* Práh 1,02 platí pro poměr k výšce viewportu (tam je 2 % necitelné),
+           NE pro přetečení tabulky v panelu: na 360×740 přesahovala tabulka
+           panel o ~6 px (= 0,8 % viewportu) a řádky se tiše ořízly — i jediný
+           pixel přesahu musí --fit srovnat (kolo 8h, CI #43/#44). */
+        if(over <= 1.02 && mxOver <= 1) break;
         var nz = Math.floor(z/over*0.99*100)/100;
         if(nz >= z) nz = Math.round((z-0.05)*100)/100;
         if(nz < 0.6) nz = 0.6;
