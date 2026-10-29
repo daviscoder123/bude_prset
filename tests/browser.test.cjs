@@ -226,12 +226,14 @@ test('mobile compact layout keeps fonts uninflated and never shrinks via zoom',a
         font:n?parseFloat(getComputedStyle(n).fontSize):null
       };
     });
-    assert.equal(state.zoom,'');                    /* fitGuard nesmi nic zmensit */
-    assert.ok(state.over<=1.02,'horizontal overflow: '+state.over);
-    assert.equal(state.adjust,true);                /* pojistka proti nafouknuti fontu */
+    const diag=JSON.stringify(state);
+    console.log('mobile compact state:',diag);
+    assert.equal(state.zoom,'','fitGuard nesmi nic zmensit: '+diag);   /* fitGuard nesmi nic zmensit */
+    assert.ok(state.over<=1.02,'horizontal overflow: '+diag);
+    assert.equal(state.adjust,true,'chybi -webkit-text-size-adjust:100%: '+diag);  /* pojistka proti nafouknuti fontu */
     assert.ok(/max-width:\s*100%/.test(state.appRule)&&/min-height:\s*100%/.test(state.appRule),
-      'compact #app musi pouzivat procenta, ne vw/dvh: '+state.appRule);
-    assert.ok(state.font!==null&&state.font<=10,'inflated font: '+state.font);
-    assert.deepEqual(errors,[]);
+      'compact #app musi pouzivat procenta, ne vw/dvh: '+diag);
+    assert.ok(state.font!==null&&state.font<=10,'inflated font: '+diag);
+    assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });

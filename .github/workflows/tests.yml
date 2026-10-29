@@ -28,4 +28,13 @@ jobs:
           tail -n 80 /tmp/test-out.txt > /tmp/test-tail.txt
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/test-tail.txt
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:browser
+      - name: Browser testy (vystup do souboru kvuli diagnose)
+        run: npm run test:browser > /tmp/browser-out.txt 2>&1
+      - name: Pri selhani browser testu vloz vystup jako komentar do PR
+        if: failure() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          tail -n 160 /tmp/browser-out.txt > /tmp/browser-tail.txt
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/browser-tail.txt
