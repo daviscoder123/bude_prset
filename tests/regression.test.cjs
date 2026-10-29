@@ -184,7 +184,7 @@ test('radar-detected approaching rain sets "soon" state and renders the mobile p
   const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
   let soloCalls=0;
   const verdicts=[];
-  const c=context(['recomputeWhen','saneMm','cap','locKeyOf','verdictProb'],{
+  const c=context(['recomputeWhen','saneMm','cap','locKeyOf','verdictProb','verdictProbSrc'],{
     $:id=>nodes[id],modelState:{},whenState:null,
     cur:{lat:50.1,lon:15.3,cc:'CZ'},
     radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
@@ -409,4 +409,94 @@ test('blend wiring applies trend, phase shift and per-source blend verification'
   assert.equal((script.match(/modelValAtMinutes\(dt \+ phaseShift\)/g)||[]).length,2);
   assert.match(script,/kind === "blend"/);
   assert.match(script,/enqueueBlendSnapshots\(locKey,\s*cur\.cc/);
+});
+
+/* ===== Kolo 7: verifikace proti radaru, kalibrace procent, ensemble timing ===== */
+test('rain end needs a confirmed dry gap and ignores drizzle above THRESH_END',()=>{
+  const c=context(['estimateRainEnd','buildRainAxis'],{modelState:null,THRESH_END:0.12,THRESH_OBS:0.2});
+  const now=1000000;
+  /* Mezera 10 minut mezi dvěma přeháňkami (5minutová mřížka nowcastu)
+     NENÍ konec — déšť se vrací v 55. Pravý konec je až suchá řada
+     60–75 (≥ 15 min potvrzeného sucha), interpolovaná na minutu. */
+  const tl1=[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,90].map(dt=>({dt,
+    mmh:dt<=40?0.8:(dt===55?0.8:(dt<=75?0:0.8))}));
+  const e1=c.estimateRainEnd(now,0,tl1);
+  assert.equal(e1.min,59);
+  assert.equal(e1.certain,true);
+  /* Hodinová mřížka modelů: druhá vlna (v 240) se nezamlčí — konec
+     se hlásí až za ní, ne na první suché hodině. */
+  const c2=context(['estimateRainEnd','buildRainAxis'],{THRESH_END:0.12,THRESH_OBS:0.2,
+    modelState:{longTimes:[120,180,240,300,360,420].map(m=>new Date(now+m*60000)),
+                longMed:[0.5,0,0.4,0,0,0]}});
+  const e2=c2.estimateRainEnd(now,60,[{dt:5,mmh:0.8},{dt:30,mmh:0.5},{dt:55,mmh:0.3}]);
+  assert.equal(e2.min,282);
+  assert.equal(e2.certain,false);
+  /* Mrholení 0,15 mm/h je NAD práhem konce (0,12) — déšť neskončil. */
+  const e3=c.estimateRainEnd(now,0,[{dt:5,mmh:0.8},{dt:20,mmh:0.5},
+    {dt:40,mmh:0.15},{dt:55,mmh:0.15},{dt:60,mmh:0}]);
+  assert.equal(e3.min,56);
+});
+test('Brier calibration is per-source and stays identity until data suffices',()=>{
+  const store={};
+  const ls={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v;},removeItem:()=>{}};
+  const c=context(['recordBrier','brierStore','brierCurve','brierCalib','lsGet','lsSet'],
+    {localStorage:ls,BRIER_KEY:'b',BRIER_MIN_BIN:25,BRIER_MIN_TOTAL:100});
+  /* Bez dat identita — procenta se nedotknou, dokud je čím podložit. */
+  assert.equal(c.brierCalib(0.7,'ens'),0.7);
+  for(let i=0;i<25;i++) c.recordBrier(0.35,i<5,'ens');
+  for(let i=0;i<25;i++) c.recordBrier(0.72,i<20,'ens');
+  assert.equal(c.brierCalib(0.7,'ens'),0.7);   /* 50 vzorků < 100: pořád identita */
+  for(let i=0;i<50;i++) c.recordBrier(0.55,i<25,'ens');
+  const pts=c.brierCurve('ens');
+  assert.equal(pts.length,3);
+  assert.ok(Math.abs(pts[0][0]-0.35)<1e-9&&Math.abs(pts[0][1]-0.2)<1e-9);
+  assert.ok(Math.abs(pts[2][0]-0.75)<1e-9&&Math.abs(pts[2][1]-0.8)<1e-9);
+  assert.ok(Math.abs(c.brierCalib(0.7,'ens')-0.725)<1e-9);  /* 70 % → reálně 72,5 % */
+  /* Jiný zdroj zůstává identitou — křivky se NEmíchají. */
+  assert.equal(c.brierCalib(0.7,'om'),0.7);
+  const raw=JSON.parse(store['b']);
+  assert.deepEqual(Object.keys(raw.srcs),['ens']);
+  c.recordBrier(0.5,true);                    /* bez uvedení zdroje → "agree" */
+  assert.ok(JSON.parse(store['b']).srcs.agree);
+});
+test('arrival probability uses ensemble onsets and mirrors the verdict source choice',()=>{
+  const c=context(['arrivalProbPct','verdictProbSrc'],
+    {ensState:{onsets:[0,60,60,120,null]},probSeries:null,HOURS:8});
+  assert.equal(c.arrivalProbPct(30,60),60);   /* 3 z 5 členů začnou do 60 min */
+  assert.equal(c.verdictProbSrc(),'ens');
+  const c2=context(['arrivalProbPct','verdictProbSrc'],
+    {ensState:null,probSeries:[10,50,20,0],HOURS:8});
+  assert.equal(c2.arrivalProbPct(30,60),50);   /* bez ensemblu max OM v okně */
+  assert.equal(c2.verdictProbSrc(),'om');
+  const c3=context(['arrivalProbPct','verdictProbSrc'],
+    {ensState:{onsets:[0,0]},probSeries:null,HOURS:8});
+  assert.equal(c3.arrivalProbPct(null,null),97);   /* stop 97 %, žádná jistota */
+  const c4=context(['arrivalProbPct','verdictProbSrc'],{ensState:null,probSeries:null,HOURS:8});
+  assert.equal(c4.arrivalProbPct(30,60),null);
+  assert.equal(c4.verdictProbSrc(),'agree');
+  /* OM přebije ensemble, když mluví hlasitěji — stejné pravidlo jako verdictProb. */
+  const c5=context(['verdictProbSrc'],{ensState:{prob:65},probSeries:[80,null,50],HOURS:8});
+  assert.equal(c5.verdictProbSrc(),'om');
+});
+test('convective prior tilts blend toward models until its own samples arrive',()=>{
+  const storeC={},storeS={};
+  const mk=(st,sr)=>{const l={getItem:k=>st[k]||null,setItem:(k,v)=>{st[k]=v;},removeItem:()=>{}};
+    return context(['blendBucket','blendWeights','blendRegimeKey','convectiveFrac',
+                    'getBlendMult','blendHasData','recordBlendError','lsGet','lsSet'],
+      {localStorage:l,BLEND_KEY:'bpBlend_v1',stormRisk:sr,precipMix:null,
+       CAPE_CONV_LO:400,CAPE_CONV_HI:2000});};
+  const std=mk(storeS,null), conv=mk(storeC,{cape:2000});
+  assert.equal(std.blendRegimeKey(),'std');
+  assert.equal(conv.blendRegimeKey(),'conv');
+  const base=std.blendWeights(30,'CZ'), w=conv.blendWeights(30,'CZ');
+  /* Bez vzorků: extrapolace dolů (×0,7), modely nahoru (×1,5), ensemble
+     hlas na čas příchodu existuje a neklesá pod nulu. */
+  assert.ok(Math.abs(w.radar/base.radar-0.7)<1e-9);
+  assert.ok(Math.abs(w.model/base.model-1.5)<1e-9);
+  assert.ok(w.ens>0&&w.ens<=0.35);
+  /* První vzorek pro radar v conv režimu → prior se pouští, učení šlápne. */
+  conv.recordBlendError('CZ','30','radar',0.3,'conv');
+  const w2=conv.blendWeights(30,'CZ');
+  assert.ok(w2.radar/base.radar>0.85);
+  assert.ok(Math.abs(w2.metno/base.metno-0.85)<1e-9);   /* bez vzorků drží prior */
 });

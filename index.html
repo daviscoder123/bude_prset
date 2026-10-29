@@ -903,6 +903,12 @@ var THRESH = THRESH_BASE;
    radar ukazuje déšť přímo nad hlavou. */
 var THRESH_OBS = THRESH_BASE;
 
+/* Práh pro KONEC deště. Nižší než práh začátku: frontální mrholení
+   0,1–0,2 mm/h reálně kape, takže "skončilo v 15:20" by u něj byla lež.
+   Konec se hlásí, až intenzita spadne pod 0,12 mm/h — a vydrží tam
+   (podívej se na požadovanou délku sucha v estimateRainEnd). */
+var THRESH_END = 0.12;
+
 var HOURS = 8;
 /* Tabulka i verdikt pracují s 8 hodinami. Odhad KONCE deště ale potřebuje
    vidět dál — jinak u deště, který začne v poslední hodině okna, nemá appka
@@ -1045,11 +1051,24 @@ function loadEnsemble(lat, lon, myId){
         /* NEP: pravděpodobnost = podíl členů nad prahem přes 3×3 okolí
            (členové × body). Špička (idx) zůstává z centrálního bodu,
            aby čas vrcholu neplaval podle toho, kde zrovna prší. */
+        /* Čas začátku deště po JEDNOTLIVÝCH členech (minuty od teď,
+           hodinová hrubost: h*60 — člen neumí slíbit minutu, jen hodinu).
+           Ensemble dosud mluvil jedním procentem přes celé okno, přitom
+           rozptyl začátků 20–51 běhů je nejlepší statistika ČASU
+           příchodu, jakou appka má: slouží jako hlas do mediánu
+           arrivalů i pro "šance do N minut".
+           null = ten člen déšť v okně nehlásí. */
+        var onsets = parsed.members.map(function(m){
+          for(var h=0; h<HOURS; h++){
+            if(m.cvals[h] != null && m.cvals[h] >= THRESH) return h*60;
+          }
+          return null;
+        });
         ensState = {prob: Math.round(100*(parsed.perHour[pk.idx] != null ? parsed.perHour[pk.idx] : pk.prob)),
                     members: parsed.members.length,
                     model: M.n, res: M.res, idx: pk.idx, count: pk.count,
                     perHour: parsed.perHour, allCvals: parsed.all,
-                    memberCvals: parsed.members};
+                    memberCvals: parsed.members, onsets: onsets};
         ensNote = M.n + " · " + parsed.members.length + " členů · " + M.res + " · 3×3 body";
         if(lastJ && lastModels) render(lastJ, lastModels);
       })
@@ -1558,6 +1577,18 @@ function getBlendMult(cc, dt, src, regime){
   var mult = 1 + (raw - 1) * (sub.n / (sub.n + 15));  /* smrštění: málo dat = malý vliv */
   return Math.max(0.5, Math.min(1.5, mult));
 }
+/* Zrcadlí lookup z getBlendMult: existuje už pro tenhle zdroj+horizont+
+   režim vlastní zkušenost? Konvektivní prior se smí uplatnit jen tam,
+   kde učení dosud nemá vzorky — jinak by bojoval s naučenou křivkou. */
+function blendHasData(cc, dt, src, regime){
+  if(!cc) return false;
+  var store = lsGet(BLEND_KEY, {regions:{}});
+  var reg = store.regions && store.regions[cc], b = blendBucket(dt);
+  var e = reg && reg[b] && reg[b][src];
+  if(!e || !e.n) return false;
+  var sub = (regime && e.r && e.r[regime] && e.r[regime].n) ? e.r[regime] : e;
+  return !!(sub && sub.n);
+}
 function recordBlendError(cc, bucket, src, logRatio, regime){
   if(!cc || !bucket || !src) return;
   var store = lsGet(BLEND_KEY, {regions:{}});
@@ -1642,11 +1673,16 @@ function enqueueBlendSnapshots(locKey, cc, lat, lon, now, tl){
    bpDiag() — dokud vzorků není dost, NIKDO se podle toho neřídí;
    nejdřív se musí ukázat, jak moc si veredikty věří zbytečně. */
 var BRIER_KEY = "bpBrier_v1", VERDICT_STAMP_KEY = "bpVerdictStamp_v1";
+/* Kdy se smí zapnout automatická kalibrace: aspoň BRIER_MIN_BIN vzorků
+   v jednom binu (0,1 šířky) a BRIER_MIN_TOTAL vzorků celkem pro zdroj.
+   Pod tímhle kalibrace vrací vstup beze změnu — méně dat by křivku
+   spíš rozbilo než narovnalo. */
+var BRIER_MIN_BIN = 25, BRIER_MIN_TOTAL = 100;
 var VERDICT_EVERY_MS = 45*60000;   /* jeden verdikt na lokalitu za 45 min —
                                       jinak by klíčová věta vygenerovala deset
                                       korelovaných vzorků za jednu přeháňku */
 function brierStore(){ return lsGet(BRIER_KEY, {n:0, sum:0, bins:{}}); }
-function recordBrier(prob, outcome){
+function recordBrier(prob, outcome, src){
   var s = brierStore();
   var b = Math.max(0, Math.min(0.9, Math.floor(prob*10)/10)).toFixed(1);
   s.n++;
@@ -1655,7 +1691,50 @@ function recordBrier(prob, outcome){
   if(!s.bins[b]) s.bins[b] = {n:0, hit:0};
   s.bins[b].n++;
   if(outcome) s.bins[b].hit++;
+  /* Nově PO ZDROJI (ens/om/agree): ensemble, Open-Meteo a shoda modelů
+     mají každé jiné rozdělení chyb a jedna společná křivka by je pletla.
+     Staré celkové biny zůstávají — čte je bpDiag(). */
+  var k = src || "agree";
+  if(!s.srcs) s.srcs = {};
+  if(!s.srcs[k]) s.srcs[k] = {};
+  if(!s.srcs[k][b]) s.srcs[k][b] = {n:0, hit:0};
+  s.srcs[k][b].n++;
+  if(outcome) s.srcs[k][b].hit++;
   lsSet(BRIER_KEY, s);
+}
+/* ===== AUTOMATICKÁ KALIBRACE PROCENT =====
+   Křivka "hlášené % → reálně %" z nasbíraných Brierových binů, PO
+   ZDROJI. Zapne se sama, až vzorků dost je; do té doby vrací vstupní
+   hodnotu (identita) — appka si nesmí ohýbat čísla, která nemá čím
+   podložit. Pozor na jeden smyček past: kalibruje se ZOBRAZENÉ procento,
+   ale do fronty na Brier se ukládá SUROVÝ prediktor — jinak by se
+   kalibrace učila na sobě samé a zakroužila. */
+function brierCurve(src){
+  var s = brierStore();
+  var bins = s.srcs && s.srcs[src];
+  if(!bins) return null;
+  var pts = [], total = 0;
+  for(var b=0; b<=0.9+1e-9; b+=0.1){
+    var e = bins[b.toFixed(1)];
+    if(!e || e.n < BRIER_MIN_BIN) continue;
+    pts.push([b+0.05, e.hit/e.n]);
+    total += e.n;
+  }
+  if(pts.length < 2 || total < BRIER_MIN_TOTAL) return null;
+  pts.sort(function(a,c){ return a[0]-c[0]; });
+  return pts;
+}
+function brierCalib(p01, src){
+  var pts = brierCurve(src);
+  if(!pts) return p01;
+  if(p01 <= pts[0][0]) return pts[0][1];
+  for(var i=1; i<pts.length; i++){
+    if(p01 <= pts[i][0]){
+      var f = (p01 - pts[i-1][0]) / Math.max(1e-9, pts[i][0] - pts[i-1][0]);
+      return pts[i-1][1] + f*(pts[i][1] - pts[i-1][1]);
+    }
+  }
+  return pts[pts.length-1][1];
 }
 /* Pravděpodobnost, kterou verdikt nese: nejlepší dostupný odhad v okamžiku
    vyslovení. Ensemble a Open-Meteo pravděpodobnost jsou modelové; když
@@ -1676,7 +1755,49 @@ function verdictProb(agree, obsN){
   if(agree === 2) return (obsN || 0) >= 1 ? 0.75 : 0.7;
   return 0.5;
 }
-function enqueueVerdict(locKey, lat, lon, cc, targetMs, prob){
+/* Zrcadlí volbu zdroje ve verdictProb — Brierova kalibrace i fronta
+   vzorků musí vědět, ČÍ procente vlastně ověřují. Jedna křivka pro
+   všechny zdroje by směšovala ensemble (modelová pravděpodobnost),
+   Open-Meteo (jejich ensemble) a shodu modelů (podíl implementací) —
+   a každé z nich chybuje jinak. */
+function verdictProbSrc(){
+  if(ensState && typeof ensState.prob === "number"){
+    if(probSeries && probSeries.length){
+      var om = 0;
+      for(var i=0;i<probSeries.length && i<HOURS;i++)
+        if(probSeries[i] != null && probSeries[i] > om) om = probSeries[i];
+      if(om > ensState.prob) return "om";
+    }
+    return "ens";
+  }
+  if(probSeries && probSeries.length) return "om";
+  return "agree";
+}
+/* Šance, že déšť začne (už bude) do hi-té minuty — procento, které patří
+   k větě "mezi 33. a 64. minutou", ne maximum přes celé osmihodinové
+   okno. Primárně podíl členů ensemblu se začátkem do hi; bez ensemblu
+   maximum Open-Meteo v hodinách okna (hodinová hrubost, ber s rezervou). */
+function arrivalProbPct(lo, hi){
+  var hiMin = (hi != null && hi > 0) ? hi : 60;
+  var loMin = (lo != null && lo > 0) ? lo : 0;
+  var p = null;
+  if(ensState && ensState !== "off" && ensState !== "error"
+     && ensState.onsets && ensState.onsets.length){
+    var n = 0;
+    ensState.onsets.forEach(function(o){ if(o != null && o <= hiMin) n++; });
+    p = n / ensState.onsets.length;
+  }
+  if(p == null && probSeries && probSeries.length){
+    var loH = Math.max(0, Math.floor(loMin/60));
+    var hiH = Math.min(HOURS-1, Math.floor(hiMin/60));
+    var mx = 0;
+    for(var i=loH; i<=hiH; i++) if(probSeries[i] != null && probSeries[i] > mx) mx = probSeries[i];
+    if(mx > 0) p = mx/100;
+  }
+  if(p == null) return null;
+  return Math.max(2, Math.min(97, Math.round(p*100)));
+}
+function enqueueVerdict(locKey, lat, lon, cc, targetMs, prob, src){
   /* dedup: klíčová věta se přepočítává po každém dorazivším zdroji —
      bez razítka by jeden déšť zaplnil frontu deseti kopiemi sebe sama */
   var stamps = lsGet(VERDICT_STAMP_KEY, {});
@@ -1693,7 +1814,7 @@ function enqueueVerdict(locKey, lat, lon, cc, targetMs, prob){
     return pendingGet().then(function(q){
       q.push({kind:"verdict", cc: cc || "--", locKey: locKey, lat: lat, lon: lon,
               targetTime: targetMs, prob: Math.round(prob*1000)/1000,
-              regime: blendRegimeKey()});
+              regime: blendRegimeKey(), src: src || "agree"});
       return pendingSet(q);
     });
   });
@@ -1707,6 +1828,47 @@ function metarApproxMm(wx){
   if(w.indexOf("SH") >= 0) return 3;
   if(w.indexOf("-") >= 0 || w.indexOf("DZ") >= 0) return 0.3;
   return 1.5;
+}
+/* ===== RADAR JAKO DRUHÝ SVĚDEK VERIFIKACE =====
+   METAR je pozemní senzor, ale jen na letištích a jen tam, kde náhoda
+   právě postavila stanici. Většina predikcí (blend 30–60 min, modely
+   0–4 h) se proto dnes ověří jen tehdy, když stanice spadne do 40 minut
+   od cíle — a učení se táhne týdny. Přitom appka stejně stahuje historii
+   radaru RainVieweru (~2 h po 10 minutách): to je ground truth přímo
+   v lokalitě, každou desetinu hodiny, zdarma.
+
+   Pravidla poctivosti:
+   - METAR má VŽDY přednost (radar měří ve výšce; virga ani bright band
+     mu nevadí, ale splést je může),
+   - radar jen doplňuje, kde METAR mlčí,
+   - čtení je medián 3×3 pixelů, ať jeden šumový pixel nerozhodí verdikt,
+   - počet radarových čtení na jedno spuštění je stropem — otevření
+     appky nesmí vyvolat desítky tile dotazů. */
+var RVV_MAX_READS = 16;                  /* tile čtení na jedno spuštění */
+var RVV_MAX_AGE_MS = 2.2*3600*1000;      /* historie radaru jde ~2 h zpátky */
+function rvVerifyObsAt(lat, lon, targetMs){
+  return cachedJson("https://api.rainviewer.com/public/weather-maps.json", 300000)
+    .then(function(j){
+      var past = (j.radar && j.radar.past) ? j.radar.past : [];
+      if(!past.length) return null;
+      var best = null, bestDt = 1e12;
+      past.forEach(function(p){
+        var dt = Math.abs(p.time*1000 - targetMs);
+        if(dt < bestDt){ bestDt = dt; best = p; }
+      });
+      if(!best || bestDt > 12*60*1000) return null;
+      var tc = tileCoords(lat, lon, Z_INTENSITY);
+      return readTilePatch(rvTile(j.host || "https://tilecache.rainviewer.com", best.path, tc),
+                           tc.px, tc.py, 1)
+        .then(function(pt){
+          if(!pt) return null;
+          var vals = pt.mm.filter(function(v){ return v != null; });
+          if(!vals.length) return null;
+          vals.sort(function(a,b){ return a-b; });
+          return vals[Math.floor(vals.length/2)];   /* medián 3×3 okolí */
+        });
+    })
+    .catch(function(){ return null; });
 }
 /* Ověří predikce starší než ~20 min proti METAR pozorování. Max jednou za otevření appky.
    Fronta žije v IndexedDB, takže celé kolo běží jako asynchronní krok
@@ -1741,34 +1903,12 @@ function runBiasVerification(){
           cachedJson("https://aviationweather.gov/api/data/metar?format=json&hours="+hoursSpan
             + "&bbox="+metarBbox(g.lat, g.lon), 3600000)
             .then(function(arr){
-              g.items.forEach(function(item){
-                /* JEN STANICE, KTERÉ UMÍ HLÁSIT POČASÍ.
-                   Bez tohohle filtru se appka učí z ticha bójí, že modely
-                   nadhodnocují — a začne déšť potlačovat. Viz komentář
-                   u staniceHlasiPocasi(). */
-                var best = null, bestDt = 1e9;
-                (arr||[]).forEach(function(o){
-                  if(o.obsTime == null) return;
-                  if(!staniceHlasiPocasi(o)) return;
-                  var dt = Math.abs(o.obsTime*1000 - item.targetTime);
-                  if(dt < bestDt && dt <= 40*60*1000){ bestDt = dt; best = o; }
-                });
-                if(!best){
-                  /* NEPŘÍTOMNOST ZPRÁVY NENÍ SUCHO — a není ani důvod vzorek
-                     zahodit navždy. METAR chodí nepravidelně; při dalším
-                     otevření appky už tam být může. Laborka přesně tímhle
-                     zahazováním přišla o tisíce vzorků. */
-                  item.pokusu = (item.pokusu || 0) + 1;
-                  if(item.pokusu < 4) keep.push(item);
-                  return;
-                }
-                var observed = metarApproxMm(best.wxString || "");
+              /* Ověření jedné predikce jedním pozorováním. `wet` dávají
+                 jen verdikty (Brier je 1/0); blend a bias modelů
+                 porovnávají mm/h. */
+              function over(item, observed, wet){
                 if(item.kind === "verdict"){
-                  /* Brier skóre: verdikt tvrdil pravděpodobnost P, že kolem
-                     cílového času začne pršet. Výsledek 1/0 dává METAR
-                     nejblíž cíli (±40 min) — hrubé, ale počestné: učí to
-                     kalibraci, ne tofu. */
-                  recordBrier(item.prob, metarHasPrecip(best.wxString || ""));
+                  recordBrier(item.prob, wet, item.src || "agree");
                   return;
                 }
                 if(item.kind === "blend"){
@@ -1787,8 +1927,54 @@ function runBiasVerification(){
                 var obs  = Math.max(0.05, Math.min(50, observed));
                 var logRatio = Math.max(-2, Math.min(2, Math.log(pred/obs)));
                 recordBiasSample(item.locKey, item.lat, item.lon, item.model, logRatio);
+              }
+              var bezSvedka = [];   /* predikce, kterou METAR nepotkal */
+              g.items.forEach(function(item){
+                /* JEN STANICE, KTERÉ UMÍ HLÁSIT POČASÍ.
+                   Bez tohohle filtru se appka učí z ticha bójí, že modely
+                   nadhodnocují — a začne déšť potlačovat. Viz komentář
+                   u staniceHlasiPocasi(). */
+                var best = null, bestDt = 1e9;
+                (arr||[]).forEach(function(o){
+                  if(o.obsTime == null) return;
+                  if(!staniceHlasiPocasi(o)) return;
+                  var dt = Math.abs(o.obsTime*1000 - item.targetTime);
+                  if(dt < bestDt && dt <= 40*60*1000){ bestDt = dt; best = o; }
+                });
+                if(!best){ bezSvedka.push(item); return; }
+                over(item, metarApproxMm(best.wxString || ""),
+                     metarHasPrecip(best.wxString || ""));
               });
-              next();
+              if(!bezSvedka.length){ next(); return; }
+              /* RADAROVÁ ZÁCHRANA: predikce bez METAR svědka se zkusí
+                 ověřit radarem — srážky přímo v lokalitě v cílovém čase.
+                 Nedosáhne-li radar (cíl moc starý / tile mrtvý / rozpočet
+                 čtení vyčerpán), zůstává staré pravidlo: NEPŘÍTOMNOST
+                 ZPRÁVY NENÍ SUCHO, vzorek se drží a zkusí to příště
+                 (napočtvrté se zahodí navždy). */
+              var cteno = 0;
+              Promise.all(bezSvedka.map(function(item){
+                var age = now - item.targetTime;
+                if(cteno >= RVV_MAX_READS || age > RVV_MAX_AGE_MS){
+                  item.pokusu = (item.pokusu || 0) + 1;
+                  if(item.pokusu < 4) keep.push(item);
+                  return null;
+                }
+                cteno++;
+                return rvVerifyObsAt(item.lat, item.lon, item.targetTime)
+                  .then(function(mmh){
+                    if(mmh == null){
+                      item.pokusu = (item.pokusu || 0) + 1;
+                      if(item.pokusu < 4) keep.push(item);
+                      return;
+                    }
+                    over(item, mmh, mmh >= 0.1);
+                  })
+                  .catch(function(){
+                    item.pokusu = (item.pokusu || 0) + 1;
+                    if(item.pokusu < 4) keep.push(item);
+                  });
+              })).then(next, next);
             })
             .catch(function(){ next(); });
         })();
@@ -2572,9 +2758,15 @@ function render(j, allModels, generation){
      přednost. Když není, ukáže se shoda modelů — ale POPISEK to řekne.
      Nikdy se netvrdí "pravděpodobnost" o něčem, co je podíl modelů. */
   var ens = (ensState && ensState !== "off" && ensState !== "error") ? ensState : null;
-  var prob, jePravdepodobnost;
-  if(ens){ prob = ens.prob; jePravdepodobnost = true; }
-  else   { prob = agreeProb; jePravdepodobnost = false; }
+  /* Automatická kalibrace z vlastních Brierových měření, per zdroj:
+     bez vzorků identita, takže dnes se nic nezmění — ale jakmile appka
+     nasbírá data, zobrazovaná procenta se sama začnou ohýbat k realitě.
+     Do fronty na Brier jde dál SUROVÝ prediktor (učí se na něm,
+     ne na vlastní kalibraci). */
+  var probSrc = ens ? "ens" : "agree";
+  var jePravdepodobnost = !!ens;
+  var prob = Math.max(2, Math.min(98, Math.round(100*brierCalib(
+    (ens ? ens.prob : agreeProb)/100, probSrc))));
 
   $("pctLabel").textContent = jePravdepodobnost
     ? "Pravděpodobnost deště do " + HOURS + " h"
@@ -2616,6 +2808,21 @@ function render(j, allModels, generation){
        appka dělá jinde už dost. */
     mokre.sort(function(a,b){ return a-b; });
     perHourMm.push(mokre.length ? mokre[Math.floor(mokre.length/2)] : 0);
+  }
+  /* Fáze srážek po hodinách: podíl mokrých modelů, které v dané hodině
+     hlásí sníh. Radar pozná sníh jen nad sebou (příznak v dlaždici) a
+     METAR jen tehdy, když zrovna padá; modely nesou snowfall pro celé
+     okno — z konsenzu se tedy fáze řekne i hodinu dopředu. */
+  var perHourSnow = [];
+  for(var ph2=0; ph2<times.length; ph2++){
+    var mokrych2 = 0, snezu = 0;
+    active.forEach(function(p){
+      if(p.cvals[ph2] != null && p.cvals[ph2] >= THRESH){
+        mokrych2++;
+        if(p.isSnow && p.isSnow[ph2]) snezu++;
+      }
+    });
+    perHourSnow.push(mokrych2 ? snezu/mokrych2 : null);
   }
   var half = -1, any = -1;
   for(var i=0;i<consensus.length;i++){
@@ -2665,6 +2872,7 @@ function render(j, allModels, generation){
   });
   verdictState = {
     prob: prob, jePravdepodobnost: jePravdepodobnost,
+    probRaw: (ens ? ens.prob : agreeProb), probSrc: probSrc,
     agreeProb: agreeProb, rainModels: rainModels, N: N,
     pkIdx: pk.idx, times: times, perHourRain: perHourRain, perHourMm: perHourMm,
     spread: spread, ens: ens
@@ -2687,7 +2895,7 @@ function render(j, allModels, generation){
   });
 
   modelState = {times:times, consensus:consensus, N:N, perHourMax:perHourMax, spread:spread, peak:pk,
-                longTimes:longTimes, longMed:longMed};
+                longTimes:longTimes, longMed:longMed, snowFrac: perHourSnow};
   /* Řádek ČHMÚ se kreslí i odsud, ne jen z loadChmi().
      Ve snímku z 23. 7. v tabulce chyběl a nemuselo to být jen CORSem:
      když ČHMÚ odpoví dřív, než dorazí modely, renderChmiRow() nemá do
@@ -3019,6 +3227,11 @@ function bpDiag(){
       Object.keys(s.bins||{}).sort().forEach(function(b){
         var e = s.bins[b];
         out += "\n    hlášené " + (Math.round(b*100)) + " %: reálně " + Math.round(100*e.hit/e.n) + " % (" + e.n + "×)";
+      });
+      ["ens","om","agree"].forEach(function(src){
+        var tot = 0;
+        if(s.srcs && s.srcs[src]) Object.keys(s.srcs[src]).forEach(function(b){ tot += s.srcs[src][b].n; });
+        out += "\n    zdroj " + src + ": " + tot + " vzorků · kalibrace " + (brierCurve(src) ? "AKTIVNÍ" : "sbírá data");
       });
       return out;
     })(),
@@ -4483,7 +4696,14 @@ function blendWeights(dt, cc){
        co teprve vzniká. Strop 0,55, ať nepřebije měření nad hlavou. */
     regio:   0.55*Math.exp(-dt/90),
     nowcast: 0,                         /* 15min nowcast Open-Meteo (bodový + mřížka) */
-    model:   Math.min(0.35, dt/60*0.35) /* hodinový konsenzus modelů */
+    model:   Math.min(0.35, dt/60*0.35), /* hodinový konsenzus modelů */
+    /* Ensemble nekrmit do intenzit — jeho silná stránka není množství,
+       ale ČAS. Tahle váha patří jedinému hlasu ensemble v seznamu
+       časů příchodu (buildBlendTimeline, pridej "ensemble"): 20–51
+       běhů téhož modelu s rozhozeným startem je statisticky nejhustší
+       odhad začátku, jaký appka má. Do sumy pro `nowcast` (zbytek po
+       pozorovacích zdrojích) úmyslně NEpatří. */
+    ens:     0.35*Math.exp(-dt/150)
   };
   w.nowcast = Math.max(0.05, 1 - w.radar - w.rvcast - w.natcast - w.metno - w.regio - w.model);
   /* Naučené váhy: zdroj, který appka vlastní verifikací přistihla při
@@ -4493,6 +4713,23 @@ function blendWeights(dt, cc){
     ["radar","rvcast","natcast","metno","regio","nowcast","model"].forEach(function(k){
       w[k] = w[k] * getBlendMult(cc, dt, k, regime);
     });
+    /* ---- KONVEKTIVNÍ PRIOR (jen dokud se appka nenaučila sama) ----
+       Při vznikající konvekci extrapolace radaru nevidí buňky, které
+       teprve vzniknou, a národní nowcasty se v tomhle režimu potácejí;
+       modely s CAPE vstupem naopak konvekci předpoví dřív, než ji radar
+       uvidí. Naučené váhy tohle dříve či později zachytí samy — ale
+       vzorky pro režim "conv" trvají, a do té doby by blend důvěřoval
+       radaru jako frontálnímu dni. Proto ruční prior: pozorovací
+       extrapolace dolů, modely nahoru. Jakmile pro daný zdroj+režim
+       dojde k prvním vlastním vzorkům, prior se pustí a šlápne na něj
+       naučená křivka. */
+    if(regime === "conv"){
+      var PRIOR_CONV = {radar:0.70, rvcast:0.80, natcast:0.75, metno:0.85,
+                        regio:0.90, nowcast:0.90, model:1.5};
+      Object.keys(PRIOR_CONV).forEach(function(k){
+        if(!blendHasData(cc, dt, k, regime)) w[k] *= PRIOR_CONV[k];
+      });
+    }
   }
   return w;
 }
@@ -5524,7 +5761,17 @@ function renderSolo(){
                   + rozp + ".";
     var fx = [];
     if(V) fx.push("<span>shoda <b>" + V.rainModels + "/" + V.N + "</b> modelů</span>");
-    if(V && V.jePravdepodobnost) fx.push("<span>pravděpodobnost <b>" + V.prob + " %</b></span>");
+    /* Šance do hi minuty: procento k tomu, co věta slibuje — že déšť
+       začne právě v tomhle rozpětí. Když není z čeho (žádný ensemble,
+       žádné Open-Meteo), zůstane staré procento přes 8h okno. */
+    var sance = arrivalProbPct(W.lo, W.hi);
+    if(sance != null){
+      fx.push("<span>šance <b>" + sance + " %</b> do " + (W.hi != null ? W.hi : 60) + " min</span>");
+      if(V && V.jePravdepodobnost)
+        fx.push("<span>pravděpodobnost <b>" + V.prob + " %</b> do " + HOURS + " h</span>");
+    } else if(V && V.jePravdepodobnost){
+      fx.push("<span>pravděpodobnost <b>" + V.prob + " %</b></span>");
+    }
     facts.innerHTML = fx.join("");
     talk.innerHTML = W.chmi ? "Vidí to český radar — echo se blíží, ale ještě není nad tebou."
       : W.sat ? "Radar zatím mlčí, ale <em>družice vidí rostoucí oblačnost</em>. Takhle vzniká přeháňka."
@@ -5539,7 +5786,9 @@ function renderSolo(){
       /* Surová klíče blendu ("model", "15min model") by uživatele mátly —
          vypíšeme lidské popisky. Radar/ČHMÚ mluví samo za sebe. */
       return p === "15min model" ? "rychlý model (15 min)"
-           : p === "model" ? "modely na 8 h" : p;
+           : p === "model" ? "modely na 8 h"
+           : p === "ensemble" ? "ensemble (" + ((ensState && ensState.members) || "?") + " členů)"
+           : p;
     }).join(" + ")) : "";
     return;
   }
@@ -6884,7 +7133,7 @@ function buildBlendTimeline(now, altSeries){
        jediný zdroj: radar něco NAMĚŘIL, model si to spočítal z analýzy
        staré několik hodin. Sám o sobě nemá přebít suché pozorování. */
     arrivals.push({v: m, w: w, kdo: jmeno,
-                   obs: (klic !== "model" && klic !== "nowcast")});
+                   obs: (klic !== "model" && klic !== "nowcast" && klic !== "ens")});
   }
   function zeSerie(series){
     if(!series) return null;
@@ -6902,6 +7151,19 @@ function buildBlendTimeline(now, altSeries){
     var v = modelValAtMinutes(dt + phaseShift);
     return {min: dt, mmh: v == null ? null : v*anchorAt(dt)};
   }), "model");
+  /* Ensemble: medián časů začátku svých členů. Jeden hlas — ale hlas
+     20–51 běhů téže analýzy, statisticky hustší než kterýkoliv jiný.
+     Hodinová hrubost znamená, že sám o sobě neumí "za 37 minut";
+     vážený medián s ostatními hlasy ho doladí. Do počtu pozorování
+     (obs) nepatří — je to modelový produkt, ne měření. */
+  if(ensState && ensState !== "off" && ensState !== "error"
+     && ensState.onsets && ensState.onsets.length){
+    var ensOns = ensState.onsets.filter(function(o){ return o != null; });
+    if(ensOns.length >= 5){
+      ensOns.sort(function(a,b){ return a-b; });
+      pridej("ensemble", [{min: ensOns[Math.floor(ensOns.length/2)], mmh: THRESH_OBS}], "ens");
+    }
+  }
 
   var arrival = null;
   if(arrivals.length){
@@ -6940,9 +7202,15 @@ function buildRainAxis(now, timeline){
   pts.sort(function(a,b){ return a.min - b.min; });
   return pts;
 }
-/* Najde konec deště: první okamžik, kdy intenzita klesne pod práh a UŽ SE
-   NEVRÁTÍ v následujícím bodě. Jeden bod pod prahem nestačí — mezera mezi
-   dvěma přeháňkami není konec deště.
+/* Najde konec deště: první okamžik, kdy intenzita klesne pod THRESH_END
+   a sucho VYDRŽÍ. Mezera mezi dvěma přeháňkami konec není — na
+   5minutové mřížce nowcastu musí sucho potrvat aspoň 15 minut, na
+   hodinové mřížce modelů (za 60. minutou) aspoň 90 minut: dřív stačila
+   jediná suchá hodina a appka vyhlašovala konec uprostřed přestávky
+   mezi dvěma vlnami.
+
+   Práh konce (0,12 mm/h) je záměrně nižší než práh začátku (0,2) —
+   mrholení pod prahem začátku je pořád déšť, ne konec.
 
    Vrací {min, wetStart, certain} · {beyond:true, horizon} · null. */
 function estimateRainEnd(now, startMin, timeline){
@@ -6951,21 +7219,38 @@ function estimateRainEnd(now, startMin, timeline){
   /* Najdi, kde déšť vůbec začíná. Tolerance 30 min dozadu, protože odhad
      začátku a hodinová mřížka modelů se nemusí trefit přesně. */
   var from = Math.max(0, startMin - 30), i = 0;
-  while(i < pts.length && !(pts[i].min >= from && pts[i].mmh != null && pts[i].mmh >= THRESH_OBS)) i++;
+  while(i < pts.length && !(pts[i].min >= from && pts[i].mmh != null && pts[i].mmh >= THRESH_END)) i++;
   if(i >= pts.length) return null;             /* v celém okně žádný déšť není */
   var wetStart = pts[i].min;
 
   for(var k=i+1; k<pts.length; k++){
-    if(pts[k].mmh == null || pts[k].mmh >= THRESH_OBS) continue;
-    var nxt = pts[k+1];
-    if(nxt && nxt.mmh != null && nxt.mmh >= THRESH_OBS) continue;   /* jen mezera */
+    if(pts[k].mmh == null || pts[k].mmh >= THRESH_END) continue;  /* mokro nebo ticho dat */
+    /* pts[k] = první suchý bod po dešti. Zjisti, jak dlouho sucho
+       vydrží: projdi souvislou suchou řadu a podívej se, co po níjde. */
+    var j = k;
+    while(j+1 < pts.length && pts[j+1].mmh != null && pts[j+1].mmh < THRESH_END) j++;
+    var nextWet = null;
+    if(j+1 < pts.length && pts[j+1].mmh != null && pts[j+1].mmh >= THRESH_END) nextWet = pts[j+1];
+    var need = (pts[k].min <= 60) ? 15 : 90;   /* minut potvrzeného sucha */
+    if(nextWet && (nextWet.min - pts[k].min) < need){
+      k = j+1;                                 /* jen přestávka mezi vlnami */
+      continue;
+    }
+    /* Interpolace skoku pod práh: na 5minutové mřížce dá minutu, na
+       hodinové aspoň nepřestřelí celou hodinu. */
     var prev = pts[k-1], m = pts[k].min;
     if(prev && prev.mmh != null && prev.mmh > pts[k].mmh){
-      var f = (prev.mmh - THRESH_OBS) / Math.max(1e-6, prev.mmh - pts[k].mmh);
+      var f = (prev.mmh - THRESH_END) / Math.max(1e-6, prev.mmh - pts[k].mmh);
       m = prev.min + (pts[k].min - prev.min) * Math.max(0, Math.min(1, f));
     }
+    /* Jistota: konec potvrzený NÁSLEDUJÍCÍM mokrým bodem (tedy opravdu
+       konec vlny, ne hraniční šum) a suchá hluboko pod prahem. */
+    var dryMin = null;
+    for(var q=k; q<=j && q<pts.length; q++){
+      if(pts[q].mmh != null && (dryMin == null || pts[q].mmh < dryMin)) dryMin = pts[q].mmh;
+    }
     return {min: Math.round(m), wetStart: wetStart, beyond: false,
-            certain: !!(nxt && nxt.mmh != null && nxt.mmh < THRESH_OBS*0.5)};
+            certain: !!(nextWet && dryMin != null && dryMin < THRESH_END*0.5)};
   }
   /* Déšť běží až za okraj dat — řekne se to rovnou i s hodinou, kam appka vidí. */
   return {beyond:true, wetStart: wetStart, horizon: pts[pts.length-1].min};
@@ -7309,6 +7594,13 @@ function recomputeWhen(){
       chmiUsed = true;
     }
     var mins = Math.max(1, Math.round(estMin));
+    /* Fáze srážek z modelů, když pozorování mlčí: většina mokrých modelů
+       v hodině příchodu hlásí sníh → slibujeme sněžení, ne déšť. */
+    if(!typeGuess && modelState && modelState.snowFrac){
+      var sIdx2 = Math.min(modelState.snowFrac.length-1, Math.max(0, Math.round(estMin/60)));
+      var sFrac = modelState.snowFrac[sIdx2];
+      if(sFrac != null && sFrac >= 0.5) typeGuess = {t:"sněžení", i:"většina modelů hlásí sníh"};
+    }
     var tp = typeGuess || wmoType(modelCurrent && modelCurrent !== "error" ? modelCurrent.code : null, estMm);
     estMm = saneMm(estMm); if(estMm == null) estMm = 0.1;
 
@@ -7397,7 +7689,8 @@ function recomputeWhen(){
        pravděpodobností P". Ověří se proti METAR, až T proběhne. */
     if(cur) enqueueVerdict(locKeyOf(cur.lat, cur.lon), cur.lat, cur.lon, cur.cc,
                            now + Math.max(1, estMin)*60000,
-                           verdictProb(agree, (arr && arr.obsN) || 0));
+                           verdictProb(agree, (arr && arr.obsN) || 0),
+                           verdictProbSrc());
     renderRainEnd(now, mins, blendTimeline);
     renderSolo();
     return;
@@ -7476,7 +7769,7 @@ function recomputeWhen(){
   /* Modelový verdikt taky patří do kalibrace — je hlášena shoda maxC/N
      modelů, což je sám o sobě pravděpodobnostní soud. */
   if(cur) enqueueVerdict(locKeyOf(cur.lat, cur.lon), cur.lat, cur.lon, cur.cc,
-                         t, Math.max(0.05, Math.min(0.98, maxC/ms.N)));
+                         t, Math.max(0.05, Math.min(0.98, maxC/ms.N)), "agree");
   renderSolo();
 }
 </script>
