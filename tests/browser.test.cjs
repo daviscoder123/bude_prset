@@ -386,10 +386,12 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
           lastIn:(mx&&last)?(last.getBoundingClientRect().bottom<=mx.getBoundingClientRect().bottom+1):null,
           fit:document.documentElement.style.getPropertyValue('--fit'),
           over:document.documentElement.scrollWidth/window.innerWidth,
-          fits:stats?stats.getBoundingClientRect().bottom<=window.innerHeight+4:null
+          fits:stats?stats.getBoundingClientRect().bottom<=window.innerHeight+4:null,
+          geom:(function(){var app=document.getElementById('app');var mx=document.querySelector('.matrix');var tb=document.getElementById('tbl');var as=document.querySelector('aside');var solo=document.getElementById('solo');var stats2=document.querySelector('.stats');var hd=document.querySelector('header');return {ih:window.innerHeight,appSH:app?app.scrollHeight:0,appOH:app?app.offsetHeight:0,mxSH:mx?mx.scrollHeight:0,mxCH:mx?mx.clientHeight:0,tbH:tb?tb.offsetHeight:0,asH:as?as.offsetHeight:0,soloH:solo?solo.offsetHeight:0,statsH:stats2?stats2.offsetHeight:0,hdH:hd?hd.offsetHeight:0};})()
         };
       });
       s.w=w; s.h=h; s.errors=errors; rows.push(s);
+      console.log('phone '+w+'x'+h+' diag: '+JSON.stringify(s));
       const f=s.fit===''?1:parseFloat(s.fit);
       assert.ok(s.over<=1.02,'horizontal overflow na '+w+'px: '+JSON.stringify(s));
       assert.ok(s.fits===true,'appka se nevesla na jednu obrazovku '+w+'x'+h+': '+JSON.stringify(s));
