@@ -4,7 +4,7 @@
    radar, geokódování) jdou vždy přímo na síť a NEcachují se zde —
    o úsporu dat se stará in-memory cache v aplikaci. Na pozadí SW
    nic nestahuje. */
-var CACHE = "bude-prset-v3";
+var CACHE = "bude-prset-v4";
 var SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", function(e){
@@ -16,12 +16,13 @@ self.addEventListener("activate", function(e){
   }).then(function(){ return self.clients.claim(); }));
 });
 self.addEventListener("fetch", function(e){
+  if(e.request.method !== "GET") return;   /* ne-GET do cache nepatří, c.put() by vyhodil výjimku */
   var url = new URL(e.request.url);
   if(url.origin !== location.origin) return;      /* API třetích stran: vždy síť, bez zásahu */
   e.respondWith(
     fetch(e.request).then(function(res){
       var copy = res.clone();
-      caches.open(CACHE).then(function(c){ c.put(e.request, copy); });
+      caches.open(CACHE).then(function(c){ return c.put(e.request, copy); }).catch(function(){});
       return res;
     }).catch(function(){ return caches.match(e.request); })
   );
