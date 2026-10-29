@@ -25,8 +25,8 @@ before(async()=>{
   browser=await chromium.launch({headless:true,channel:'chromium'});
 });
 after(async()=>{await browser?.close();await new Promise(r=>server?.close(r));});
-async function fixture(timezone='America/Los_Angeles',width=1280){
-  const ctx=await browser.newContext({timezoneId:timezone,viewport:{width,height:900},serviceWorkers:'block'});
+async function fixture(timezone='America/Los_Angeles',width=1280,height=900){
+  const ctx=await browser.newContext({timezoneId:timezone,viewport:{width,height},serviceWorkers:'block'});
   const p=await ctx.newPage(), errors=[];
   p.on('pageerror',e=>errors.push(e.message));
   const control={pending:[],holdLat:null,failLat:null,failRegional:false,modelRequests:[]};
@@ -239,11 +239,25 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
         /* Kolo 8b: popisky listy souhrnu se na mobilu zkracuji (data-short),
            aby se "NEJBLIZSI DEST" nezalamoval — useknuty druhy radek
            vypadal na telefonu jako rozsypany text. Popisek musi byt
-           kratky A na jednom radku. */
+           kratky A na jednom radku.
+           Kolo 8c: velikosti fontu jsou fluidni skala
+           clamp(dolni, X*vw, horni) ukotvena k realnym displejum
+           (360-430 px) — a nouzove zmenzeni resi promenna --fit,
+           ne zoom (zoom by vw fonty nezmensoval). Na beznych
+           telefonech se --fit nesmi spustit vubec, jinak by velikost
+           textu byla pri kazdem nacteni jina. */
         k2:(function(){const k=document.querySelectorAll('.stat .k')[1];
           return k?k.textContent:null;})(),
         k2h:(function(){const k=document.querySelectorAll('.stat .k')[1];
           return k?k.getBoundingClientRect().height:null;})(),
+        px:(el)=>el?parseFloat(getComputedStyle(el).fontSize):null,
+        kf:(function(){const k=document.querySelectorAll('.stat .k')[1];
+          return k?parseFloat(getComputedStyle(k).fontSize):null;})(),
+        vf:(function(){const v=document.querySelectorAll('.stat .v')[1];
+          return v?parseFloat(getComputedStyle(v).fontSize):null;})(),
+        bigf:(function(){const b=document.getElementById('soloBig');
+          return b?parseFloat(getComputedStyle(b).fontSize):null;})(),
+        fit:document.documentElement.style.getPropertyValue('--fit'),
         adjust:/(-webkit-)?text-size-adjust:\s*100%/.test(css),
         computedAdjust:cs.getPropertyValue('-webkit-text-size-adjust')||cs.getPropertyValue('text-size-adjust'),
         htmlRule:(rules.find(t=>/^html\s*,\s*body\s*\{/.test(t))||'NO RULE'),
@@ -277,6 +291,77 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
     /* .n je od 29. 10. 2026 cíleně 10,5 px (čitelnost na mobilu); pojistka
        hlídá iOS inflaci (~zdvojnásobení na ~19-21 px), ne přesnou hodnotu. */
     assert.ok(state.font!==null&&state.font<=12,'inflated font: '+diag);
+    /* Kolo 8c: fluidni skala + deterministicke --fit. Na beznych
+       telefonech (tady 375x900) se --fit vubec nesmi spustit — velikost
+       textu zalezi jen na sirce displeje, takze kazde nacteni vypada
+       stejne. A pisma musi byt „pomerne velka": popisky >=10 px,
+       hodnoty >=13,4 px, hlavni cislo >=34 px. */
+    assert.equal(state.fit,'','--fit se nadmerne spustil na bezkem telefonu: '+diag);
+    assert.ok(state.kf>=10&&state.vf>=13.4&&state.bigf>=34,'mala pisma po zmene skaly: '+diag);
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
+});
+test('mobile type scale is deterministic and fits on real phone sizes (360-430)',async()=>{
+  /* Kolo 8c (Dave): „Nastuduj si velikosti nejznamnejsich telefonu
+     a uprav to, at se text vejde akorat do oken — a at velikosti
+     nejsou ruznorode pri kazdem nacteni." Realne CSS viewporty
+     telefonu na vysku (~95 % mobilnich navstev ma sirku 360-430 px):
+       360x740  Galaxy S/A, Pixel a (nejbeznejsi sirka Androidu)
+       375x667  iPhone SE (nejkratsi bezna vyska displeje)
+       393x852  iPhone 14 Pro / 15 / 16
+       430x932  iPhone Plus / Pro Max
+     Skala fontu je clamp(dolni, X*vw, horni) ukotvena 360 -> 430 px,
+     takze velikost textu zalezi JEN na sirce displeje — nic se
+     neprepocitava z obsahu, takze stejny telefon vykresli pri kazdem
+     nacteni stejnou velikost. Nouzove --fit smi ubrat jen na kratkem
+     displeji (typicky SE) a snizi vsechny velikosti naraz, takze
+     pomery layoutu zustanou stejne. */
+  const phones=[[360,740],[375,667],[393,852],[430,932]];
+  const rows=[];
+  for(const [w,h] of phones){
+    const {ctx,p,errors}=await fixture('Europe/Prague',w,h);
+    try{
+      await search(p,'Praha');await ready(p,'Praha');
+      await p.evaluate(()=>new Promise(res=>requestAnimationFrame(()=>requestAnimationFrame(res))));
+      const s=await p.evaluate(()=>{
+        const px=el=>el?parseFloat(getComputedStyle(el).fontSize):null;
+        const ks=document.querySelectorAll('.stat .k');
+        const vs=document.querySelectorAll('.stat .v');
+        const stats=document.querySelector('.stats');
+        return {
+          k:px(ks[1]), v:px(vs[1]),
+          n:px(document.querySelector('#body tr td.name .n')),
+          big:px(document.getElementById('soloBig')),
+          fit:document.documentElement.style.getPropertyValue('--fit'),
+          over:document.documentElement.scrollWidth/window.innerWidth,
+          fits:stats?stats.getBoundingClientRect().bottom<=window.innerHeight+4:null
+        };
+      });
+      s.w=w; s.h=h; s.errors=errors; rows.push(s);
+      const f=s.fit===''?1:parseFloat(s.fit);
+      assert.ok(s.over<=1.02,'horizontal overflow na '+w+'px: '+JSON.stringify(s));
+      assert.ok(s.fits===true,'appka se nevesla na jednu obrazovku '+w+'x'+h+': '+JSON.stringify(s));
+      assert.ok(f>=0.8,'--fit zbesil na '+w+'px: '+JSON.stringify(s));
+      /* pomerne velka pisma — prahy pocitane po pripadnem --fit,
+         at zustava ctitelnost i na nejkratsim displeji */
+      assert.ok(s.k>=10*f-0.05&&s.v>=13.4*f-0.05&&s.n>=10.4*f-0.05&&s.big>=33*f-0.05,
+        'mala pisma na '+w+'px: '+JSON.stringify(s));
+      assert.deepEqual(errors,[],'page errors '+w+'px: '+errors.join(' | '));
+    }finally{await ctx.close();}
+  }
+  /* deterministicka skala: vyocene zakladni velikosti (bez --fit) s
+     rostouci sirkou displeje jen rostou — na zadnem telefonu nesmi
+     skala "skacem" klesnout, jinak by appka vypadala pri ruznych
+     sirekach nahodne. */
+  const base=rows.map(r=>({w:r.w,k:r.k/(r.fit===''?1:parseFloat(r.fit)),
+    v:r.v/(r.fit===''?1:parseFloat(r.fit)),
+    n:r.n/(r.fit===''?1:parseFloat(r.fit)),
+    big:r.big/(r.fit===''?1:parseFloat(r.fit))}));
+  for(let i=1;i<base.length;i++){
+    for(const key of ['k','v','n','big']){
+      assert.ok(base[i][key]>=base[i-1][key]-0.05,
+        'skala "'+key+'" klesa s rostouci sirkou: '+JSON.stringify(base));
+    }
+  }
+  console.log('phone scale:',JSON.stringify(rows));
 });
