@@ -519,10 +519,17 @@ var MODEL_POOL = [
      řádek" nesebrala jako dvojkartu ICONu. AI model má JINÉ chyby než
      fyzikální (umí skvrny lépe položit, ale občas si vymyslí vítr) —
      právě proto je jeho srovnání s ICONem nejcennější, a to jen když zůstane
-     samostatný řádek. Kdyby open-meteo pod tímhle id model nevedlo,
-     nevrátí data a appka ho vyfiltruje úplně stejně jako doménové modely
-     mimo svoji oblast — nikam se nerozsype. */
-  {id:"aicon_global",         n:"DWD AICON",    a:"AI model DWD · ~13 km",     hl:50.1, hg:8.7,    fam:"AICON",      cc:"DE"},
+     samostatný řádek.
+     POZOR NA ID: správné id open-meteo je "dwd_aicon_global_native".
+     Neexistující id v models= neshodí jen jeden řádek, jak jsem dřív
+     čekal — open-meteo vrátí HTTP 400 pro CELÝ dotaz ("Cannot initialize
+     MultiDomains from invalid String value") a appka nezobrazí nic.
+     Přesně to se stalo 29. 10. 2026 s id "aicon_global": všech 17 modelů
+     najednou vrátilo chybu, a protože neplatné id leželo i v nouzovém
+     základu MODELS, shodilo i záchranné druhé volání — kompletní výpadek
+     dat. Snowfall AICON umí taky (API ho pro něj vrácí), takže sdílený
+     dotaz hourly=precipitation,snowfall projde v pořádku. */
+  {id:"dwd_aicon_global_native", n:"DWD AICON",  a:"AI model DWD · ~13 km",    hl:50.1, hg:8.7,    fam:"AICON",      cc:"DE"},
   {id:"meteofrance_seamless", n:"Météo-France",  a:"ARPEGE / AROME",            hl:43.6, hg:1.4,    fam:"MeteoFrance",cc:"FR"},
   {id:"ukmo_seamless",        n:"UK Met Office", a:"Britská met. služba",       hl:50.7, hg:-3.5,   fam:"UKMO",       cc:"GB"},
   {id:"knmi_seamless",        n:"KNMI",          a:"Nizozemská met. služba",    hl:52.1, hg:5.2,    fam:"KNMI",       cc:"NL"},
@@ -2214,15 +2221,33 @@ function load(place, silent){
     })
     .catch(function(){
       if(isStale(myId)) return;
-      /* pokud regionální model shodí dotaz (mimo doménu), zkus jen globální */
-      if(reg){
-        var url2 = "https://api.open-meteo.com/v1/forecast?latitude="+place.lat+"&longitude="+place.lon
-          + "&hourly=precipitation,snowfall&models="+MODELS.map(function(m){return m.id;}).join(",")
+      /* 2. pokus: pokud hlavní dotaz shodí jeden model (regionální mimo
+         doménu, neplatné id), zkus nouzový základ MODELS. POZOR: ten se
+         bere ze stejného MODEL_POOL, takže jedno neplatné id shodí obě
+         volání naráz — 29. 10. 2026 to takhle vyřadilo celou appku
+         (aicon_global). Proto je tu ještě 3. pokus: tvrdě zadrátované
+         trio modelů, které open-meteo obsluhuje roky a leží hluboko
+         před vším ostatním v poolu. Aspoň tři řádky místo prázdné
+         obrazovky — výpadek jednoho modelu už nikdy nesrhne celý
+         výběr modelů. */
+      var retry = function(models){
+        var u = "https://api.open-meteo.com/v1/forecast?latitude="+place.lat+"&longitude="+place.lon
+          + "&hourly=precipitation,snowfall&models="+models.map(function(m){return m.id;}).join(",")
           + "&forecast_hours="+(HOURS_END+1)+"&timeformat=unixtime&timezone=auto";
-        cachedJson(url2, 600000)
-          .then(function(j){ if(isStale(myId)) return; render(j, MODELS.slice(), myId); status(null); })
-          .catch(function(){ if(!isStale(myId)) failLoad(); });
-      } else failLoad();
+        return cachedJson(u, 600000).then(function(j){
+          if(isStale(myId)) return;
+          render(j, models, myId);
+          status(null);
+        });
+      };
+      var trio = MODEL_POOL.filter(function(m){
+        return m.id === "gfs_seamless" || m.id === "icon_seamless" || m.id === "ecmwf_ifs025";
+      });
+      retry(reg ? MODELS.slice() : trio)
+        .catch(function(){
+          if(isStale(myId)) return;
+          retry(trio).catch(function(){ if(!isStale(myId)) failLoad(); });
+        });
     });
 
   loadRadar(place.lat, place.lon, myId);
