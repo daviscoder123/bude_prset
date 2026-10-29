@@ -202,7 +202,7 @@ test('global-model fallback also receives and renders Unix timestamps',async()=>
   }finally{await ctx.close();}
 });
 test('mobile compact layout keeps fonts uninflated and never shrinks via zoom',async()=>{
-  /* Regrese z 29. 10. 2026: iOS Safari (17.4+) nafukuje malé fonty
+  /* Regrese z 29. 10. 2026: (a) iOS Safari (17.4+) nafukuje malé fonty
      ("text autosizing"), kdyz stranka nevyjadrne text-size-adjust. Na
      mobilu appka pouziva 8-9,5px fonty, takze si je Safari zdvojnasobilo
      - nazvy modelu se orizly na "ICO…" a layout pretecel, takze fitGuard
@@ -229,9 +229,17 @@ test('mobile compact layout keeps fonts uninflated and never shrinks via zoom',a
         computedAdjust:cs.getPropertyValue('-webkit-text-size-adjust')||cs.getPropertyValue('text-size-adjust'),
         htmlRule:(rules.find(t=>/^html\s*,\s*body\s*\{/.test(t))||'NO RULE'),
         appRule:(css.match(/html\.compact #app\s*\{[^}]*\}/g)||[]).join(' '),
+        noFixedAttach:css.indexOf('background-attachment')===-1,
         font:n?parseFloat(getComputedStyle(n).fontSize):null
       };
     });
+    /* Regrese z 29. 10. 2026 (barvy): stavový gradient musi zit na body::before
+       (position:fixed), ne na background-attachment:fixed — iOS Safari ho pri
+       scrollu kompaktniho rezimu nerespektuje a misto gradientu vykresli bilou
+       stranku; prusvitne panely pak vypadaji jako rozbity svetly motiv. */
+    const bgBefore=await p.evaluate(()=>getComputedStyle(document.body,'::before').backgroundImage);
+    assert.ok(/linear-gradient/.test(bgBefore),'stavovy gradient chybi na body::before: '+bgBefore);
+    assert.ok(state.noFixedAttach!==false,'background-attachment:fixed nesmi zpet do CSS');
     const diag=JSON.stringify(state);
     console.log('mobile compact state:',diag);
     assert.equal(state.zoom,'','fitGuard nesmi nic zmensit: '+diag);   /* fitGuard nesmi nic zmensit */

@@ -29,18 +29,31 @@
    velikosti, které si appka nastavila sama. Android Chrome má stejný
    mechanismus ("font boosting") a i ten tohle vypíná. */
 html,body{height:100%;overflow:hidden;-webkit-text-size-adjust:100%;text-size-adjust:100%}
-/* ==== SKLO: pozadí nese stav počasí, panely jsou průsvitné ==== */
+/* ==== SKLO: pozadí nese stav počasí, panely jsou průsvitné ====
+   Gradient je na body::before (position:fixed), NE na background-
+   attachment:fixed na body: iOS Safari fixed attachment nerespektuje
+   (29. 10. 2026 — mobil vykreslil místo gradientu bílou stránku,
+   průsvitné panely pak působily jako rozbitý světlý motiv). Pevně
+   pozicovaný pseudo-element je na iOS spolehlivý a drží se viewportu
+   i při scrollu kompaktního režimu — přesně to, co fixed attachment
+   sliboval. Body nese jen plnou pojistnou barvu pro hraniční případy. */
 body{
-  background:linear-gradient(165deg,#1B3A8F 0%,#2D4FBF 40%,#7C3AED 100%);
-  background-attachment:fixed;
+  background:#1B3A8F;
   color:var(--text); font-family:var(--sans);
 }
 body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;
   /* světelné skvrny až od středu obrazovky — horní lišta zůstává čistý gradient */
   background:radial-gradient(900px 480px at 88% 32%, rgba(255,255,255,.09), transparent 60%),
-             radial-gradient(640px 420px at 8% 96%, rgba(120,220,255,.10), transparent 65%)}
-body.soon{background:linear-gradient(165deg,#7C3AED 0%,#B558D8 55%,#E88A5C 100%);background-attachment:fixed}
-body.dry{background:linear-gradient(165deg,#0E5A4E 0%,#2E8A6E 60%,#4CA67E 100%);background-attachment:fixed}
+             radial-gradient(640px 420px at 8% 96%, rgba(120,220,255,.10), transparent 65%),
+             linear-gradient(165deg,#1B3A8F 0%,#2D4FBF 40%,#7C3AED 100%)}
+body.soon{background:#7C3AED}
+body.dry{background:#0E5A4E}
+body.soon::before{background:radial-gradient(900px 480px at 88% 32%, rgba(255,255,255,.09), transparent 60%),
+             radial-gradient(640px 420px at 8% 96%, rgba(120,220,255,.10), transparent 65%),
+             linear-gradient(165deg,#7C3AED 0%,#B558D8 55%,#E88A5C 100%)}
+body.dry::before{background:radial-gradient(900px 480px at 88% 32%, rgba(255,255,255,.09), transparent 60%),
+             radial-gradient(640px 420px at 8% 96%, rgba(120,220,255,.10), transparent 65%),
+             linear-gradient(165deg,#0E5A4E 0%,#2E8A6E 60%,#4CA67E 100%)}
 .matrix,.verdict,.when,.stats,.loc,.solo,.sugg,.madeby{
   -webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
 }
