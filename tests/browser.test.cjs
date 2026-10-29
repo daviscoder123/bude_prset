@@ -201,3 +201,37 @@ test('global-model fallback also receives and renders Unix timestamps',async()=>
     assert.deepEqual(errors,[]);
   }finally{await ctx.close();}
 });
+test('mobile compact layout keeps fonts uninflated and never shrinks via zoom',async()=>{
+  /* Regrese z 29. 10. 2026: iOS Safari (17.4+) nafukuje malé fonty
+     ("text autosizing"), kdyz stranka nevyjadrne text-size-adjust. Na
+     mobilu appka pouziva 8-9,5px fonty, takze si je Safari zdvojnasobilo
+     - nazvy modelu se orizly na "ICO…" a layout pretecel, takze fitGuard
+     zmensil celu stranku zoomem (obsah vlevo, prazdne pruhy vpravo/dole).
+     Fix: html{-webkit-text-size-adjust:100%;text-size-adjust:100%} a
+     procenta misto vw/dvh na #app v compactu. Tenhle test hlida vsechny
+     tri casti fixu v mobilnim viewportu 375x812. */
+  const {ctx,p,errors}=await fixture('Europe/Prague',375);
+  try{
+    await search(p,'Praha');await ready(p,'Praha');
+    /* fitGuard nastavuje zoom az v rAF - pockat na dva snimky, az se layout ustali */
+    await p.evaluate(()=>new Promise(res=>requestAnimationFrame(()=>requestAnimationFrame(res))));
+    const state=await p.evaluate(()=>{
+      const n=document.querySelector('#body tr td.name .n');
+      const css=[...document.styleSheets[0].cssRules].map(r=>r.cssText).join('\n');
+      return {
+        zoom:document.body.style.zoom,
+        over:document.documentElement.scrollWidth/window.innerWidth,
+        adjust:/-webkit-text-size-adjust:\s*100%/.test(css),
+        appRule:(css.match(/html\.compact #app\s*\{[^}]*\}/g)||[]).join(' '),
+        font:n?parseFloat(getComputedStyle(n).fontSize):null
+      };
+    });
+    assert.equal(state.zoom,'');                    /* fitGuard nesmi nic zmensit */
+    assert.ok(state.over<=1.02,'horizontal overflow: '+state.over);
+    assert.equal(state.adjust,true);                /* pojistka proti nafouknuti fontu */
+    assert.ok(/max-width:\s*100%/.test(state.appRule)&&/min-height:\s*100%/.test(state.appRule),
+      'compact #app musi pouzivat procenta, ne vw/dvh: '+state.appRule);
+    assert.ok(state.font!==null&&state.font<=10,'inflated font: '+state.font);
+    assert.deepEqual(errors,[]);
+  }finally{await ctx.close();}
+});
