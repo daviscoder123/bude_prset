@@ -251,6 +251,15 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
         k2h:(function(){const k=document.querySelectorAll('.stat .k')[1];
           return k?k.getBoundingClientRect().height:null;})(),
         px:(el)=>el?parseFloat(getComputedStyle(el).fontSize):null,
+        /* Kolo 8e (screenshot 22:37): nazvy modelu se na prvnim otevreni
+           usekaly na „ICO…" — dlouhe nazvy („ICON-D2 · střední Evropa",
+           „MET Norway"…) se nevejdou do uzkeho mobilniho sloupce.
+           Fix: kratke nazvy (ns) na mobilu + sirsi sloupec. Pojistka:
+           ZADNY nazev v prvnim sloupci nesmi byt useknuty — text-overflow
+           ellipsis znamena, ze scrollWidth presahuje clientWidth. */
+        nfit:(function(){const ns=document.querySelectorAll('#body td.name .n');
+          for(const n of ns){ if(n.scrollWidth>n.clientWidth+1) return false; }
+          return ns.length?true:null;})(),
         kf:(function(){const k=document.querySelectorAll('.stat .k')[1];
           return k?parseFloat(getComputedStyle(k).fontSize):null;})(),
         vf:(function(){const v=document.querySelectorAll('.stat .v')[1];
@@ -298,6 +307,7 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
        hlavni cislo 30-40 px (už ne osamoceně obří ~2,7násobek popisků). */
     assert.equal(state.fit,'','--fit se nadmerne spustil na bezkem telefonu: '+diag);
     assert.ok(state.kf>=11&&state.vf>=13.4&&state.bigf>=30,'mala pisma po zmene skaly: '+diag);
+    assert.ok(state.nfit===true,'useknute nazvy modelu (kolo 8e): '+diag);
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });
@@ -328,10 +338,15 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
         const ks=document.querySelectorAll('.stat .k');
         const vs=document.querySelectorAll('.stat .v');
         const stats=document.querySelector('.stats');
+        /* Kolo 8e: zadny nazev modelu nesmi byt useknuty (schema nfit viz vyse) */
+        let nfit=null;
+        const ns=document.querySelectorAll('#body td.name .n');
+        if(ns.length){ nfit=true; for(const n of ns){ if(n.scrollWidth>n.clientWidth+1) nfit=false; } }
         return {
           k:px(ks[1]), v:px(vs[1]),
           n:px(document.querySelector('#body tr td.name .n')),
           big:px(document.getElementById('soloBig')),
+          nfit,
           fit:document.documentElement.style.getPropertyValue('--fit'),
           over:document.documentElement.scrollWidth/window.innerWidth,
           fits:stats?stats.getBoundingClientRect().bottom<=window.innerHeight+4:null
@@ -347,6 +362,7 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
          uz neni 4nasobek popisku, ale ~2,5-2,9násobek */
       assert.ok(s.k>=11*f-0.05&&s.v>=13.4*f-0.05&&s.n>=11.4*f-0.05&&s.big>=30*f-0.05,
         'mala pisma na '+w+'px: '+JSON.stringify(s));
+      assert.ok(s.nfit===true,'useknute nazvy modelu na '+w+'px: '+JSON.stringify(s));
       assert.deepEqual(errors,[],'page errors '+w+'px: '+errors.join(' | '));
     }finally{await ctx.close();}
   }
