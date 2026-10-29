@@ -343,7 +343,15 @@ footer{display:flex;justify-content:space-between;align-items:center;font-family
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 /* kompaktní (mobilní) režim — řízeno JS třídou na <html> */
-html.compact , html.compact body{overflow-y:auto;overflow-x:hidden}
+/* Mobil je JEDNA obrazovka: hlavička, tabulka, hlavní věta a lišta
+   souhrnů se musejí vejít vedle sebe na displej bez posouvání stránky.
+   Výškový řetězec html→body je v procentech záměrně (ne vw/dvh):
+   procenta se uvnitř zoomu fitGuardu přepočítají, takže appka vyplní
+   displej i po zmenšení, a scrollHeight pak pořád poctivě hlásí,
+   kolik obsah ve skutečnosti zabírá. */
+html.compact , html.compact body{overflow:hidden}
+html.compact{height:100%}
+html.compact body{min-height:100%}
 /* Pozor na jednotky: vw/dvh se nezmenšují se zoomem fitGuardu (zoom škáluje
    jen prvky, ne viewport), takže s vw/dvh by appka zabrala jen část
    obrazovky a kolem zůstal prázdný rám. Procenta se počítají uvnitř
@@ -363,15 +371,36 @@ html.compact .updated{display:none}
 html.compact .loc{min-width:0;max-width:none}
 html.compact .loc .coords{display:none}
 html.compact .locBtn{padding:8px 12px}
-html.compact main{grid-template-columns:1fr;gap:8px}
-html.compact aside{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+/* main na mobilu je sloupec: tabulka pruží (doplní volné místo),
+   panely pod ní drží přirozenou výšku — lišta souhrnů tak sedí
+   u spodního okraje displeje. */
+html.compact main{display:flex;flex-direction:column;gap:8px;min-height:0}
+html.compact .matrix{flex:1 1 0;min-height:0}
+html.compact aside{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-height:0}
 html.compact .verdict{grid-column:1}
 html.compact .when{grid-column:2}
-html.compact .stats{grid-column:1/-1;grid-template-columns:repeat(4,1fr);gap:6px;padding:8px}
-html.compact .stat{min-width:0;overflow:hidden}
-html.compact .stat .k{font-size:9px;letter-spacing:.02em;line-height:1.25;white-space:normal}
-html.compact .stat .v{font-size:14px;white-space:nowrap}
-html.compact{--cell-h:22px}
+/* Lišta souhrnů na mobilu: jeden tenký pruh se čtyřmi oddělenými
+   hodnotami — vždy na jednom řádku, bez zalamování buněk. Oddělovače
+   mezi buňkami ji dělají čitelnou i na úzkých displejích. */
+html.compact .stats{grid-column:1/-1;grid-template-columns:repeat(4,1fr);gap:0;padding:8px 2px;border-radius:14px}
+html.compact .stat{min-width:0;overflow:hidden;padding:0 8px}
+html.compact .stat + .stat{border-left:1px solid var(--line)}
+html.compact .stat .k{font-size:8.5px;letter-spacing:.05em;line-height:1.3;white-space:normal}
+html.compact .stat .v{font-size:13px;white-space:nowrap;margin-top:2px}
+/* Hlavní panel na mobilu dýchá hustěji, ať zbude místo pro tabulku
+   i lištu — čitelnost hlídají zvětšené řádky, ne vzduch kolem. */
+html.compact .solo .hero{padding:11px 13px 9px}
+html.compact .solo .wart{width:62px;height:62px;margin:-2px -2px 0 0}
+html.compact .solo .big{font-size:clamp(30px,9.5vw,44px)}
+html.compact .solo .says{padding:10px 13px 0;gap:8px}
+html.compact .solo .say{padding-left:11px}
+html.compact .solo .say .tag{margin-bottom:3px}
+html.compact .solo .say p{font-size:15px}
+html.compact .solo .facts{padding:9px 13px 0;gap:4px}
+html.compact .solo .facts span{font-size:11.5px;padding:4px 8px}
+html.compact .solo .talk{margin:9px 13px 0;padding:9px 0 0;font-size:12.5px}
+html.compact .solo .src{padding:7px 13px 11px}
+html.compact{--cell-h:20px}
 html.compact .matrix{padding:6px;border-radius:10px}
 html.compact .mhead h2{font-size:13px}
 html.compact .mhead .u{font-size:9.5px}
@@ -393,13 +422,15 @@ html.compact .when .big{font-size:24px}
 html.compact .when .big.none{font-size:16px}
 html.compact .when .sub{font-size:9.5px}
 html.compact .when .src{font-size:7.5px}
-html.compact footer{display:flex;justify-content:center;padding:6px 0 2px}
+/* Značka i slogan zůstávají na velkém displeji; na mobilu hlavička
+   nese název appky sama a patička by jen kradla řádky displeje. */
+html.compact footer{display:none}
 html.compact .legend{display:none}
 html.compact .srcnote,html.compact .srcwrap{display:none}
 html.compact .madeby{gap:6px;padding:4px 11px}
 html.compact .mb-name{font-size:10px}
 html.compact .mb-slogan{font-size:9px}
-html.compact{--cell-h:22px;font-size:15px}
+html.compact{--cell-h:20px;font-size:15px}
 html.compact body{overflow-x:hidden}
 html.compact #app{overflow-x:hidden}
 html.compact td{font-size:10px}
@@ -2019,6 +2050,7 @@ function fitPanels(){
   requestAnimationFrame(function(){
     var v = document.querySelector(".verdict"), w = document.querySelector(".when");
     fitPanel(v); fitPanel(w);
+    fitGuard();   /* na mobilu se po nových faktech posune výška obsahu */
   });
 }
 function isPhoneLike(){
@@ -2033,12 +2065,21 @@ function applyLayoutMode(){
   fitGuard();
 }
 /* Pojistka: pokud i tak obsah přetéká (prohlížeč ignoruje viewport),
-   plynule zmenšit celou plochu, aby se vešla beze zbytku. */
+   plynule zmenšit celou plochu, aby se vešla beze zbytku.
+   Na telefonu se hlídá i VÝŠKA: appka musí stát na jedné obrazovce
+   bez posouvání. Když obsah přesáhne displej, zmenší se zoomem celá
+   plocha — na malých telefonech tak zůstane vše čitelné a najednou.
+   Procenta v compact CSS se uvnitř zoomu přepočítají, takže plocha
+   vyplní displej i po zmenšení (stejné pravidlo jako u šířky). */
 function fitGuard(){
   var b = document.body;
   b.style.zoom = "";
   requestAnimationFrame(function(){
     var over = document.documentElement.scrollWidth / window.innerWidth;
+    if(NARROW.matches){
+      var overH = document.documentElement.scrollHeight / window.innerHeight;
+      if(overH > over) over = overH;
+    }
     if(over > 1.02) b.style.zoom = String(Math.floor(100/over*0.99)/100);
   });
 }

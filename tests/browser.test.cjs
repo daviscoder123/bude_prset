@@ -201,15 +201,20 @@ test('global-model fallback also receives and renders Unix timestamps',async()=>
     assert.deepEqual(errors,[]);
   }finally{await ctx.close();}
 });
-test('mobile compact layout keeps fonts uninflated and never shrinks via zoom',async()=>{
+test('mobile compact layout keeps fonts uninflated and fits one screen without scrolling',async()=>{
   /* Regrese z 29. 10. 2026: (a) iOS Safari (17.4+) nafukuje malé fonty
-     ("text autosizing"), kdyz stranka nevyjadrne text-size-adjust. Na
+     ("text autosizing"), kdyz stranka nevyjadri text-size-adjust. Na
      mobilu appka pouziva 8-9,5px fonty, takze si je Safari zdvojnasobilo
      - nazvy modelu se orizly na "ICO…" a layout pretecel, takze fitGuard
      zmensil celu stranku zoomem (obsah vlevo, prazdne pruhy vpravo/dole).
      Fix: html{-webkit-text-size-adjust:100%;text-size-adjust:100%} a
-     procenta misto vw/dvh na #app v compactu. Tenhle test hlida vsechny
-     tri casti fixu v mobilnim viewportu 375x812. */
+     procenta misto vw/dvh na #app v compactu.
+     (b) Od kola 8 musi byt mobil JEDNA obrazovka: zadne posouvani stranky.
+     fitGuard hlida krom sirky i vysku a kdyz obsah presahne displej,
+     zmensi zoomem celou plochu. Zoom tedy nyni smi byt nenulovy, ALE:
+     nesmi zbesit (kdezto inflace fontu zmensila na ~0,5) a cela appka
+     se musi vejst do viewportu — hlida se spodni hrana listy souhrnu.
+     Tenhle test hlida vsechny casti obou fixu v mobilnim viewportu 375x812. */
   const {ctx,p,errors}=await fixture('Europe/Prague',375);
   try{
     await search(p,'Praha');await ready(p,'Praha');
@@ -225,6 +230,12 @@ test('mobile compact layout keeps fonts uninflated and never shrinks via zoom',a
       return {
         zoom:document.body.style.zoom,
         over:document.documentElement.scrollWidth/window.innerWidth,
+        /* Kolo 8: cela appka se musi vejst na jednu obrazovku — spodni
+           hrana listy souhrnu (.stats, posledni prvek) nesmi vylezt
+           pod displej. Rect se pocita az po zoomu, takze to meri to,
+           co uzivatel fakticky vidi. */
+        fits:(function(){const s=document.querySelector('.stats');
+          return s?s.getBoundingClientRect().bottom<=window.innerHeight+4:null;})(),
         adjust:/(-webkit-)?text-size-adjust:\s*100%/.test(css),
         computedAdjust:cs.getPropertyValue('-webkit-text-size-adjust')||cs.getPropertyValue('text-size-adjust'),
         htmlRule:(rules.find(t=>/^html\s*,\s*body\s*\{/.test(t))||'NO RULE'),
@@ -242,7 +253,13 @@ test('mobile compact layout keeps fonts uninflated and never shrinks via zoom',a
     assert.ok(state.noFixedAttach!==false,'background-attachment:fixed nesmi zpet do CSS');
     const diag=JSON.stringify(state);
     console.log('mobile compact state:',diag);
-    assert.equal(state.zoom,'','fitGuard nesmi nic zmensit: '+diag);   /* fitGuard nesmi nic zmensit */
+    /* Kolo 8: zoom smi zmensit obsah jen jako pojistku vysky (mobil je
+       jedna obrazovka), nesmi ale zbesit — inflace fontu z regrese (a)
+       zmensovala plochu na ~0,5. A lista souhrnu musi byt cela nad
+       spodnim okrajem displeje. */
+    const z=state.zoom===''?1:parseFloat(state.zoom);
+    assert.ok(z>=0.7,'zoom zbesil (regrese inflace fontu?): '+diag);
+    assert.ok(state.fits===true,'mobil presahuje obrazovku na vysku — lista souhrnu neni cela videt: '+diag);
     assert.ok(state.over<=1.02,'horizontal overflow: '+diag);
     assert.ok(state.adjust===true||state.computedAdjust==='100%','chybi text-size-adjust:100%: '+diag);  /* pojistka proti nafouknuti fontu */
     assert.ok(/max-width:\s*100%/.test(state.appRule)&&/min-height:\s*100%/.test(state.appRule),
