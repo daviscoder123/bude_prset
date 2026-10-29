@@ -250,7 +250,7 @@ html.compact .solo.dry{
 .solo .say{padding:1px 0 1px 13px;border-left:2px solid var(--line);
   transition:border-color .5s ease}
 .solo .say.wet{border-left-color:var(--rain)}
-.solo .say .tag{display:block;font-family:var(--mono);font-size:8.5px;
+.solo .say .tag{display:block;font-family:var(--mono);font-size:9.5px;
   letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
 .solo .say p{margin:0;font-size:16px;line-height:1.42;font-weight:650;
   color:var(--text);letter-spacing:-.008em;text-wrap:balance}
@@ -258,7 +258,7 @@ html.compact .solo.dry{
 .solo .say b{color:var(--rain)}
 
 .solo .facts{display:flex;flex-wrap:wrap;gap:5px;padding:11px 16px 0}
-.solo .facts span{font-size:11px;color:var(--muted);background:rgba(255,255,255,.08);max-width:100%;overflow-wrap:anywhere;
+.solo .facts span{font-size:12px;color:var(--muted);background:rgba(255,255,255,.08);max-width:100%;overflow-wrap:anywhere;
   border-radius:8px;padding:5px 9px;line-height:1.3}
 .solo .facts b{color:var(--text);font-weight:700}
 
@@ -266,7 +266,7 @@ html.compact .solo.dry{
   margin:12px 16px 0;padding:12px 0 0;border-top:1px solid var(--line)}
 .solo .talk em{font-style:normal;color:var(--warn);font-weight:700}
 .solo .talk s{text-decoration:none;color:var(--nat);font-weight:700}
-.solo .src{font-family:var(--mono);font-size:8px;color:var(--muted);
+.solo .src{font-family:var(--mono);font-size:10px;color:var(--muted);
   padding:9px 16px 13px;overflow-wrap:anywhere}
 
 @media (prefers-reduced-motion:reduce){
@@ -369,22 +369,22 @@ html.compact .verdict{grid-column:1}
 html.compact .when{grid-column:2}
 html.compact .stats{grid-column:1/-1;grid-template-columns:repeat(4,1fr);gap:6px;padding:8px}
 html.compact .stat{min-width:0;overflow:hidden}
-html.compact .stat .k{font-size:7.5px;letter-spacing:.02em;white-space:nowrap}
-html.compact .stat .v{font-size:13px;white-space:nowrap}
+html.compact .stat .k{font-size:9px;letter-spacing:.02em;line-height:1.25;white-space:normal}
+html.compact .stat .v{font-size:14px;white-space:nowrap}
 html.compact{--cell-h:22px}
 html.compact .matrix{padding:6px;border-radius:10px}
-html.compact .mhead h2{font-size:12px}
-html.compact .mhead .u{font-size:8px}
+html.compact .mhead h2{font-size:13px}
+html.compact .mhead .u{font-size:9.5px}
 html.compact table{border-spacing:2px}
-html.compact th{font-size:8.5px}
-html.compact th.model{width:60px}
-html.compact th.sum{width:30px}
-html.compact td{font-size:8.5px;border-radius:3px;overflow:hidden}
-html.compact td.name .n{font-size:9.5px}
+html.compact th{font-size:10px}
+html.compact th.model{width:68px}
+html.compact th.sum{width:32px}
+html.compact td{font-size:10px;border-radius:3px;overflow:hidden}
+html.compact td.name .n{font-size:10.5px}
 html.compact td.name .a{display:none}
 html.compact td.name .flag{display:none}
 html.compact tr.national .badge{display:none}
-html.compact td.sumcell{font-size:8.5px}
+html.compact td.sumcell{font-size:9.5px}
 html.compact .verdict, html.compact .when{padding:10px;border-radius:10px}
 html.compact .verdict .pct{font-size:32px}
 html.compact .verdict .word{font-size:12px}
@@ -397,16 +397,16 @@ html.compact footer{display:flex;justify-content:center;padding:6px 0 2px}
 html.compact .legend{display:none}
 html.compact .srcnote,html.compact .srcwrap{display:none}
 html.compact .madeby{gap:6px;padding:4px 11px}
-html.compact .mb-name{font-size:9px}
-html.compact .mb-slogan{font-size:8px}
-html.compact{--cell-h:20px;font-size:15px}
+html.compact .mb-name{font-size:10px}
+html.compact .mb-slogan{font-size:9px}
+html.compact{--cell-h:22px;font-size:15px}
 html.compact body{overflow-x:hidden}
 html.compact #app{overflow-x:hidden}
-html.compact td{font-size:8px}
-html.compact th{font-size:8px}
-html.compact th.model{width:54px}
-html.compact th.sum{width:28px}
-html.compact td.name .n{font-size:9px}
+html.compact td{font-size:10px}
+html.compact th{font-size:10px}
+html.compact th.model{width:68px}
+html.compact th.sum{width:32px}
+html.compact td.name .n{font-size:10.5px}
 html.compact table{border-spacing:1.5px}
 
 </style>
@@ -5519,8 +5519,8 @@ function renderSolo(){
       : m < 60 ? ("za " + m + " <small>min</small>")
       : ("za " + Math.floor(m/60) + "<small>h</small> " + (m%60 ? (m%60)+"<small>min</small>" : ""));
     var rozp = "";
-    if(W.lo != null && W.hi != null && (W.hi - W.lo) >= 5) rozp = " · mezi " + W.lo + " a " + W.hi + " minutami";
-    sub.innerHTML = (W.mmh != null ? "Čekaná intenzita <b>" + fmtMM(W.mmh) + " mm/h</b>" : "Slabé srážky")
+    if(W.lo != null && W.hi != null && (W.hi - W.lo) >= 5) rozp = " · mezi " + W.lo + ". a " + W.hi + ". minutou";
+    sub.innerHTML = (W.mmh != null ? "Očekávaná intenzita <b>" + fmtMM(W.mmh) + " mm/h</b>" : "Slabé srážky")
                   + rozp + ".";
     var fx = [];
     if(V) fx.push("<span>shoda <b>" + V.rainModels + "/" + V.N + "</b> modelů</span>");
@@ -5529,11 +5529,18 @@ function renderSolo(){
     talk.innerHTML = W.chmi ? "Vidí to český radar — echo se blíží, ale ještě není nad tebou."
       : W.sat ? "Radar zatím mlčí, ale <em>družice vidí rostoucí oblačnost</em>. Takhle vzniká přeháňka."
       : (W.arr && W.arr.n >= 2)
-        ? ("Na tomhle čase se shodlo <b>" + W.arr.n + "</b> zdrojů. "
+        ? ((W.arr.n <= 4
+            ? "Na tomhle čase se shodly <b>" + W.arr.n + "</b> zdroje. "
+            : "Na tomhle čase se shodlo <b>" + W.arr.n + "</b> zdrojů. ")
            + ((W.hi - W.lo) >= 15 ? "Rozcházejí se ale dost — ber ten čas jako <em>orientační</em>."
                                   : "Shoda je těsná, čas by měl sedět."))
         : "Odhad stojí zatím na jednom zdroji — může se posunout.";
-    src.textContent = W.parts ? ("zdroj: " + W.parts.join(" + ")) : "";
+    src.textContent = W.parts ? ("zdroj: " + W.parts.map(function(p){
+      /* Surová klíče blendu ("model", "15min model") by uživatele mátly —
+         vypíšeme lidské popisky. Radar/ČHMÚ mluví samo za sebe. */
+      return p === "15min model" ? "rychlý model (15 min)"
+           : p === "model" ? "modely na 8 h" : p;
+    }).join(" + ")) : "";
     return;
   }
 

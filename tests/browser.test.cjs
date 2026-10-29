@@ -247,7 +247,9 @@ test('mobile compact layout keeps fonts uninflated and never shrinks via zoom',a
     assert.ok(state.adjust===true||state.computedAdjust==='100%','chybi text-size-adjust:100%: '+diag);  /* pojistka proti nafouknuti fontu */
     assert.ok(/max-width:\s*100%/.test(state.appRule)&&/min-height:\s*100%/.test(state.appRule),
       'compact #app musi pouzivat procenta, ne vw/dvh: '+diag);
-    assert.ok(state.font!==null&&state.font<=10,'inflated font: '+diag);
+    /* .n je od 29. 10. 2026 cíleně 10,5 px (čitelnost na mobilu); pojistka
+       hlídá iOS inflaci (~zdvojnásobení na ~19-21 px), ne přesnou hodnotu. */
+    assert.ok(state.font!==null&&state.font<=12,'inflated font: '+diag);
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });
