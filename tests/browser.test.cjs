@@ -398,7 +398,6 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
     }finally{await ctx.close();}
   }
   /* deterministicka skala: vyocene zakladni velikosti (bez --fit) s
-
      rostouci sirkou displeje jen rostou — na zadnem telefonu nesmi
      skala "skacem" klesnout, jinak by appka vypadala pri ruznych
      sirekach nahodne. */
