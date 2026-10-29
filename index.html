@@ -16,16 +16,27 @@
 :root{
   --sans:system-ui,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
   --mono:ui-monospace,'Cascadia Mono','SF Mono',Menlo,Consolas,monospace;
-  --ink:#0A1017; --panel:#101A26; --panel2:#15212F; --line:#1E2C3D;
-  --rain:#5BB3E8; --rain-deep:#1E6FA8; --text:#E9F0F7; --muted:#7E90A6;
-  --dry:#3E4E61; --warn:#E8C15A; --nat:#8ED18F;
+  --ink:#0A1017; --panel:rgba(255,255,255,.12); --panel2:rgba(255,255,255,.06);
+  --line:rgba(255,255,255,.22);
+  --rain:#A8E4FF; --rain-deep:rgba(168,228,255,.42); --text:#F4F8FC; --muted:rgba(255,255,255,.72);
+  --dry:rgba(255,255,255,.42); --warn:#FFE3A3; --nat:#B9F0C8;
   --cell-h: clamp(20px, 4.4vh, 38px);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
+/* ==== SKLO: pozadí nese stav počasí, panely jsou průsvitné ==== */
 body{
-  background:radial-gradient(1200px 500px at 70% -10%, #14283C 0%, transparent 60%), var(--ink);
-  color:var(--text); font-family:var(--sans); 
+  background:linear-gradient(165deg,#1B3A8F 0%,#2D4FBF 40%,#7C3AED 100%);
+  background-attachment:fixed;
+  color:var(--text); font-family:var(--sans);
+}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;
+  background:radial-gradient(900px 480px at 85% -5%, rgba(255,255,255,.13), transparent 60%),
+             radial-gradient(640px 420px at 8% 100%, rgba(120,220,255,.13), transparent 65%)}
+body.soon{background:linear-gradient(165deg,#7C3AED 0%,#B558D8 55%,#E88A5C 100%);background-attachment:fixed}
+body.dry{background:linear-gradient(165deg,#0E5A4E 0%,#2E8A6E 60%,#4CA67E 100%);background-attachment:fixed}
+.matrix,.verdict,.when,.stats,.loc,.solo,.sugg,.madeby{
+  -webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
 }
 #app{height:100vh;display:grid;grid-template-rows:auto 1fr auto;gap:clamp(6px,1.2vh,14px);padding:calc(clamp(8px,1.4vh,18px) + env(safe-area-inset-top,0px)) calc(clamp(12px,2vw,28px) + env(safe-area-inset-right,0px)) clamp(8px,1.4vh,18px) calc(clamp(12px,2vw,28px) + env(safe-area-inset-left,0px))}
 
@@ -41,8 +52,8 @@ header{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .loc input{flex:1;min-width:0;width:100%;background:none;border:none;outline:none;color:var(--text);font-family:var(--sans);font-size:clamp(13px,1.8vh,16px);font-weight:600;padding:8px 10px;text-overflow:ellipsis}
 .loc input::placeholder{color:var(--muted);font-weight:400}
 .loc .coords{font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;padding:8px 10px;pointer-events:none}
-.locBtn{background:var(--rain-deep);border:none;color:#fff;padding:8px 16px;border-radius:7px;cursor:pointer;font-weight:800;font-family:var(--sans);font-size:clamp(12px,1.7vh,14px);flex:none;transition:background .2s}
-.locBtn:hover{background:var(--rain)}
+.locBtn{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.30);color:#fff;padding:8px 16px;border-radius:7px;cursor:pointer;font-weight:800;font-family:var(--sans);font-size:clamp(12px,1.7vh,14px);flex:none;transition:background .2s}
+.locBtn:hover{background:rgba(255,255,255,.28);border-color:rgba(255,255,255,.45)}
 .locBtn:active{transform:scale(.97)}
 .locBtn .bmin{display:none;font-size:17px;font-weight:900;line-height:1}
 html.compact .locBtn .bfull{display:none}
@@ -51,8 +62,8 @@ html.compact .locBtn .bmin{display:inline}
 .sugg.open{display:block}
 .sugg button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;background:none;border:none;border-bottom:1px solid var(--line);color:var(--text);font-family:var(--sans);font-size:clamp(12px,1.6vh,14px);padding:11px 12px;cursor:pointer;transition:background .12s}
 .sugg button:last-child{border-bottom:none}
-.sugg button:hover{background:rgba(91,179,232,.12)}
-.sugg button.sel{background:rgba(91,179,232,.22);border-left:2px solid var(--rain);padding-left:10px}
+.sugg button:hover{background:rgba(168,228,255,.14)}
+.sugg button.sel{background:rgba(168,228,255,.26);border-left:2px solid var(--rain);padding-left:10px}
 .sugg .cc{font-family:var(--mono);font-size:10px;color:var(--muted)}
 .sugg .src{font-size:9px;color:var(--rain);border:1px solid var(--rain-deep);border-radius:4px;padding:1px 4px;margin-left:4px}
 @keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
@@ -60,7 +71,7 @@ html.compact .locBtn .bmin{display:inline}
 
 /* ---------- HLAVNÍ PLOCHA ---------- */
 main{display:grid;grid-template-columns:1fr clamp(210px,23vw,310px);gap:clamp(10px,1.4vw,18px);min-height:0}
-.matrix{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:clamp(8px,1.4vh,16px);display:flex;flex-direction:column;min-height:0}
+.matrix{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(8px,1.4vh,16px);display:flex;flex-direction:column;min-height:0}
 .mhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:clamp(4px,.8vh,10px)}
 .mhead h2{font-size:clamp(13px,1.8vh,16px);font-weight:800;letter-spacing:-.01em}
 .mhead .u{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.08em}
@@ -69,26 +80,26 @@ th{font-family:var(--mono);font-weight:500;font-size:clamp(9px,1.25vh,11px);colo
 th.hr{text-align:center}
 th.model{text-align:left;width:clamp(118px,14vw,188px)}
 th.sum{width:clamp(44px,5vw,60px);text-align:right}
-td{height:var(--cell-h);border-radius:6px;text-align:center;font-family:var(--mono);font-size:clamp(9px,1.3vh,11px)}
+td{height:var(--cell-h);border-radius:6px;text-align:center;font-family:var(--mono);font-size:clamp(9px,1.3vh,11px);white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums}
 td.name{background:none;text-align:left;padding-right:6px;overflow:hidden}
 td.name .n{font-family:var(--sans);font-weight:700;font-size:clamp(10px,1.45vh,13px);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 td.name .a{font-family:var(--mono);font-size:8.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-td.name .flag{display:none;font-size:12px;line-height:1.1}
+td.name .flag{display:none;font-size:12px;line-height:1.1} /* vlajka je inline v názvu — viz render() */
 td.cell{background:var(--panel2);color:var(--dry);transition:background .3s}
 td.cell.wet{color:#DFF0FC;font-weight:600}
 /* srážky pod prahem — jsou v součtu, ale za déšť se nepovažují */
-td.cell.sub{color:#4E6377;background:var(--panel2)}
+td.cell.sub{color:rgba(255,255,255,.45);background:var(--panel2)}
 td.sumcell{background:none;text-align:right;font-weight:600}
 tr.national td.name .n{color:var(--nat)}
-tr.national td.cell{border:1px solid rgba(142,209,143,.3)}
-tr.national .badge{display:inline-block;font-size:8px;color:var(--nat);border:1px solid rgba(142,209,143,.5);border-radius:4px;padding:0 4px;margin-left:4px;vertical-align:1px}
-tr.consensus td.cell{border:1px solid var(--line)}
+tr.national td.cell{border:1px solid rgba(185,240,200,.35)}
+tr.national .badge{display:inline-block;font-size:8px;color:var(--nat);border:1px solid rgba(185,240,200,.55);border-radius:4px;padding:0 4px;margin-left:4px;vertical-align:1px}
+tr.consensus td.cell{border:1px solid var(--line);background:rgba(168,228,255,.07)}
 tr.consensus td.name .n{color:var(--rain)}
 
 /* ---------- PRAVÝ PANEL ---------- */
 aside{display:flex;flex-direction:column;gap:clamp(8px,1.2vh,14px);min-height:0}
 .verdict,.when{overflow:hidden;overflow-wrap:anywhere;word-break:break-word;hyphens:auto}
-.verdict{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:clamp(10px,1.6vh,16px);display:flex;flex-direction:column;gap:4px}
+.verdict{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(10px,1.6vh,16px);display:flex;flex-direction:column;gap:4px}
 .verdict .label{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .verdict .pct{font-weight:900;font-size:clamp(26px,6.5vh,62px);letter-spacing:-.04em;line-height:.95;font-variation-settings:'wdth' 78}
 .verdict .word{font-size:clamp(13px,2vh,17px);font-weight:700}
@@ -124,13 +135,13 @@ html.compact .solo.soon{border-color:var(--warn)}
 /* Jemné pozadí podle stavu — nese náladu, nekrade pozornost. */
 html.compact .solo.wet{
   background:
-    radial-gradient(130% 90% at 50% -25%, rgba(74,158,255,.22), transparent 62%),
-    linear-gradient(180deg, rgba(74,158,255,.05), transparent 40%),
+    radial-gradient(130% 90% at 50% -25%, rgba(255,255,255,.12), transparent 62%),
+    linear-gradient(180deg, rgba(255,255,255,.06), transparent 40%),
     var(--panel);
 }
 html.compact .solo.dry{
   background:
-    radial-gradient(120% 80% at 50% -20%, rgba(74,200,140,.10), transparent 60%),
+    radial-gradient(120% 80% at 50% -20%, rgba(255,255,255,.08), transparent 60%),
     var(--panel);
 }
 
@@ -228,7 +239,7 @@ html.compact .solo.dry{
 .solo .say b{color:var(--rain)}
 
 .solo .facts{display:flex;flex-wrap:wrap;gap:5px;padding:11px 16px 0}
-.solo .facts span{font-size:11px;color:var(--muted);background:rgba(255,255,255,.04);
+.solo .facts span{font-size:11px;color:var(--muted);background:rgba(255,255,255,.08);max-width:100%;overflow-wrap:anywhere;
   border-radius:8px;padding:5px 9px;line-height:1.3}
 .solo .facts b{color:var(--text);font-weight:700}
 
@@ -251,7 +262,7 @@ html.compact .solo.dry{
 .ensrow .ok{color:var(--nat)} .ensrow .dis{color:var(--warn)}
 html.compact .ensrow{font-size:9px;margin-top:4px}
 
-.when{background:var(--panel);border:1px solid var(--rain-deep);border-radius:14px;padding:clamp(10px,1.6vh,16px);display:flex;flex-direction:column;gap:3px}
+.when{background:var(--panel);border:1px solid var(--rain-deep);border-radius:18px;padding:clamp(10px,1.6vh,16px);display:flex;flex-direction:column;gap:3px}
 .when .label{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .when .big{font-weight:900;font-size:clamp(22px,5.8vh,54px);max-width:100%;overflow-wrap:anywhere;letter-spacing:-.04em;line-height:1;color:var(--rain)}
 .when .big.none{color:var(--muted);font-size:clamp(20px,3.6vh,32px)}
@@ -260,7 +271,7 @@ html.compact .ensrow{font-size:9px;margin-top:4px}
 .when .sub b{color:var(--text)}
 .when .src{font-family:var(--mono);font-size:8.5px;color:var(--rain);margin-top:2px}
 
-.stats{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:clamp(8px,1.4vh,14px);display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stats{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(8px,1.4vh,14px);display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .stat .k{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
 .stat .v{font-weight:800;font-size:clamp(13px,2.1vh,18px);margin-top:2px}
 .stat .v small{font-size:.6em;font-weight:500;color:var(--muted)}
@@ -276,7 +287,7 @@ html.compact .when .until{font-size:9.5px}
 
 footer{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.05em;flex-wrap:wrap;gap:6px}
 .madeby{display:flex;align-items:center;gap:7px;padding:4px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel)}
-.mb-drop{flex:none;filter:drop-shadow(0 1px 3px rgba(91,179,232,.4))}
+.mb-drop{flex:none;filter:drop-shadow(0 1px 3px rgba(168,228,255,.45))}
 .mb-name{font-family:var(--sans);font-weight:900;font-size:10px;letter-spacing:.12em;color:var(--text)}
 .mb-sep{color:var(--dry)}
 .mb-slogan{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--rain);white-space:nowrap;text-transform:uppercase}
@@ -284,7 +295,7 @@ footer{display:flex;justify-content:space-between;align-items:center;font-family
 .legend span{display:flex;gap:5px;align-items:center}
 .sw{width:14px;height:10px;border-radius:3px;display:inline-block}
 
-#status{position:fixed;inset:0;display:none;place-items:center;background:rgba(10,16,23,.82);z-index:50;font-family:var(--mono);font-size:13px;color:var(--muted);text-align:center;line-height:1.8;padding:20px}
+#status{position:fixed;inset:0;display:none;place-items:center;background:rgba(12,20,45,.60);z-index:50;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);font-family:var(--mono);font-size:13px;color:var(--muted);text-align:center;line-height:1.8;padding:20px}
 #status.show{display:grid}
 .pulse{color:var(--rain);animation:pl 1.2s infinite}
 @keyframes pl{50%{opacity:.35}}
@@ -328,7 +339,7 @@ html.compact th.sum{width:30px}
 html.compact td{font-size:8.5px;border-radius:3px;overflow:hidden}
 html.compact td.name .n{font-size:9.5px}
 html.compact td.name .a{display:none}
-html.compact td.name .flag{display:block}
+html.compact td.name .flag{display:none}
 html.compact tr.national .badge{display:none}
 html.compact td.sumcell{font-size:8.5px}
 html.compact .verdict, html.compact .when{padding:10px;border-radius:10px}
@@ -444,8 +455,8 @@ html.compact table{border-spacing:1.5px}
     <div class="legend">
       <span><i class="sw" style="background:var(--panel2)"></i> sucho</span>
       <span><i class="sw" style="background:var(--panel2);color:#4E6377;text-align:center;font-size:9px;line-height:10px">·</i> pod prahem</span>
-      <span><i class="sw" style="background:rgba(91,179,232,.28)"></i> slabý</span>
-      <span><i class="sw" style="background:rgba(91,179,232,.6)"></i> mírný</span>
+      <span><i class="sw" style="background:rgba(168,228,255,.28)"></i> slabý</span>
+      <span><i class="sw" style="background:rgba(168,228,255,.6)"></i> mírný</span>
       <span><i class="sw" style="background:var(--rain)"></i> silný</span>
       <span><i class="sw" style="background:rgba(142,209,143,.5)"></i> národní model</span>
     </div>
@@ -1117,7 +1128,14 @@ function status(msg){
   s.firstElementChild.innerHTML = '<span class="pulse">●</span><br>' + msg;
   s.classList.add("show");
 }
-function fmtMM(v){ return v>=10 ? v.toFixed(0) : v>=1 ? v.toFixed(1) : v.toFixed(2); }
+function fmtMM(v){
+  /* Vždy s nulou před desetinnou tečkou: "0.9", ne ".9" nebo "0.90".
+     Hodně desetinných míst zbytečně zabírá místo v buňce tabulky. */
+  if(v>=10) return v.toFixed(0);
+  if(v>=1) return v.toFixed(1);
+  var s = v.toFixed(2);
+  return s === "0.00" ? "0" : s.replace(/0$/,"");
+}
 /* Fyzikální kontrolor: světové extrémy krátkodobé intenzity jsou ~120–300 mm/h.
    Cokoliv nad 150 mm/h nebo záporného/nečíselného je chyba dat → zahodit. */
 var MAX_SANE_MMH = 150;
@@ -2211,13 +2229,16 @@ function render(j, allModels, generation){
          i tam, kde ve skutečnosti sněžilo — `precipitation` je součet
          obojího a sama o sobě rozdíl neukáže. */
       var snowy = pm.isSnow && pm.isSnow[i];
-      var rgb = snowy ? "176,205,224" : "91,179,232";
+      /* Sklo: světle cyan výplň; když je sklo plné, musí být text tmavý,
+         jinak světlo na světle nepřečteš. */
+      var rgb = snowy ? "204,236,252" : "168,228,255";
       return "<td class=\"cell wet"+(snowy?" snow":"")+"\" style=\"background:rgba("+rgb+","
-           + alpha.toFixed(2)+")\">"+fmtMM(v)+"</td>";
+           + alpha.toFixed(2)+");color:"+(alpha>0.55 ? "#0B2337" : "#EAF7FF")+"\">"+fmtMM(v)+"</td>";
     }).join("");
-    tr.innerHTML = "<td class=\"name\"><div class=\"n\">"+pm.m.n
+    var fl = flagEmoji(pm.m.cc);
+    tr.innerHTML = "<td class=\"name\"><div class=\"n\">" + (fl ? fl + "&nbsp;" : "") + pm.m.n
       + (pm.m.national ? "<span class=\"badge\">NÁRODNÍ</span>" : "")
-      + "</div><div class=\"a\">"+pm.m.a+"</div><div class=\"flag\">"+flagEmoji(pm.m.cc)+"</div></td>" + cells
+      + "</div><div class=\"a\">"+pm.m.a+"</div></td>" + cells
       + "<td class=\"sumcell\" style=\"color:"+(pm.rains?"var(--rain)":"var(--muted)")+"\">"+(pm.avail?fmtMM(pm.sum):"·")+"</td>";
     body.appendChild(tr);
   });
@@ -2232,7 +2253,8 @@ function render(j, allModels, generation){
   trc.innerHTML = "<td class=\"name\"><div class=\"n\">Shoda modelů</div><div class=\"a\">kolik z "+N+" hlásí déšť</div></td>"
     + consensus.map(function(c){
         var f = N ? c/N : 0, wet = c>0;
-        var bg = wet ? " style=\"background:rgba(91,179,232,"+(0.15+f*0.85).toFixed(2)+")\"" : "";
+        var bg = wet ? " style=\"background:rgba(168,228,255,"+(0.15+f*0.85).toFixed(2)
+                       +");color:"+(f>0.55 ? "#0B2337" : "#EAF7FF")+"\"" : "";
         return "<td class=\"cell"+(wet?" wet":"")+"\""+bg+">"+c+"/"+N+"</td>";
       }).join("")
     + "<td class=\"sumcell\"></td>";
@@ -3912,11 +3934,10 @@ function renderChmiRow(){
     if(!wet && chmiState.first) wet = Math.abs(chmiState.first.dt - mins) <= 30;
     if(!wet) return "<td class=\"cell\">0</td>";
     var a = 0.25 + (chmiState.nowOrd || 0.5)*0.6;
-    return "<td class=\"cell wet\" style=\"background:rgba(142,209,143,"+a.toFixed(2)+")\">•</td>";
+    return "<td class=\"cell wet\" style=\"background:rgba(74,190,120,"+a.toFixed(2)+")\">•</td>";
   }).join("");
-  tr.innerHTML = "<td class=\"name\"><div class=\"n\">ČHMÚ radar<span class=\"badge\">NÁRODNÍ</span></div>"
-    + "<div class=\"a\">pozorování + COTREC, 1 km · jen 1. hodina</div>"
-    + "<div class=\"flag\">\uD83C\uDDE8\uD83C\uDDFF</div></td>" + cells
+  tr.innerHTML = "<td class=\"name\"><div class=\"n\">🇨🇿&nbsp;ČHMÚ radar<span class=\"badge\">NÁRODNÍ</span></div>"
+    + "<div class=\"a\">pozorování + COTREC, 1 km · jen 1. hodina</div></td>" + cells
     + "<td class=\"sumcell\" style=\"color:var(--muted)\">—</td>";
   body.insertBefore(tr, body.firstChild);
 }
@@ -4394,6 +4415,21 @@ function renderSolo(){
   var facts = soloEl("soloFacts");
   var talk = soloEl("soloTalk"), src = soloEl("soloSrc");
   box.className = "solo";
+
+  /* SKLO: gradient celé plochy nese stav počasí. Panely jsou průsvitné,
+     takže jediné, co musí reagovat na situaci, je pozadí — a barva
+     status baru telefonu spolu s ním (meta theme-color). */
+  try{
+    var st = !W ? (V && V.prob >= 40 ? "soon" : "dry")
+              : W.mode === "wet" ? "wet"
+              : W.mode === "dry" ? "dry" : "soon";
+    var bd = document.body;
+    bd.classList.remove("wet","soon","dry");
+    bd.classList.add(st);
+    var mc = document.querySelector('meta[name="theme-color"]');
+    if(mc) mc.setAttribute("content",
+      st === "wet" ? "#1B3A8F" : st === "soon" ? "#7C3AED" : "#0E5A4E");
+  }catch(e){ /* bez plného DOM (testy) se žije dál */ }
 
   /* Obrázek stavu vpravo nahoře. Překreslí se jen při změně druhu,
      jinak by se animace při každém přepočtu restartovala odznova. */
