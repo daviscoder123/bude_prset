@@ -3113,6 +3113,14 @@ function render(j, allModels, generation){
   fitGuard();
   fitPanels();
 
+  /* Doplnkové odpovědi (ensemble, verdikt, ČHMÚ, satelit) dorazí až PO
+     hlavním renderu a zaplní panely pod tabulkou — .matrix (flex:1) se
+     tím smrskne a tabulka může přetect, i když v okamžiku renderu seděla.
+     fitGuard se proto o chvíli později dvakrát „dohání“ (kolo 8h, CI #45:
+     na 375×667 zůstalo --fit prázdné a ~30 px tabulky zmizelo pod panely). */
+  setTimeout(function(){ fitGuard(); }, 300);
+  setTimeout(function(){ fitGuard(); }, 900);
+
   var now = new Date();
   $("updated").innerHTML = "aktualizováno<br>"+now.toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"});
 }

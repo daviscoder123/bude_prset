@@ -219,8 +219,10 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
   const {ctx,p,errors}=await fixture('Europe/Prague',375);
   try{
     await search(p,'Praha');await ready(p,'Praha');
-    /* fitGuard nastavuje zoom az v rAF - pockat na dva snimky, az se layout ustali */
-    await p.evaluate(()=>new Promise(res=>requestAnimationFrame(()=>requestAnimationFrame(res))));
+    /* fitGuard nastavuje --fit az v rAF a dohaneci se po 300/900 ms —
+       az pak je layout ustaly (kolo 8h: doplnky ensemble/verdikt pribyly
+       po renderu a tabulka sla dolu z panelu). Cekame 1,2 s + snimek. */
+    await p.evaluate(()=>new Promise(res=>setTimeout(()=>requestAnimationFrame(()=>res()),1200)));
     const state=await p.evaluate(()=>{
       const n=document.querySelector('#body tr td.name .n');
       const rules=[...document.styleSheets[0].cssRules].map(r=>r.cssText);
@@ -353,7 +355,8 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
     const {ctx,p,errors}=await fixture('Europe/Prague',w,h);
     try{
       await search(p,'Praha');await ready(p,'Praha');
-      await p.evaluate(()=>new Promise(res=>requestAnimationFrame(()=>requestAnimationFrame(res))));
+      /* viz test vyse: pockat az se fitGuard dohane po doplncich (kolo 8h) */
+      await p.evaluate(()=>new Promise(res=>setTimeout(()=>requestAnimationFrame(()=>res()),1200)));
       const s=await p.evaluate(()=>{
         const px=el=>el?parseFloat(getComputedStyle(el).fontSize):null;
         const ks=document.querySelectorAll('.stat .k');
