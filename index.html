@@ -31,8 +31,9 @@ body{
   color:var(--text); font-family:var(--sans);
 }
 body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;
-  background:radial-gradient(900px 480px at 85% -5%, rgba(255,255,255,.13), transparent 60%),
-             radial-gradient(640px 420px at 8% 100%, rgba(120,220,255,.13), transparent 65%)}
+  /* světelné skvrny až od středu obrazovky — horní lišta zůstává čistý gradient */
+  background:radial-gradient(900px 480px at 88% 32%, rgba(255,255,255,.09), transparent 60%),
+             radial-gradient(640px 420px at 8% 96%, rgba(120,220,255,.10), transparent 65%)}
 body.soon{background:linear-gradient(165deg,#7C3AED 0%,#B558D8 55%,#E88A5C 100%);background-attachment:fixed}
 body.dry{background:linear-gradient(165deg,#0E5A4E 0%,#2E8A6E 60%,#4CA67E 100%);background-attachment:fixed}
 .matrix,.verdict,.when,.stats,.loc,.solo,.sugg,.madeby{
@@ -45,7 +46,7 @@ header{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .brand{display:flex;flex-direction:column;line-height:1}
 .brand .t{font-weight:850;font-size:clamp(16px,2.1vh,23px);letter-spacing:-.02em}
 .brand .s{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;margin-top:4px}
-.loc{flex:1;min-width:260px;max-width:640px;position:relative;overflow:visible;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;padding:5px;cursor:text}
+.loc{flex:1;min-width:260px;max-width:640px;position:relative;z-index:40;overflow:visible;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;padding:5px;cursor:text}
 .loc:focus-within{border-color:var(--rain)}
 .pinBtn{background:none;border:none;color:var(--rain);flex:none;padding:0 6px 0 10px;cursor:pointer;display:flex;align-items:center}
 .pinBtn:active{transform:scale(.9)}
@@ -287,6 +288,12 @@ html.compact .when .until{font-size:9.5px}
 
 footer{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.05em;flex-wrap:wrap;gap:6px}
 .madeby{display:flex;align-items:center;gap:7px;padding:4px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel)}
+/* zdroje dat a licence: složit jako rozbalovací seznam — nezabírají místo,
+   dokud si je čtenář sám neotevře */
+.srcwrap{width:100%}
+.srcwrap summary{cursor:pointer;font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.05em;opacity:.85;padding:2px 0;user-select:none}
+.srcwrap summary:hover{color:var(--text);opacity:1}
+.srcwrap[open] summary{margin-bottom:3px;opacity:1}
 .mb-drop{flex:none;filter:drop-shadow(0 1px 3px rgba(168,228,255,.45))}
 .mb-name{font-family:var(--sans);font-weight:900;font-size:10px;letter-spacing:.12em;color:var(--text)}
 .mb-sep{color:var(--dry)}
@@ -352,7 +359,7 @@ html.compact .when .sub{font-size:9.5px}
 html.compact .when .src{font-size:7.5px}
 html.compact footer{display:flex;justify-content:center;padding:6px 0 2px}
 html.compact .legend{display:none}
-html.compact .srcnote{display:none}
+html.compact .srcnote,html.compact .srcwrap{display:none}
 html.compact .madeby{gap:6px;padding:4px 11px}
 html.compact .mb-name{font-size:9px}
 html.compact .mb-slogan{font-size:8px}
@@ -472,7 +479,7 @@ html.compact table{border-spacing:1.5px}
       <span class="mb-sep">·</span>
       <span class="mb-slogan">made by Skarka&nbsp;AI&nbsp;company</span>
     </div>
-    <div class="srcnote">obce: GeoNames + Photon/OSM · předpovědi: open-meteo.com · radar: RainViewer (globální kompozit, vlastní extrapolace posunu + jejich nowcast) · nad ČR navíc přímo ČHMÚ (PseudoCAPPI 2 km, mřížka 1×1 km, extrapolace COTREC do 60 min, opendata.chmi.cz, CC BY 4.0) · Skandinávie a Pobaltí: met.no nowcast · Rakousko a jižní Morava: GeoSphere INCA · USA: api.weather.gov · stanice: METAR · národní radarový nowcast: DWD (RADVOR/WN) a KNMI (radar_forecast, CC-BY-4.0) · družice: NASA GIBS a EUMETSAT Meteosat (EUMETView) · pravděpodobnost: ensemble Open-Meteo (ICON-D2/ICON-EU/ECMWF IFS, 20–51 členů) · terén: Open-Meteo Elevation · data MET Norway (met.no) pod licencí CC BY 4.0 · práh modelů se řídí konvekcí (základ 0,2 mm/h, při silné labilitě až 1,0 — konvektivní déšť je skvrnitý), radar ≥ 0,2 mm/h. Kde radar nedosahuje nebo jsou 15min data jen dopočítaná, aplikace to uvede u zdroje.</div>
+    <details class="srcwrap"><summary>Zdroje dat a licence</summary><div class="srcnote">obce: GeoNames + Photon/OSM · předpovědi: open-meteo.com · radar: RainViewer (globální kompozit, vlastní extrapolace posunu + jejich nowcast) · nad ČR navíc přímo ČHMÚ (PseudoCAPPI 2 km, mřížka 1×1 km, extrapolace COTREC do 60 min, opendata.chmi.cz, CC BY 4.0) · Skandinávie a Pobaltí: met.no nowcast · Rakousko a jižní Morava: GeoSphere INCA · USA: api.weather.gov · stanice: METAR · národní radarový nowcast: DWD (RADVOR/WN) a KNMI (radar_forecast, CC-BY-4.0) · družice: NASA GIBS a EUMETSAT Meteosat (EUMETView) · pravděpodobnost: ensemble Open-Meteo (ICON-D2/ICON-EU/ECMWF IFS, 20–51 členů) · terén: Open-Meteo Elevation · data MET Norway (met.no) pod licencí CC BY 4.0 · práh modelů se řídí konvekcí (základ 0,2 mm/h, při silné labilitě až 1,0 — konvektivní déšť je skvrnitý), radar ≥ 0,2 mm/h. Kde radar nedosahuje nebo jsou 15min data jen dopočítaná, aplikace to uvede u zdroje.</div></details>
   </footer>
 </div>
 
@@ -6109,3 +6116,4 @@ function recomputeWhen(){
 </script>
 </body>
 </html>
+
