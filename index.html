@@ -94,11 +94,14 @@ main{display:grid;grid-template-columns:1fr clamp(210px,23vw,310px);gap:clamp(10
 .mhead h2{font-size:clamp(13px,1.8vh,16px);font-weight:800;letter-spacing:-.01em}
 .mhead .u{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.08em}
 table{width:100%;border-collapse:separate;border-spacing:3px;flex:1;table-layout:fixed}
-th{font-family:var(--mono);font-weight:500;font-size:clamp(9px,1.25vh,11px);color:var(--muted)}
+th{font-family:var(--sans);font-weight:600;font-size:clamp(9px,1.25vh,11px);color:var(--muted)}
 th.hr{text-align:center}
 th.model{text-align:left;width:clamp(118px,14vw,188px)}
 th.sum{width:clamp(44px,5vw,60px);text-align:right}
-td{height:var(--cell-h);border-radius:6px;text-align:center;font-family:var(--mono);font-size:clamp(9px,1.3vh,11px);white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums}
+/* Kolo 8r (Dave: „cislice v tabulce vypada strasne"): hodnoty i casove
+   hlavicky z monospace do cisteho sansu — tabular-nums drzi zarovnani,
+   tvar cislic je moderni a harmonicka s nazvy modelu (ktere sans uz mely). */
+td{height:var(--cell-h);border-radius:6px;text-align:center;font-family:var(--sans);font-size:clamp(9px,1.3vh,11px);white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums}
 td.name{background:none;text-align:left;padding-right:6px;overflow:hidden}
 td.name .n{font-family:var(--sans);font-weight:700;font-size:clamp(10px,1.45vh,13px);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 td.name .a{font-family:var(--mono);font-size:8.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -436,7 +439,9 @@ html.compact .stat .v{font-size:calc(clamp(13.5px,3.6vw,15px)*var(--fit,1));whit
    i lištu — čitelnost hlídají zvětšené řádky, ne vzduch kolem. */
 html.compact .solo .hero{padding:calc(clamp(13px,3.6vw,14px)*var(--fit,1)) calc(clamp(13px,3.9vw,15px)*var(--fit,1)) calc(clamp(10px,3.1vw,12px)*var(--fit,1))}
 html.compact .solo .pill{font-size:calc(clamp(8.5px,2.4vw,9.5px)*var(--fit,1));letter-spacing:.12em;margin-bottom:6px}
-html.compact .solo .big{font-size:calc(clamp(30px,10.5vw,42px)*var(--fit,1))}
+/* Kolo 8r (Dave: „tucny napis pusobi agresivne"): verdikt na mobilu
+   jemnejsi — 39 px → ~31 px na bezkem telefonu (test drzi spodni hranici 30 px). */
+html.compact .solo .big{font-size:calc(clamp(26px,8.4vw,34px)*var(--fit,1))}
 html.compact .solo .word{font-size:calc(clamp(12.5px,3.6vw,14px)*var(--fit,1));margin-top:calc(3px*var(--fit,1))}
 html.compact .solo .sub{margin-top:5px;font-size:calc(clamp(13px,3.6vw,14.5px)*var(--fit,1))}
 html.compact .solo .says{padding:8px 13px 0;gap:8px}
