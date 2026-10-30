@@ -635,7 +635,7 @@ html.compact table{border-spacing:1.5px}
 
       <div class="stats">
         <div class="stat"><div class="k" data-short="Shoda" data-full="Shoda modelů">Shoda modelů</div><div class="v" id="agree">–</div></div>
-        <div class="stat"><div class="k" data-short="Déšť od" data-full="Nejbližší déšť">Nejbližší déšť</div><div class="v" id="firstRain">–</div></div>
+        <div class="stat"><div class="k" id="firstRainK" data-short="Déšť od" data-full="Nejbližší déšť">Nejbližší déšť</div><div class="v" id="firstRain">–</div></div>
         <div class="stat"><div class="k" data-short="Ø úhrn" data-full="Ø úhrn / 8 h">Ø úhrn / 8 h</div><div class="v" id="avgSum">–</div></div>
         <div class="stat"><div class="k" data-short="Max int." data-full="Max. intenzita">Max. intenzita</div><div class="v" id="maxInt">–</div></div>
       </div>
@@ -6029,6 +6029,28 @@ function renderSolo(){
   var talk = soloEl("soloTalk"), src = soloEl("soloSrc");
   var word = soloEl("soloWord");
   box.className = "solo";
+
+  /* Kolo 8u (Dave): jakmile prší, lišta souhrnů nemá smysl říkat
+     „déšť od" — déšť už běží. Popisek se promění na „déšť do"
+     a hodnota ukáže odhad konce deště. Ostatní stavy vrátí
+     původní „nejbližší déšť". */
+  var frk = document.getElementById("firstRainK");
+  if(frk){
+    var wetEnd = W && W.mode === "wet" && W.end;
+    var doTxt = !!(wetEnd && !wetEnd.beyond && wetEnd.min != null);
+    frk.dataset.short = doTxt ? "Déšť do" : "Déšť od";
+    frk.dataset.full  = doTxt ? "Konec deště" : "Nejbližší déšť";
+    frk.textContent = NARROW.matches ? frk.dataset.short : frk.dataset.full;
+    var frEl = document.getElementById("firstRain");
+    if(frEl){
+      if(doTxt){
+        var dEnd = new Date(W.now.getTime() + wetEnd.min*60000);
+        frEl.innerHTML = fmtHr(dEnd) + tzHint(dEnd);
+      } else if(W && W.mode === "wet" && wetEnd && wetEnd.beyond){
+        frEl.innerHTML = "> 8 h";
+      }
+    }
+  }
 
   /* SKLO: gradient celé plochy nese stav počasí. Panely jsou průsvitné,
      takže jediné, co musí reagovat na situaci, je pozadí — a barva
