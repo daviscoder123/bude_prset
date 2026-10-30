@@ -382,7 +382,9 @@ html.compact body{min-height:100%}
    se s --fit netahaly dolů (fit škáluje jen prvky, ne viewport) a
    appka by zabrala jen část obrazovky s prázdným rámem kolem.
    Plynulé fonty (vw) se zmenšují společně se vším přes var(--fit,1). */
-html.compact #app{height:auto;min-height:100%;padding:calc(10px + env(safe-area-inset-top,0px)) calc(12px + env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) calc(12px + env(safe-area-inset-left,0px));max-width:100%}
+/* Kolo 8o: obsah na mobilu o kus nize — nazev byl prilepeny
+   hned pod status barem a pres Dynamic Island jevil se rozmazane. */
+html.compact #app{height:auto;min-height:100%;padding:calc(clamp(20px,3.2vh,30px) + env(safe-area-inset-top,0px)) calc(12px + env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) calc(12px + env(safe-area-inset-left,0px));max-width:100%}
 html.compact #app>*, html.compact main>*, html.compact aside>*{min-width:0}
 /* Kolo 8n: na mobilu vyhledavaci okno na celou sirku displeje,
    umistene POD nazev "Bude prset?" s podtitulem. */
