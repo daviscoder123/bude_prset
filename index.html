@@ -456,7 +456,7 @@ html.compact td.name .n{font-size:calc(clamp(11.5px,3.3vw,13px)*var(--fit,1))}
    konsenzus radek tenkou horni linkou misto plneho pruhu — na malem
    displeji neni misto pro tezkou dekoraci, ciselna hrana staci. */
 html.compact td.cell.wet{background:rgba(168,228,255,.10)}
-html.compact tr.consensus td.cell{border:1px solid transparent;border-top:1px solid var(--line);background:transparent}
+html.compact tr.consensus td.cell{border:1px solid transparent;border-top:1px solid var(--line);background:transparent;color:var(--rain);font-weight:600}
 html.compact #mnote{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--fit,1));padding:4px 1px 0}
 /* Kolo 8j (navrh 02): mini legenda bunek pod tabulkou — na mobilu mizi
    paticka (kolo 8) a s ni i klic k tabulce; „Shoda 0/8“ si bez legendy
@@ -6063,7 +6063,7 @@ function renderSolo(){
 
   /* ================= 4. NEPRŠÍ ================= */
   box.classList.add("dry");
-  pill.textContent = "Verdikt · teď neprší";
+  pill.textContent = "Verdikt · sucho";
   if(!V){
     big.textContent = "–"; if(word) word.textContent = ""; sub.textContent = "Načítám…";
     facts.innerHTML = ""; talk.innerHTML = ""; src.textContent = "";
