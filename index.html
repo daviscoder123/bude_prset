@@ -503,6 +503,40 @@ html.compact .mb-slogan{font-size:9px}
 html.compact{--cell-h:calc(clamp(23px,6.3vw,27px)*var(--fit,1));font-size:calc(15px*var(--fit,1))}
 html.compact body{overflow-x:hidden}
 html.compact #app{overflow-x:hidden}
+
+/* ===== Kolo 8s: animované pozadí dle počasí =====
+   Fyzika je v CSS (levné, GPU), JS jen nasype pár desítek čar.
+   Pozadí je pod panely (z-index), dlaždice s daty se nemění. */
+.wbg{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+#app{position:relative;z-index:1}
+.wbg .dr{position:absolute;top:-40px;border-radius:2px;
+  background:linear-gradient(rgba(168,228,255,0),rgba(168,228,255,var(--wa,.5)));
+  animation:wbgFall var(--wd,1.4s) linear infinite}
+@keyframes wbgFall{to{transform:translateY(115vh)}}
+.wbg[data-k="storm"] .dr{animation-name:wbgStorm}
+@keyframes wbgStorm{from{transform:translate(-3vw,-40px)}to{transform:translate(-8vw,115vh)}}
+.wbg .sn{position:absolute;top:-20px;color:rgba(230,242,255,.8);
+  animation:wbgSn var(--wd,7s) linear infinite}
+@keyframes wbgSn{0%{transform:translate(0,-20px)}
+  25%{transform:translate(12px,28vh)}
+  50%{transform:translate(-10px,56vh)}
+  75%{transform:translate(9px,84vh)}
+  100%{transform:translate(0,112vh)}}
+.wbg .sp{position:absolute;bottom:6px;width:6px;height:6px;border-radius:50%;
+  border:1.5px solid rgba(168,228,255,.55);transform:scale(.3);
+  animation:wbgSplash 1.05s ease-out infinite}
+@keyframes wbgSplash{from{transform:scale(.3);opacity:.8}to{transform:scale(3.4);opacity:0}}
+.wbg .fl{position:absolute;inset:0;background:rgba(195,225,255,.42);opacity:0;
+  animation:wbgFlash 9s infinite}
+@keyframes wbgFlash{0%,91%,100%{opacity:0}92%{opacity:.4}93%{opacity:0}94%{opacity:.28}95%{opacity:0}}
+.wbg .sun{position:absolute;top:-90px;right:-90px;width:340px;height:340px;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,236,170,.5),rgba(255,220,140,.14) 55%,transparent 72%);
+  animation:wbgPulse 6s ease-in-out infinite}
+.wbg .rays{position:absolute;top:-90px;right:-90px;width:340px;height:340px;border-radius:50%;
+  background:conic-gradient(rgba(255,236,170,.10) 0 5deg,transparent 5deg 22deg,rgba(255,236,170,.07) 22deg 27deg,transparent 27deg 48deg);
+  animation:wbgSpin 50s linear infinite}
+@keyframes wbgSpin{to{transform:rotate(360deg)}}
+@keyframes wbgPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
 html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
 html.compact th{font-size:calc(clamp(9px,2.6vw,10px)*var(--fit,1));letter-spacing:.06em}
 html.compact th.model{width:calc(clamp(78px,22vw,94px)*var(--fit,1))}
@@ -513,6 +547,7 @@ html.compact table{border-spacing:1.5px}
 </style>
 </head>
 <body>
+<div class="wbg" id="wbg" aria-hidden="true"></div>
 <div id="app">
   <header>
     <div class="brand">
@@ -5912,6 +5947,77 @@ function soloRainAfter(minFromNow){
   return bestIdx < 0 ? null : {count: best, idx: bestIdx, at: verdictState.times[bestIdx]};
 }
 
+/* ===== Kolo 8s: animované pozadí dle počasí =====
+   Druh animace plyne z verdiktu: sucho → slunce, déšť dle intenzity
+   (mm/h z radaru/blendu), konvekce → šikmý déšť s bleskem, extrém →
+   průtrž s dopady, sníh → vločky. Překresluje se jen při změně druhu
+   nebo intenzity, jinak by animace naskočila pokaždé odznova. */
+function wbgSet(kind, mmh){
+  var el = document.getElementById("wbg");
+  if(!el) return;
+  var key = kind + "|" + (mmh != null ? Math.round(mmh) : "");
+  if(el.dataset.key === key) return;
+  el.dataset.key = key;
+  el.setAttribute("data-k", kind);
+  var rnd = function(a,b){ return a + Math.random()*(b-a); };
+  var h = "";
+  if(kind === "dry"){
+    h = "<i class='rays'></i><i class='sun'></i>";
+  } else if(kind === "snow"){
+    var ns = Math.round(Math.max(18, Math.min(44, 14 + (mmh||1)*8)));
+    var fls = ["\u2744","\u2745","\u2746"];
+    for(var j=0;j<ns;j++){
+      h += "<i class='sn' style='left:" + rnd(0,100).toFixed(1) + "%;font-size:"
+        + rnd(8,14).toFixed(0) + "px;--wd:" + rnd(5.5,10).toFixed(1)
+        + "s;animation-delay:-" + rnd(0,8).toFixed(1) + "s'>" + fls[j%3] + "</i>";
+    }
+  } else {
+    var n, dur, len, wa, wpx;
+    if(kind === "soon"){ n=12; dur=3.4; len=10; wa=.18; wpx=1.2; }
+    else if(kind === "drizzle"){ n=26; dur=2.4; len=12; wa=.3; wpx=1.4; }
+    else if(kind === "heavy"){ n=100; dur=.62; len=30; wa=.7; wpx=2.4; }
+    else if(kind === "storm"){ n=72; dur=.8; len=24; wa=.65; wpx=2.2; }
+    else {
+      var m = mmh || 0;                 /* déšť roste s intenzitou */
+      n = Math.round(Math.max(28, Math.min(85, 26 + m*7)));
+      dur = Math.max(.65, Math.min(1.7, 1.9 - m*.09));
+      len = Math.max(12, Math.min(26, 10 + m*1.6));
+      wa = Math.max(.3, Math.min(.65, .3 + m*.03));
+      wpx = 1.8;
+    }
+    for(var i=0;i<n;i++){
+      h += "<i class='dr' style='left:" + rnd(0,100).toFixed(1) + "%;"
+        + "--wd:" + (dur*rnd(.75,1.25)).toFixed(2) + "s;"
+        + "--wa:" + wa.toFixed(2) + ";width:" + wpx + "px;height:"
+        + Math.round(len*rnd(.7,1.2)) + "px;"
+        + "animation-delay:-" + (dur*rnd(0,2)).toFixed(2) + "s'></i>";
+    }
+    if(kind === "heavy"){
+      for(var s=0;s<9;s++)
+        h += "<i class='sp' style='left:" + rnd(3,97).toFixed(0) + "%;animation-delay:" + rnd(0,1.1).toFixed(2) + "s'></i>";
+    }
+    if(kind === "storm") h += "<i class='fl'></i>";
+  }
+  el.innerHTML = h;
+}
+function wbgFromState(st, W){
+  try{
+    var kind = st, mmh = 0;
+    if(st === "wet" && W){
+      mmh = W.mmh || 0;
+      var t = (W.type && W.type.t) || "";
+      if(/sn\u011b|sn\u00ed/i.test(t)) kind = "snow";
+      else if(mmh >= 15) kind = "heavy";
+      else if(precipMix && precipMix.showerFrac > 0.6 && mmh >= 2.5) kind = "storm";
+      else if(mmh < 1) kind = "drizzle";
+      else kind = "rain";
+    } else if(st === "soon"){
+      kind = (W && W.mode === "maybe") ? "drizzle" : "soon";
+    }
+    wbgSet(kind, mmh);
+  }catch(e){ /* pozadí je kosmetika, nesmí shodit verdikt */ }
+}
+
 function renderSolo(){
   var box = soloEl("solo");
   if(!box) return;
@@ -5934,6 +6040,7 @@ function renderSolo(){
     var bd = document.body;
     bd.classList.remove("wet","soon","dry");
     bd.classList.add(st);
+    wbgFromState(st, W);
     var mc = document.querySelector('meta[name="theme-color"]');
     if(mc) mc.setAttribute("content",
       st === "wet" ? "#1B3A8F" : st === "soon" ? "#7C3AED" : "#0E5A4E");
