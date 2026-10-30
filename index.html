@@ -42,9 +42,11 @@ body{
 }
 body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;
   /* světelné skvrny až od středu obrazovky — horní lišta zůstává čistý gradient */
+  /* Kolo 8t (Dave): prší = obloha do modra, ne do fialova.
+     Fialova zustava jen stavum „bude prset", kde jeste nic nepadá. */
   background:radial-gradient(900px 480px at 88% 32%, rgba(255,255,255,.09), transparent 60%),
              radial-gradient(640px 420px at 8% 96%, rgba(120,220,255,.10), transparent 65%),
-             linear-gradient(165deg,#1B3A8F 0%,#2D4FBF 40%,#7C3AED 100%)}
+             linear-gradient(165deg,#152E6E 0%,#1F49B8 45%,#3E7DDB 100%)}
 body.soon{background:#7C3AED}
 body.dry{background:#0E5A4E}
 body.soon::before{background:radial-gradient(900px 480px at 88% 32%, rgba(255,255,255,.09), transparent 60%),
@@ -6035,6 +6037,10 @@ function renderSolo(){
     var st = !W ? (V && V.prob >= 40 ? "soon" : "dry")
               : W.mode === "wet" ? "wet"
               : W.mode === "dry" ? "dry" : "soon";
+    /* Kolo 8t (Dave): „možná kape" už animuje déšť na pozadí,
+       takže obloha má být dešťová modrá — fialová patří jen
+       stavům „bude pršet", kde ještě nic nepadá. */
+    if(W && W.mode === "maybe") st = "wet";
     var bd = document.body;
     bd.classList.remove("wet","soon","dry");
     bd.classList.add(st);
