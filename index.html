@@ -384,8 +384,10 @@ html.compact body{min-height:100%}
    Plynulé fonty (vw) se zmenšují společně se vším přes var(--fit,1). */
 html.compact #app{height:auto;min-height:100%;padding:calc(10px + env(safe-area-inset-top,0px)) calc(12px + env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) calc(12px + env(safe-area-inset-left,0px));max-width:100%}
 html.compact #app>*, html.compact main>*, html.compact aside>*{min-width:0}
-html.compact header{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center}
-html.compact .loc{min-width:0;max-width:none;margin-left:6px;padding:3px 3px 3px 0;border-radius:9px}
+/* Kolo 8n: na mobilu vyhledavaci okno na celou sirku displeje,
+   umistene POD nazev "Bude prset?" s podtitulem. */
+html.compact header{display:grid;grid-template-columns:1fr;gap:8px;align-items:stretch}
+html.compact .loc{min-width:0;max-width:none;margin-left:0;padding:3px 3px 3px 0;border-radius:9px}
 html.compact .pinBtn{padding:0 4px 0 7px}
 html.compact .pinBtn svg{width:13px;height:13px}
 html.compact .loc input{font-size:calc(clamp(13px,3.7vw,15px)*var(--fit,1));padding:7px 6px}
