@@ -289,7 +289,9 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
         noFixedAttach:css.indexOf('background-attachment')===-1,
         font:n?parseFloat(getComputedStyle(n).fontSize):null,
         flagsN:document.querySelectorAll('#body td.name .flag').length,
-        flagD:(function(){var f=document.querySelector('#body td.name .flag');return f?getComputedStyle(f).display:null;})()
+        flagD:(function(){var f=document.querySelector('#body td.name .flag');return f?getComputedStyle(f).display:null;})(),
+        legendN:document.querySelectorAll('.matrix .mlegend span').length,
+        cap:(function(){var h=document.querySelector('.mhead h2');return h?h.textContent:null;})()
       };
     });
     /* Regrese z 29. 10. 2026 (barvy): stavový gradient musi zit na body::before
@@ -330,6 +332,9 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
     assert.ok(state.lastIn===true,'posledni radek tabulky (Shoda) neni videt (kolo 8h): '+diag);
     assert.ok(state.flagsN>=8,'vlajecky u modelu chybi (kolo 8i): '+diag);
     assert.ok(state.flagD!==null&&state.flagD!=='none','vlajecka na mobilu skryta (kolo 8i): '+diag);
+    /* Kolo 8j (navrh 02): mini legenda bunek + mono kapitalka s poctem zdroju */
+    assert.ok(state.legendN===4,'mini legenda bunek chybi (kolo 8j): '+diag);
+    assert.ok(typeof state.cap==='string'&&/^Modely · \d+ zdroj\u016f/.test(state.cap),'mono kapitalka nad tabulkou chybi (kolo 8j): '+diag);
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });

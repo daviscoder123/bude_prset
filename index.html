@@ -105,6 +105,9 @@ td.name .n{font-family:var(--sans);font-weight:700;font-size:clamp(10px,1.45vh,1
 td.name .a{font-family:var(--mono);font-size:8.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #mnote{font-family:var(--sans);font-size:10px;color:var(--muted);padding:6px 2px 0;line-height:1.35}
 #mnote:empty{display:none}
+/* Kolo 8j: mini legenda bunek — jen kompaktni rezim (desktop ma plnou
+   legendu v paticce, viz footer). */
+.mlegend{display:none}
 td.name .flag{font-style:normal;font-size:12px;line-height:1.1;margin-right:2px} /* vlajka před názvem modelu — viz render() */
 td.cell{background:var(--panel2);color:var(--dry);transition:background .3s}
 td.cell.wet{color:#DFF0FC;font-weight:600}
@@ -139,7 +142,7 @@ html.compact .solo{
   background:
     radial-gradient(120% 80% at 50% -20%, rgba(74,158,255,.10), transparent 65%),
     var(--panel);
-  border:1px solid var(--line); border-radius:20px;
+  border:1px solid var(--line); border-radius:22px;
   padding:0; position:relative; overflow:hidden;
   transition:border-color .5s ease;
 }
@@ -419,7 +422,7 @@ html.compact .when{grid-column:2}
 /* Lišta souhrnů na mobilu: jeden tenký pruh se čtyřmi oddělenými
    hodnotami — vždy na jednom řádku, bez zalamování buněk. Oddělovače
    mezi buňkami ji dělají čitelnou i na úzkých displejích. */
-html.compact .stats{grid-column:1/-1;grid-template-columns:repeat(4,1fr);gap:0;padding:8px 2px;border-radius:14px}
+html.compact .stats{grid-column:1/-1;grid-template-columns:repeat(4,1fr);gap:0;padding:9px 2px;border-radius:16px}
 html.compact .stat{min-width:0;overflow:hidden;padding:0 8px}
 html.compact .stat + .stat{border-left:1px solid var(--line)}
 html.compact .stat .k{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));letter-spacing:.03em;line-height:1.25;white-space:nowrap}
@@ -431,18 +434,22 @@ html.compact .solo .pill{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));l
 html.compact .solo .sub{margin-top:8px;font-size:calc(clamp(13px,3.6vw,14.5px)*var(--fit,1))}
 html.compact .solo .wart{width:62px;height:62px;margin:-2px -2px 0 0}
 html.compact .solo .big{font-size:calc(clamp(30px,8.5vw,40px)*var(--fit,1))}
-html.compact .solo .says{padding:10px 13px 0;gap:8px}
+html.compact .solo .says{padding:8px 13px 0;gap:8px}
 html.compact .solo .say{padding-left:11px}
 html.compact .solo .say .tag{margin-bottom:3px;font-size:calc(clamp(10.5px,3vw,12px)*var(--fit,1))}
 html.compact .solo .say p{font-size:calc(clamp(14px,4vw,16px)*var(--fit,1))}
-html.compact .solo .facts{padding:9px 13px 0;gap:4px}
+html.compact .solo .facts{padding:8px 13px 0;gap:4px}
 html.compact .solo .facts span{font-size:calc(clamp(12px,3.4vw,14px)*var(--fit,1));padding:4px 8px}
-html.compact .solo .talk{margin:9px 13px 0;padding:9px 0 0;font-size:calc(clamp(12.5px,3.6vw,15px)*var(--fit,1))}
-html.compact .solo .src{padding:7px 13px 11px;font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
-html.compact{--cell-h:calc(clamp(20px,5.4vw,24px)*var(--fit,1))}
-html.compact .matrix{padding:6px;border-radius:10px}
-html.compact .mhead h2{font-size:calc(clamp(13.5px,3.8vw,15.5px)*var(--fit,1))}
-html.compact .mhead .u{font-size:calc(clamp(10px,2.8vw,11.5px)*var(--fit,1))}
+html.compact .solo .talk{margin:8px 13px 0;padding:8px 0 0;font-size:calc(clamp(12.5px,3.6vw,15px)*var(--fit,1))}
+html.compact .solo .src{padding:6px 13px 10px;font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
+html.compact{--cell-h:calc(clamp(20px,5.5vw,24px)*var(--fit,1))}
+html.compact .matrix{padding:8px;border-radius:14px}
+/* Kolo 8j (navrh 02 „typografie z desktopu“): nadpis tabulky se na mobilu meni
+   na mono kapitalku s poctem zdroju („Modely · 8 zdroju“) — desktop ma plny
+   nadpis, mobil instrumentovy souhrn. Kapitalka je nizsi nez dosavadni
+   h2, coz vraci par px rozpoctu vysky legendi pod tabulkou. */
+html.compact .mhead h2{font-family:var(--mono);font-weight:500;color:var(--muted);font-size:calc(clamp(8.5px,2.4vw,9.5px)*var(--fit,1));letter-spacing:.12em;text-transform:uppercase}
+html.compact .mhead .u{font-size:calc(clamp(8px,2.2vw,9.5px)*var(--fit,1))}
 html.compact table{border-spacing:2px}
 html.compact th{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
 html.compact th.model{width:calc(clamp(78px,22vw,94px)*var(--fit,1))}
@@ -450,6 +457,14 @@ html.compact th.sum{width:32px}
 html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));border-radius:3px;overflow:hidden}
 html.compact td.name .n{font-size:calc(clamp(11.5px,3.3vw,13px)*var(--fit,1))}
 html.compact #mnote{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--fit,1));padding:4px 1px 0}
+/* Kolo 8j (navrh 02): mini legenda bunek pod tabulkou — na mobilu mizi
+   paticka (kolo 8) a s ni i klic k tabulce; „Shoda 0/8“ si bez legendy
+   precte jen znalec. Na desktopu se nezobrazuje — tam je plna legenda
+   v paticce. */
+html.compact .mlegend{display:flex;gap:12px;align-items:center;flex:none;
+  padding:4px 4px 0;font-size:calc(clamp(8px,2.3vw,9.5px)*var(--fit,1))}
+html.compact .mlegend span{display:flex;gap:5px;align-items:center;color:var(--muted)}
+html.compact .mlegend .sw{width:12px;height:9px;border-radius:3px;flex:none}
 html.compact td.name .a{display:none}
 html.compact td.name .flag{float:left;font-style:normal;font-size:calc(clamp(10px,2.9vw,12px)*var(--fit,1));line-height:1;transform:scale(.78);transform-origin:left center;margin-right:2px}
 html.compact tr.national .badge{display:none}
@@ -502,10 +517,17 @@ html.compact table{border-spacing:1.5px}
   <main>
     <section class="matrix">
       <div class="mhead">
-        <h2>Předpověď srážek podle modelu</h2>
+        <h2 data-full="Předpověď srážek podle modelu" data-short="Modely">Předpověď srážek podle modelu</h2>
         <span class="u">mm / hod · lokální čas</span>
       </div>
       <table id="tbl"><thead><tr id="hdr"></tr></thead><tbody id="body"></tbody></table>
+      <!-- Kolo 8j (navrh 02): mini legenda bunek v panelu tabulky. -->
+      <div class="mlegend" aria-hidden="true">
+        <span><i class="sw" style="background:rgba(168,228,255,.45)"></i>mokrá</span>
+        <span><i class="sw" style="background:var(--panel2);color:var(--muted);font-size:7px;line-height:9px;text-align:center">·</i>pod prahem</span>
+        <span><i class="sw" style="background:var(--panel2)"></i>suchá</span>
+        <span><i class="sw" style="background:transparent;box-shadow:inset 0 0 0 1px var(--nat)"></i>národní model</span>
+      </div>
       <!-- Poznámka o modelech bez odpovědi (kolo 8f): když open-meteo
            některým modelem neodpoví, jeho řádek tiše vypadne a tabulka
            vypadala „rozbitá“ — Dave 29. 10. 22:47 viděl jen 6 řádků.
@@ -2117,10 +2139,15 @@ function applyLayoutMode(){
      text rozsypal. Krátké varianty (Shoda, Déšť od, Ø úhrn, Max int.)
      sedí na jeden řádek vždy — i na 320px telefonu; na velkém displeji
      zůstávají plné popisky. */
-  var ks = document.querySelectorAll(".stat .k");
+  var ks = document.querySelectorAll(".stat .k, .mhead h2");
   for(var i=0;i<ks.length;i++){
     var el = ks[i];
-    if(el.dataset.full) el.textContent = NARROW.matches ? el.dataset.short : el.dataset.full;
+    if(el.dataset.full){
+      /* kolo 8j: na mobilu nese h2 pocet zdroju od render() (dataset.cap) */
+      if(NARROW.matches && el.tagName === "H2" && el.dataset.cap) continue;
+      el.textContent = NARROW.matches ? el.dataset.short : el.dataset.full;
+      if(el.tagName === "H2" && !NARROW.matches) el.dataset.cap = "";
+    }
   }
   fitGuard();
 }
@@ -2892,6 +2919,17 @@ function render(j, allModels, generation){
       + (miss === 1 ? "neodpověděl" : (miss < 5 ? "neodpověděly" : "neodpovědělo"))
       + " (open-meteo bez dat) — tabulka ukazuje zbytek."
     : "";
+
+  /* Kolo 8j (navrh 02): mono kapitalka nad tabulkou nese pocet zdroju,
+     ktere tabulka doopravdy ukazuje. Na desktopu se vraci plny nadpis —
+     o prepina applyLayoutMode (data-full/data-short). */
+  var mh = document.querySelector(".mhead h2");
+if(mh && NARROW.matches){
+    var zc = perModel.length;
+    mh.textContent = "Modely \u00b7 " + zc + " " + (zc === 1 ? "zdroj" : (zc >= 2 && zc <= 4 ? "zdroje" : "zdroj\u016f"));
+    /* dataset.cap = uhona pro applyLayoutMode, aby pri resize neprepsal pocet zpet na data-short */
+    mh.dataset.cap = "1";
+  }
 
   perModel.forEach(function(pm){
     var tr = document.createElement("tr");
