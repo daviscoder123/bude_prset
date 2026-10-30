@@ -106,7 +106,7 @@ test('desktop search, model-only rain, mobile resize and geolocation',async()=>{
     await p.setViewportSize({width:375,height:812});
     await p.waitForFunction(()=>NARROW.matches);
     assert.equal(await p.locator('#solo').isVisible(),true);
-    assert.match(await p.locator('#soloTalk').innerText(),/Modelový odhad není měření/);
+    assert.match(await p.locator('#soloTalk').textContent(),/Modelový odhad není měření/);
     assert.equal(await p.evaluate(()=>modelState.times[0].getTime()),before.ts);
     await fs.mkdir(path.join(root,'test-results'),{recursive:true});
     await p.screenshot({path:path.join(root,'test-results/mobile.png'),fullPage:true});
