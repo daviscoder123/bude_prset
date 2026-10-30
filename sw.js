@@ -4,7 +4,7 @@
    radar, geokódování) jdou vždy přímo na síť a NEcachují se zde —
    o úsporu dat se stará in-memory cache v aplikaci. Na pozadí SW
    nic nestahuje. */
-var CACHE = "bude-prset-v5 /* kolo 8j hotfix: bump verze vynuti SW update */";
+var CACHE = "bude-prset-v6 /* kolo 8l: bump verze vynuti SW update, controllerchange pak reloadne stranku */";
 var SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", function(e){

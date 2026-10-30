@@ -95,8 +95,8 @@ async function runScenario(browser, base, label, wet) {
   await p.screenshot({ path: path.join(outDir, desktop), fullPage: true });
   made.push(desktop);
 
-  /* Mobil */
-  if (wet) {
+  /* Mobil - kolo 8l: i scenar sucho (mobilni verdikt se hodnoti v obou stavech) */
+  {
     await p.setViewportSize({ width: 375, height: 812 });
     await p.waitForFunction(() => NARROW.matches);
     await p.waitForTimeout(800);
