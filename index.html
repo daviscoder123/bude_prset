@@ -169,34 +169,28 @@ html.compact .solo.dry{
     var(--panel);
 }
 
-.solo .hero{padding:15px 16px 12px;display:flex;align-items:flex-start;
-  justify-content:space-between;gap:12px}
-.solo .heroL{min-width:0;flex:1}
-.solo .pill{display:inline-flex;align-items:center;gap:7px;
-  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--muted);background:rgba(255,255,255,.05);border-radius:999px;padding:4px 11px;
-  margin-bottom:9px}
-.solo .pill i{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:none}
-.solo.wet .pill{color:var(--rain);background:rgba(74,158,255,.13)}
-.solo.wet .pill i{background:var(--rain);box-shadow:0 0 0 0 rgba(74,158,255,.6);
-  animation:soloPulse 2.2s ease-out infinite}
-.solo.soon .pill{color:var(--warn);background:rgba(230,170,60,.13)}
-.solo.soon .pill i{background:var(--warn)}
-.solo.dry .pill{color:var(--nat);background:rgba(74,200,140,.12)}
-.solo.dry .pill i{background:var(--nat)}
-@keyframes soloPulse{
-  0%{box-shadow:0 0 0 0 rgba(74,158,255,.55)}
-  70%{box-shadow:0 0 0 9px rgba(74,158,255,0)}
-  100%{box-shadow:0 0 0 0 rgba(74,158,255,0)}
-}
+.solo .hero{padding:13px 15px 10px}
+/* Kolo 8k (navrh 02 „typografie z desktopu“): pill na mobilu neni bublina
+   s LED, ale mono kapitalka „VERDIKT · …“ — stav nesou barvy textu. */
+.solo .pill{display:block;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--muted);
+  background:none;padding:0;margin-bottom:7px}
+.solo.wet .pill{color:var(--rain)}
+.solo.soon .pill{color:var(--warn)}
+.solo.dry .pill{color:var(--nat)}
 
-.solo .big{font-weight:900;font-size:clamp(34px,10.5vw,58px);letter-spacing:-.045em;
-  line-height:.98;overflow-wrap:anywhere;font-variation-settings:'wdth' 82}
-.solo .big small{font-size:.36em;font-weight:700;color:var(--muted);letter-spacing:0;
+.solo .big{font-weight:900;font-size:clamp(30px,10.5vw,42px);letter-spacing:-.04em;
+  line-height:.95;overflow-wrap:anywhere;font-variation-settings:'wdth' 78;
+  text-transform:uppercase}
+.solo .big small{font-size:.42em;font-weight:800;color:var(--muted);letter-spacing:0;
   font-variation-settings:'wdth' 100}
+/* Kolo 8k (navrh 02): slovni verdikt pod obrim cislem — „ZA 23 MIN“
+   je cas, „Vydatny dest“ je vyznam. Procenta samotna nestaci. */
+.solo .word{font-weight:700;font-size:clamp(12.5px,3.6vw,14px);letter-spacing:-.01em;
+  margin-top:3px}
 .solo.wet .big{color:var(--rain)}
 .solo.soon .big{color:var(--text)}
-.solo .sub{font-size:13px;color:var(--muted);line-height:1.45;margin-top:7px}
+.solo .sub{font-size:13px;color:var(--muted);line-height:1.45;margin-top:5px}
 .solo .sub b{color:var(--text);font-weight:700}
 
 /* ===== ANIMACE AKTUÁLNÍHO STAVU =====
@@ -422,18 +416,20 @@ html.compact .when{grid-column:2}
 /* Lišta souhrnů na mobilu: jeden tenký pruh se čtyřmi oddělenými
    hodnotami — vždy na jednom řádku, bez zalamování buněk. Oddělovače
    mezi buňkami ji dělají čitelnou i na úzkých displejích. */
-html.compact .stats{grid-column:1/-1;grid-template-columns:repeat(4,1fr);gap:0;padding:9px 2px;border-radius:16px}
-html.compact .stat{min-width:0;overflow:hidden;padding:0 8px}
-html.compact .stat + .stat{border-left:1px solid var(--line)}
-html.compact .stat .k{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));letter-spacing:.03em;line-height:1.25;white-space:nowrap}
-html.compact .stat .v{font-size:calc(clamp(13.5px,3.8vw,15px)*var(--fit,1));white-space:nowrap;margin-top:2px}
+html.compact .stats{grid-column:1/-1;grid-template-columns:repeat(4,1fr);gap:0;padding:calc(10px*var(--fit,1)) calc(4px*var(--fit,1));border-radius:18px}
+html.compact .stat{min-width:0;overflow:hidden;padding:0 4px;text-align:center}
+html.compact .stat + .stat{border-left:1px solid rgba(255,255,255,.14)}
+/* Kolo 8k (navrh 02): mono kapitalky i v liste souhrnu — jednotna
+   instrumentova typografie jako u nadpisu tabulky a verdiktu. */
+html.compact .stat .k{font-family:var(--mono);font-size:calc(clamp(8px,2.3vw,9.5px)*var(--fit,1));letter-spacing:.12em;text-transform:uppercase;line-height:1.25;white-space:nowrap;text-align:center}
+html.compact .stat .v{font-size:calc(clamp(13.5px,3.6vw,15px)*var(--fit,1));white-space:nowrap;margin-top:2px;text-align:center}
 /* Hlavní panel na mobilu dýchá hustěji, ať zbude místo pro tabulku
    i lištu — čitelnost hlídají zvětšené řádky, ne vzduch kolem. */
-html.compact .solo .hero{padding:calc(clamp(13px,3.6vw,16px)*var(--fit,1)) calc(clamp(14px,3.9vw,17px)*var(--fit,1)) calc(clamp(11px,3.1vw,14px)*var(--fit,1))}
-html.compact .solo .pill{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));letter-spacing:.08em}
-html.compact .solo .sub{margin-top:8px;font-size:calc(clamp(13px,3.6vw,14.5px)*var(--fit,1))}
-html.compact .solo .wart{width:62px;height:62px;margin:-2px -2px 0 0}
-html.compact .solo .big{font-size:calc(clamp(30px,8.5vw,40px)*var(--fit,1))}
+html.compact .solo .hero{padding:calc(clamp(13px,3.6vw,14px)*var(--fit,1)) calc(clamp(13px,3.9vw,15px)*var(--fit,1)) calc(clamp(10px,3.1vw,12px)*var(--fit,1))}
+html.compact .solo .pill{font-size:calc(clamp(8.5px,2.4vw,9.5px)*var(--fit,1));letter-spacing:.12em;margin-bottom:6px}
+html.compact .solo .big{font-size:calc(clamp(30px,10.5vw,42px)*var(--fit,1))}
+html.compact .solo .word{font-size:calc(clamp(12.5px,3.6vw,14px)*var(--fit,1));margin-top:calc(3px*var(--fit,1))}
+html.compact .solo .sub{margin-top:5px;font-size:calc(clamp(13px,3.6vw,14.5px)*var(--fit,1))}
 html.compact .solo .says{padding:8px 13px 0;gap:8px}
 html.compact .solo .say{padding-left:11px}
 html.compact .solo .say .tag{margin-bottom:3px;font-size:calc(clamp(10.5px,3vw,12px)*var(--fit,1))}
@@ -442,29 +438,34 @@ html.compact .solo .facts{padding:8px 13px 0;gap:4px}
 html.compact .solo .facts span{font-size:calc(clamp(12px,3.4vw,14px)*var(--fit,1));padding:4px 8px}
 html.compact .solo .talk{margin:8px 13px 0;padding:8px 0 0;font-size:calc(clamp(12.5px,3.6vw,15px)*var(--fit,1))}
 html.compact .solo .src{padding:6px 13px 10px;font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
-html.compact{--cell-h:calc(clamp(20px,5.5vw,24px)*var(--fit,1))}
-html.compact .matrix{padding:8px;border-radius:14px}
+html.compact{--cell-h:calc(clamp(23px,6.3vw,27px)*var(--fit,1))}
+html.compact .matrix{padding:8px 7px 9px;border-radius:18px}
 /* Kolo 8j (navrh 02 „typografie z desktopu“): nadpis tabulky se na mobilu meni
    na mono kapitalku s poctem zdroju („Modely · 8 zdroju“) — desktop ma plny
    nadpis, mobil instrumentovy souhrn. Kapitalka je nizsi nez dosavadni
    h2, coz vraci par px rozpoctu vysky legendi pod tabulkou. */
 html.compact .mhead h2{font-family:var(--mono);font-weight:500;color:var(--muted);font-size:calc(clamp(8.5px,2.4vw,9.5px)*var(--fit,1));letter-spacing:.12em;text-transform:uppercase}
-html.compact .mhead .u{font-size:calc(clamp(8px,2.2vw,9.5px)*var(--fit,1))}
-html.compact table{border-spacing:2px}
-html.compact th{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
+html.compact .mhead .u{display:none}
+html.compact table{border-spacing:1.5px}
+html.compact th{font-size:calc(clamp(9px,2.6vw,10px)*var(--fit,1));letter-spacing:.06em}
 html.compact th.model{width:calc(clamp(78px,22vw,94px)*var(--fit,1))}
 html.compact th.sum{width:32px}
-html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));border-radius:3px;overflow:hidden}
+html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));border-radius:5px;overflow:hidden}
 html.compact td.name .n{font-size:calc(clamp(11.5px,3.3vw,13px)*var(--fit,1))}
+/* Kolo 8k (navrh 02): mokre bunky jen naznak svetle modle barvy,
+   konsenzus radek tenkou horni linkou misto plneho pruhu — na malem
+   displeji neni misto pro tezkou dekoraci, ciselna hrana staci. */
+html.compact td.cell.wet{background:rgba(168,228,255,.10)}
+html.compact tr.consensus td.cell{border:1px solid transparent;border-top:1px solid var(--line);background:transparent}
 html.compact #mnote{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--fit,1));padding:4px 1px 0}
 /* Kolo 8j (navrh 02): mini legenda bunek pod tabulkou — na mobilu mizi
    paticka (kolo 8) a s ni i klic k tabulce; „Shoda 0/8“ si bez legendy
    precte jen znalec. Na desktopu se nezobrazuje — tam je plna legenda
    v paticce. */
-html.compact .mlegend{display:flex;gap:12px;align-items:center;flex:none;
-  padding:4px 4px 0;font-size:calc(clamp(8px,2.3vw,9.5px)*var(--fit,1))}
+html.compact .mlegend{display:flex;gap:14px;align-items:center;flex:none;
+  padding:0 4px;margin-top:calc(9px*var(--fit,1));font-size:calc(clamp(8.5px,2.4vw,9.5px)*var(--fit,1))}
 html.compact .mlegend span{display:flex;gap:5px;align-items:center;color:var(--muted)}
-html.compact .mlegend .sw{width:12px;height:9px;border-radius:3px;flex:none}
+html.compact .mlegend .sw{width:13px;height:9px;border-radius:3px;flex:none}
 html.compact td.name .a{display:none}
 html.compact td.name .flag{float:left;font-style:normal;font-size:calc(clamp(10px,2.9vw,12px)*var(--fit,1));line-height:1;transform:scale(.78);transform-origin:left center;margin-right:2px}
 html.compact tr.national .badge{display:none}
@@ -485,11 +486,11 @@ html.compact .srcnote,html.compact .srcwrap{display:none}
 html.compact .madeby{gap:6px;padding:4px 11px}
 html.compact .mb-name{font-size:10px}
 html.compact .mb-slogan{font-size:9px}
-html.compact{--cell-h:calc(clamp(20px,5.4vw,24px)*var(--fit,1));font-size:calc(15px*var(--fit,1))}
+html.compact{--cell-h:calc(clamp(23px,6.3vw,27px)*var(--fit,1));font-size:calc(15px*var(--fit,1))}
 html.compact body{overflow-x:hidden}
 html.compact #app{overflow-x:hidden}
 html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
-html.compact th{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
+html.compact th{font-size:calc(clamp(9px,2.6vw,10px)*var(--fit,1));letter-spacing:.06em}
 html.compact th.model{width:calc(clamp(78px,22vw,94px)*var(--fit,1))}
 html.compact th.sum{width:32px}
 html.compact td.name .n{font-size:calc(clamp(11.5px,3.3vw,13px)*var(--fit,1))}
@@ -544,12 +545,10 @@ html.compact table{border-spacing:1.5px}
            je rozpor, ne dvě informace. -->
       <div class="solo" id="solo" aria-live="polite">
         <div class="hero">
-          <div class="heroL">
-            <div class="pill" id="soloPill"><i></i><span id="soloPillTxt">Načítám</span></div>
-            <div class="big" id="soloBig">–</div>
-            <div class="sub" id="soloSub"></div>
-          </div>
-          <div class="wart" id="soloArt" aria-hidden="true"></div>
+          <div class="pill" id="soloPill"><span id="soloPillTxt">Načítám</span></div>
+          <div class="big" id="soloBig">–</div>
+          <div class="word" id="soloWord"></div>
+          <div class="sub" id="soloSub"></div>
         </div>
         <div class="says">
           <div class="say" id="soloHourWrap" hidden>
@@ -2180,11 +2179,18 @@ function fitNames(){
   }
 }
 function fitGuard(){
-  var root = document.documentElement, b = document.body,
-      app = document.getElementById("app");
-  root.style.removeProperty("--fit");
-  b.style.zoom = "";
+  /* Kolo 8k: reset --fit i zoom az uvnitr rAF, tesne pred merenim.
+     Drive se --fit odstranil synchronne a nove cislo se nastavilo az
+     v dalsim snimku — prohlizec mezitim vykreslil jeden frame
+     na 100 % a pak obsah smrskl (tabulka i texty na mobilu
+     „skubaly“). Reset + mereni + nastaveni v jednom snimku se
+     nevykresli zadny mezistav; algoritmus i vysledne hodnoty
+     --fit zustavaji bez zmeny. */
   requestAnimationFrame(function(){
+    var root = document.documentElement, b = document.body,
+        app = document.getElementById("app");
+    root.style.removeProperty("--fit");
+    b.style.zoom = "";
     if(NARROW.matches){
       /* Kolo 8h (Dave 29. 10. 23:10): root.scrollHeight je klamavé —
          html i body mají overflow:hidden, takže se svislé přetečení
@@ -5901,6 +5907,7 @@ function renderSolo(){
   var pill = soloEl("soloPillTxt"), big = soloEl("soloBig"), sub = soloEl("soloSub");
   var facts = soloEl("soloFacts");
   var talk = soloEl("soloTalk"), src = soloEl("soloSrc");
+  var word = soloEl("soloWord");
   box.className = "solo";
 
   /* SKLO: gradient celé plochy nese stav počasí. Panely jsou průsvitné,
@@ -5952,10 +5959,11 @@ function renderSolo(){
   /* ================= 1. PRŠÍ ================= */
   if(W && W.mode === "wet"){
     box.classList.add("wet");
-    pill.textContent = "právě prší";
+    pill.textContent = "Verdikt · právě prší";
     big.innerHTML = cap(W.type.t);
     var sil = W.mmh >= 4 ? "vydatný" : W.mmh >= 1 ? "mírný" : "slabý";
-    sub.innerHTML = "<b>" + fmtMM(W.mmh) + " mm/h</b> · " + sil + " · potvrzeno <b>"
+    if(word) word.textContent = sil + " déšť";
+    sub.innerHTML = "<b>" + fmtMM(W.mmh) + " mm/h</b> · potvrzeno <b>"
                   + W.indep + "</b> nezávislými zdroji.";
 
     var zbyva = null, konecTxt = "";
@@ -5995,8 +6003,9 @@ function renderSolo(){
   /* ================= 2. MOŽNÁ MRHOLÍ ================= */
   if(W && W.mode === "maybe"){
     box.classList.add("soon");
-    pill.textContent = "nepotvrzeno";
-    big.innerHTML = "Možná <small>kape</small>";
+    pill.textContent = "Verdikt · nepotvrzeno";
+    big.textContent = "Možná kape";
+    if(word) word.textContent = "Déšť není potvrzen";
     sub.textContent = "Signál srážek: " + W.votes.join(", ") + ".";
     facts.innerHTML = "";
     talk.textContent = "Déšť není potvrzen dvěma nezávislými pozorovacími zdroji. Modelový odhad není měření v místě.";
@@ -6007,11 +6016,13 @@ function renderSolo(){
   /* ================= 3. DÉŠŤ SE BLÍŽÍ ================= */
   if(W && (W.mode === "soon" || (W.mode === "model" && W.etaMin != null && W.etaMin < 90))){
     box.classList.add("soon");
-    pill.textContent = "déšť se blíží";
+    pill.textContent = "Verdikt · déšť se blíží";
     var m = Math.round(W.etaMin == null ? 30 : W.etaMin);
     big.innerHTML = m <= 0 ? "Každou chvíli"
-      : m < 60 ? ("za " + m + " <small>min</small>")
-      : ("za " + Math.floor(m/60) + "<small>h</small> " + (m%60 ? (m%60)+"<small>min</small>" : ""));
+      : m < 60 ? ("za " + m + " min")
+      : ("za " + Math.floor(m/60) + " h " + (m%60 ? (m%60)+" min" : ""));
+    if(word) word.textContent = W.mmh == null ? "Slabé srážky"
+      : W.mmh >= 4 ? "Vydatný déšť" : W.mmh >= 1 ? "Mírný déšť" : "Slabý déšť";
     var rozp = "";
     if(W.lo != null && W.hi != null && (W.hi - W.lo) >= 5) rozp = " · mezi " + W.lo + ". a " + W.hi + ". minutou";
     sub.innerHTML = (W.mmh != null ? "Očekávaná intenzita <b>" + fmtMM(W.mmh) + " mm/h</b>" : "Slabé srážky")
@@ -6052,16 +6063,17 @@ function renderSolo(){
 
   /* ================= 4. NEPRŠÍ ================= */
   box.classList.add("dry");
-  pill.textContent = "teď neprší";
+  pill.textContent = "Verdikt · teď neprší";
   if(!V){
-    big.textContent = "–"; sub.textContent = "Načítám…";
+    big.textContent = "–"; if(word) word.textContent = ""; sub.textContent = "Načítám…";
     facts.innerHTML = ""; talk.innerHTML = ""; src.textContent = "";
     return;
   }
-  big.innerHTML = V.prob + "<small> %</small>";
+  big.textContent = V.prob + " %";
   sub.textContent = V.jePravdepodobnost
     ? ("pravděpodobnost deště během " + HOURS + " hodin")
     : ("shoda modelů na dešti během " + HOURS + " hodin");
+  if(word) word.textContent = V.rainModels === 0 ? "Nemělo by pršet" : "Spíš sucho";
   var fx2 = ["<span>shoda <b>" + V.rainModels + "/" + V.N + "</b> modelů</span>"];
   if(V.jePravdepodobnost) fx2.push("<span>shoda modelů <b>" + V.agreeProb + " %</b></span>");
   if(V.pkIdx >= 0 && V.times[V.pkIdx]) fx2.push("<span>nejblíž <b>" + fmtHr(V.times[V.pkIdx]) + "</b></span>");
