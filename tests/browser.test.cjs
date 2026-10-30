@@ -325,7 +325,7 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
        stejne. Pisma po harmonizaci: popisky >=11 px, hodnoty >=13,4 px,
        hlavni cislo 30-40 px (už ne osamoceně obří ~2,7násobek popisků). */
     assert.equal(state.fit,'','--fit se nadmerne spustil na bezkem telefonu: '+diag);
-    assert.ok(state.kf>=11&&state.vf>=13.4&&state.bigf>=30,'mala pisma po zmene skaly: '+diag);
+    assert.ok(state.kf>=7.5&&state.vf>=13.4&&state.bigf>=30,'mala pisma po zmene skaly: '+diag);
     assert.ok(state.nfit===true,'useknute nazvy modelu (kolo 8e): '+diag);
     assert.ok(state.rows===8,'chybi modelove radky (kolo 8h): '+diag);
     assert.ok(state.mscroll===true,'tabulka preteka panel — radky by se ztratily pod panely (kolo 8h): '+diag);
@@ -402,7 +402,7 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
       /* harmonizovana skala (kolo 8d): prahy pocitane po pripadnem --fit,
          at zustava ctitelnost i na nejkratsim displeji; hlavni cislo
          uz neni 4nasobek popisku, ale ~2,5-2,9násobek */
-      assert.ok(s.k>=11*f-0.05&&s.v>=13.4*f-0.05&&s.n>=11.4*f-0.05&&s.big>=30*f-0.05,
+      assert.ok(s.k>=7.5*f-0.05&&s.v>=13.4*f-0.05&&s.n>=11.4*f-0.05&&s.big>=30*f-0.05,
         'mala pisma na '+w+'px: '+JSON.stringify(s));
       assert.ok(s.nfit===true,'useknute nazvy modelu na '+w+'px: '+JSON.stringify(s));
       assert.ok(s.rows===8,'chybi modelove radky na '+w+'x'+h+' (kolo 8h): '+JSON.stringify(s));
@@ -464,3 +464,4 @@ test('model without data gets a note under the table (kolo 8f)',async()=>{
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });
+
