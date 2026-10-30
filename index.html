@@ -2142,7 +2142,12 @@ function applyLayoutMode(){
   var ks = document.querySelectorAll(".stat .k, .mhead h2");
   for(var i=0;i<ks.length;i++){
     var el = ks[i];
-    if(el.dataset.full) el.textContent = NARROW.matches ? el.dataset.short : el.dataset.full;
+    if(el.dataset.full){
+      /* kolo 8j: na mobilu nese h2 pocet zdroju od render() (dataset.cap) */
+      if(NARROW.matches && el.tagName === "H2" && el.dataset.cap) continue;
+      el.textContent = NARROW.matches ? el.dataset.short : el.dataset.full;
+      if(el.tagName === "H2" && !NARROW.matches) el.dataset.cap = "";
+    }
   }
   fitGuard();
 }
@@ -2919,8 +2924,12 @@ function render(j, allModels, generation){
      ktere tabulka doopravdy ukazuje. Na desktopu se vraci plny nadpis —
      o prepina applyLayoutMode (data-full/data-short). */
   var mh = document.querySelector(".mhead h2");
-  if(mh && NARROW.matches)
-    mh.textContent = "Modely · " + perModel.length + " zdroju";
+if(mh && NARROW.matches){
+    var zc = perModel.length;
+    mh.textContent = "Modely \u00b7 " + zc + " " + (zc === 1 ? "zdroj" : (zc >= 2 && zc <= 4 ? "zdroje" : "zdroj\u016f"));
+    /* dataset.cap = uhona pro applyLayoutMode, aby pri resize neprepsal pocet zpet na data-short */
+    mh.dataset.cap = "1";
+  }
 
   perModel.forEach(function(pm){
     var tr = document.createElement("tr");
