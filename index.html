@@ -1,4 +1,3 @@
-<!DOCTYPE html>
 <html lang="cs">
 <head>
 <meta charset="UTF-8">
@@ -133,6 +132,11 @@ aside{display:flex;flex-direction:column;gap:clamp(8px,1.2vh,14px);min-height:0}
    neškodí. Na telefonu je jeden panel, který podle situace mění obsah. */
 .solo{display:none}
 html.compact .verdict, html.compact .when{display:none}
+/* Kolo 8m (vize navrh 02): mobil je cisty verdikt — VERDIKT panel,
+   lista souhrnu, tabulka. Says/facts/talk zustavaji na desktopu,
+   kde jsou soucasti popisu obou panelu a je tam misto. Na telefonu
+   nazyva jediny verdikt vse, co rika obrovsky pocet s wordem. */
+html.compact .solo .says,html.compact .solo .facts,html.compact .solo .talk{display:none}
 html.compact .solo{
   /* aside je na mobilu dvousloupcová mřížka kvůli původním dvěma panelům.
      Sloučený panel musí přes obě — jinak sedí v levé polovině a vedle
@@ -387,7 +391,7 @@ html.compact .pinBtn svg{width:13px;height:13px}
 html.compact .loc input{font-size:calc(clamp(13px,3.7vw,15px)*var(--fit,1));padding:7px 6px}
 html.compact .locBtn{padding:7px 11px;border-radius:7px;margin-left:2px}
 html.compact .sugg{left:0;right:0}
-html.compact .brand .s{display:none}
+html.compact .brand .s{display:block;font-size:calc(clamp(8px,2.3vw,9.5px)*var(--fit,1));margin-top:2px}
 html.compact .brand .t{font-size:calc(clamp(15px,4.2vw,17px)*var(--fit,1))}
 html.compact .updated{display:none}
 html.compact .loc{min-width:0;max-width:none}
@@ -396,7 +400,7 @@ html.compact .locBtn{padding:8px 12px}
 /* main na mobilu je sloupec: tabulka pruží (doplní volné místo),
    panely pod ní drží přirozenou výšku — lišta souhrnů tak sedí
    u spodního okraje displeje. */
-html.compact main{display:flex;flex-direction:column;gap:10px;min-height:0}
+html.compact main{display:flex;flex-direction:column;gap:12px;min-height:0}
 /* Kolo 8h: tabulka nesmí přetéct panel a nechat řádky mizet pod
    panely níž („Shoda 0/8, ale vidět jen 6 modelů"). .matrix má
    vlastní scroll (schozený scrollbar, iOS momentum) jako pojistku
@@ -410,7 +414,7 @@ html.compact .matrix::-webkit-scrollbar{display:none}
    dost (žádný prázdný pás pod tabulkou), a když není, .matrix scrolluje
    (pojistka z kola 8h zůstává). */
 html.compact .matrix table{flex:1 0 auto}
-html.compact aside{display:grid;grid-template-columns:1fr 1fr;gap:10px;min-height:0}
+html.compact aside{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:0;order:-1}
 html.compact .verdict{grid-column:1}
 html.compact .when{grid-column:2}
 /* Lišta souhrnů na mobilu: jeden tenký pruh se čtyřmi oddělenými
@@ -8044,4 +8048,3 @@ function recomputeWhen(){
 </script>
 </body>
 </html>
-
