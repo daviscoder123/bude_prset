@@ -332,8 +332,10 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
     assert.ok(state.lastIn===true,'posledni radek tabulky (Shoda) neni videt (kolo 8h): '+diag);
     assert.ok(state.flagsN>=8,'vlajecky u modelu chybi (kolo 8i): '+diag);
     assert.ok(state.flagD!==null&&state.flagD!=='none','vlajecka na mobilu skryta (kolo 8i): '+diag);
-    /* Kolo 8j (navrh 02): mini legenda bunek + mono kapitalka s poctem zdroju */
-    assert.ok(state.legendN===4,'mini legenda bunek chybi (kolo 8j): '+diag);
+    /* Kolo 8j (navrh 02): mini legenda bunek + mono kapitalka s poctem zdroju.
+       Kolo 8y (Dave): legenda ma stejnych 6 polozek jako desktop (sucho,
+       pod prahem, slabý, mírný, silný, národní model). */
+    assert.ok(state.legendN===6,'mini legenda bunek chybi/prepsala se (kolo 8j/8y): '+diag);
     assert.ok(typeof state.cap==='string'&&/^Modely · \d+ zdroj\u016f/.test(state.cap),'mono kapitalka nad tabulkou chybi (kolo 8j): '+diag);
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
@@ -432,7 +434,7 @@ test('model without data gets a note under the table (kolo 8f)',async()=>{
      jako by appka modely sama omezila — chybející řádky jsou tiše.
      Když open-meteo některým modelem neodpoví, musí se pod tabulkou
      objevit poznámka s počtem, a tabulka nesmí vypadat rozbitě
-     (žádná useknutá jména ani po zmenšení počtu řádků). */
+     (žádné useknutá jména ani po zmenšení počtu řádků). */
   const {ctx,p,errors,control}=await fixture('Europe/Prague',393,852);
   try{
     await search(p,'Praha');await ready(p,'Praha');
@@ -464,4 +466,3 @@ test('model without data gets a note under the table (kolo 8f)',async()=>{
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });
-

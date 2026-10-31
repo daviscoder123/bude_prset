@@ -151,7 +151,11 @@ html.compact .solo{
      prázdná díra. :has() v CSS jsem zkoušel a nepodporují ho všechna
      renderovací jádra (screenshoty), třída je spolehlivější. */
   grid-column:1/-1;
-  display:flex; flex-direction:column; gap:0; justify-content:center;
+  /* Kolo 8y (Dave: „lépe přizpůsob verdikt velikosti okna“): obsah
+     panelu se ROZPROSTŘE po celé výšce okna (space-evenly) — když je
+     vedle vyšší radarový kompas, nezůstane mrtvé pásmo dole, ale hero
+     i src se rovnoměrně rozestoupí po celém panelu. */
+  display:flex; flex-direction:column; gap:0; justify-content:space-evenly;
   background:
     radial-gradient(120% 80% at 50% -20%, rgba(74,158,255,.10), transparent 65%),
     var(--panel);
@@ -469,7 +473,7 @@ html.compact .stat .v{font-size:calc(clamp(13.5px,3.6vw,15px)*var(--fit,1));whit
 /* Hlavní panel na mobilu dýchá hustěji, ať zbude místo pro tabulku
    i lištu — čitelnost hlídají zvětšené řádky, ne vzduch kolem. */
 html.compact .solo .hero{padding:calc(clamp(12px,3.4vw,14px)*var(--fit,1)) calc(clamp(10px,2.9vw,13px)*var(--fit,1)) calc(clamp(9px,2.9vw,11px)*var(--fit,1))}
-html.compact .solo .pill{font-size:calc(clamp(8.5px,2.4vw,9.5px)*var(--fit,1));letter-spacing:.12em;margin-bottom:6px}
+html.compact .solo .pill{font-size:calc(clamp(8.5px,2.4vw,9.5px)*var(--fit,1));letter-spacing:.12em;margin-bottom:8px}
 /* Kolo 8r (Dave: „tucny napis pusobi agresivne"): verdikt na mobilu
    jemnejsi — 39 px → ~31 px na bezkem telefonu (test drzi spodni hranici 30 px). */
 html.compact .solo .big{font-size:calc(clamp(26px,8.4vw,34px)*var(--fit,1))}
@@ -479,9 +483,14 @@ html.compact .solo .big{font-size:calc(clamp(26px,8.4vw,34px)*var(--fit,1))}
    už jsou na svém místě (word „Nemělo by pršet“, pak sub). Dlouhé
    textové verdikty (MOŽNÁ KAPE, SLABÝ DÉŠŤ…) výše zůstávají
    v původní velikosti — větší by se z půlky panelu vylomily. */
-html.compact .solo.dry .big{font-size:calc(clamp(40px,12vw,52px)*var(--fit,1))}
-html.compact .solo .word{font-size:calc(clamp(12.5px,3.6vw,14px)*var(--fit,1));margin-top:calc(3px*var(--fit,1))}
-html.compact .solo .sub{margin-top:4px;font-size:calc(clamp(11.5px,3.1vw,13px)*var(--fit,1))}
+/* Kolo 8w fix5 + 8y (Dave: „větší procento“ → „verdikt ať vyplní okno“):
+   v suchu je hrdinou panelu ČÍSLO; na mobilu zabere větší díl půlky
+   panelu (kolo 8y zvětšilo: 40/12/52 → 44/13,5/58), aby panel neměl
+   tolik volného místa. Textové verdikty (MOŽNÁ KAPE apod.) zůstávají
+   v clamp(26px,8.4vw,34px) kvůli testu big>=30px v maybe stavu. */
+html.compact .solo.dry .big{font-size:calc(clamp(44px,13.5vw,58px)*var(--fit,1))}
+html.compact .solo .word{font-size:calc(clamp(12.5px,3.6vw,14px)*var(--fit,1));margin-top:calc(5px*var(--fit,1))}
+html.compact .solo .sub{margin-top:6px;font-size:calc(clamp(11.5px,3.1vw,13px)*var(--fit,1))}
 html.compact .solo .says{padding:8px 13px 0;gap:8px}
 html.compact .solo .say{padding-left:11px}
 html.compact .solo .say .tag{margin-bottom:3px;font-size:calc(clamp(10.5px,3vw,12px)*var(--fit,1))}
@@ -514,10 +523,15 @@ html.compact #mnote{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--fit,1));paddi
    paticka (kolo 8) a s ni i klic k tabulce; „Shoda 0/8“ si bez legendy
    precte jen znalec. Na desktopu se nezobrazuje — tam je plna legenda
    v paticce. */
-html.compact .mlegend{display:flex;gap:14px;align-items:center;flex:none;
-  padding:0 4px;margin-top:calc(9px*var(--fit,1));font-size:calc(clamp(8.5px,2.4vw,9.5px)*var(--fit,1))}
-html.compact .mlegend span{display:flex;gap:5px;align-items:center;color:var(--muted)}
-html.compact .mlegend .sw{width:13px;height:9px;border-radius:3px;flex:none}
+/* Kolo 8y (Dave: „uprav to podle pc verze“): legenda pod tabulkou má
+   stejné položky jako v patičce na desktopu. Aby se všech šest vešlo
+   na jeden řádek i na 360px displeji, je gap i písmo kompaktnější;
+   flex-wrap + nowrap položky jsou pojistka — položka se nikdy
+   nezalomí uvnitř, v nejhorsim pripade prejde cela na druhy radek. */
+html.compact .mlegend{display:flex;flex-wrap:wrap;gap:8px;row-gap:3px;align-items:center;flex:none;
+  padding:0 4px;margin-top:calc(9px*var(--fit,1));font-size:calc(clamp(7.5px,2.05vw,8.5px)*var(--fit,1))}
+html.compact .mlegend span{display:flex;gap:4px;align-items:center;color:var(--muted);white-space:nowrap}
+html.compact .mlegend .sw{width:12px;height:8px;border-radius:3px;flex:none}
 html.compact td.name .a{display:none}
 html.compact td.name .flag{float:left;font-style:normal;font-size:calc(clamp(10px,2.9vw,12px)*var(--fit,1));line-height:1;transform:scale(.78);transform-origin:left center;margin-right:2px}
 html.compact tr.national .badge{display:none}
@@ -606,12 +620,18 @@ html.compact table{border-spacing:1.5px}
         <span class="u">mm / hod · lokální čas</span>
       </div>
       <table id="tbl"><thead><tr id="hdr"></tr></thead><tbody id="body"></tbody></table>
-      <!-- Kolo 8j (navrh 02): mini legenda bunek v panelu tabulky. -->
+      <!-- Kolo 8j (navrh 02): mini legenda bunek v panelu tabulky.
+           Kolo 8y (Dave: „uprav to podle pc verze“): stejné položky
+           jako legenda v patičce na desktopu — sucho, pod prahem,
+           slabý, mírný, silný, národní model. Buňky mají stupňovanou
+           intenzitu i na mobilu (inline barvy), takže klíč sedí. -->
       <div class="mlegend" aria-hidden="true">
-        <span><i class="sw" style="background:rgba(168,228,255,.45)"></i>mokrá</span>
-        <span><i class="sw" style="background:var(--panel2);color:var(--muted);font-size:7px;line-height:9px;text-align:center">·</i>pod prahem</span>
-        <span><i class="sw" style="background:var(--panel2)"></i>suchá</span>
-        <span><i class="sw" style="background:transparent;box-shadow:inset 0 0 0 1px var(--nat)"></i>národní model</span>
+        <span><i class="sw" style="background:var(--panel2)"></i>sucho</span>
+        <span><i class="sw" style="background:var(--panel2);color:#4E6377;text-align:center;font-size:7px;line-height:8px">·</i>pod prahem</span>
+        <span><i class="sw" style="background:rgba(168,228,255,.28)"></i>slabý</span>
+        <span><i class="sw" style="background:rgba(168,228,255,.6)"></i>mírný</span>
+        <span><i class="sw" style="background:var(--rain)"></i>silný</span>
+        <span><i class="sw" style="background:rgba(142,209,143,.5)"></i>národní model</span>
       </div>
       <!-- Poznámka o modelech bez odpovědi (kolo 8f): když open-meteo
            některým modelem neodpoví, jeho řádek tiše vypadne a tabulka
