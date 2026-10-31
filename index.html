@@ -6157,11 +6157,15 @@ function renderSolo(){
     pill.textContent = "Verdikt · právě prší";
     big.innerHTML = cap(W.type.t);
     var sil = W.mmh >= 4 ? "vydatný" : W.mmh >= 1 ? "mírný" : "slabý";
-    if(word) word.textContent = sil + " déšť";
+    /* Typ srážek patří do verdiktu: u sněžení nelze říkat „déšť“. */
+    if(word) word.textContent =
+      (W.type && /sněž|sníh|sněh/i.test(W.type.t)) ? "sněžení" : (sil + " déšť");
     sub.innerHTML = "<b>" + fmtMM(W.mmh) + " mm/h</b> · "
                   + (W.staniceSolo
                       ? "potvrzeno stanicí — pozemní měření"
-                      : "potvrzeno <b>" + W.indep + "</b> nezávislými zdroji") + ".";
+                      : W.radarSolo
+                        ? "potvrzeno radarem — měření nad tebou"
+                        : "potvrzeno <b>" + W.indep + "</b> nezávislými zdroji") + ".";
 
     var zbyva = null, konecTxt = "";
     if(W.end && !W.end.beyond && W.end.min != null){
@@ -7884,6 +7888,23 @@ function recomputeWhen(){
          && staniceKm <= (staniceKonvektivni ? 12 : 25))
         || (modSign && staniceKm != null && staniceKm <= 60)));
 
+  /* ---- RADAR JAKO POTVRZENÍ SAMA (kolo 8x) ----
+     Radar je měření nad lokalitou, ne predikce — a stejně jako stanice
+     (kolo 8v) může potvrdit „prší právě teď“ i sám. Případ z 31. 10. 2026
+     (Łódź): radar viděl ~7 mm/h přímo nad obcí, snímek 7 min starý,
+     modely souhlasily — a verdikt říkal „možná mrholí“, protože jediné
+     nezávislé potvrzení (radar) nestačilo a METAR ve chvíli svého až
+     hodinu starého pozorování srážky nehlásil. Echo přímo nad tebou
+     ale nemá co „možná“: kapky už letí k zemi. Pravidla (radar má i
+     falešná echa, proto opatrně): potvrzuje sám jen s čerstvým snímkem
+     (do 15 min), vydatným echem nad obcí (≥ 1 mm/h, tedy 10× nad
+     hranicí hlasování) a s potvrzením i v okolí (nowMmArea ≥ 0,1) —
+     osamocený šumový pixel nebo starý snímek sám o sobě nikdy. */
+  var radarPotvrzuje = !!(radarState && radarState !== "error"
+    && radarNow != null && radarNow >= 1.0
+    && (radarState.ageMin == null || radarState.ageMin <= 15)
+    && (radarState.nowMmArea == null || radarState.nowMmArea >= 0.1));
+
   /* ---- VÝŠKA PAPRSKU RADARU (proč radar říká sucho, ač stanice prší) ----
      Radarový paprsek se od antény zvedá nad obzor a s rostoucí vzdáleností
      sleduje mete stovky metrů až kilometry nad zemí. Mrholení, mlha nebo
@@ -7945,7 +7966,7 @@ function recomputeWhen(){
   }
 
   /* ---- PRŠÍ PRÁVĚ TEĎ (potvrzeno ≥2 zdroji, nebo blízkou stanicí) ---- */
-  if(indepVotes >= 2 || stanicePotvrzuje){
+  if(indepVotes >= 2 || stanicePotvrzuje || radarPotvrzuje){
     /* Verdikt jen ze stanice: intenzitu neznámá žádný mm/h zdroj, kategorie
        METARu dá aspoň hrubý odhad (-RA ≈ 0,3 mm/h) — poctivější než nic. */
     if(!mmhVals.length){
@@ -7979,15 +8000,20 @@ function recomputeWhen(){
       + stationNote
       + (indepVotes >= 2
           ? " Potvrzeno <b>" + indepVotes + "</b> nezávislými zdroji."
-          : " Potvrzuje stanice — pozemní měření"
-            + (modSign ? ", se souhlasem modelu." : " blízko tebe."))
+          : (stanicePotvrzuje
+              ? " Potvrzuje stanice — pozemní měření"
+                + (modSign ? ", se souhlasem modelu." : " blízko tebe.")
+              : " Potvrzuje radar — měření přímo nad tebou"
+                + (radarState.ageMin != null
+                    ? ", snímek před " + Math.round(radarState.ageMin) + " min." : ".")))
       + trendPhrase
       + beamNote + blitzNote();
     var observedVotes = votes.filter(function(v){ return v.indexOf("model") < 0; });
     srcEl.textContent = "ověřeno: " + observedVotes.join(" + ") + sourceCaveat();
     renderRainEnd(now, 0, blendTimeline);
     whenState = {mode:"wet", mmh:med, type:typeGuess, votes:observedVotes, indep:indepVotes,
-                 staniceSolo:(indepVotes < 2),
+                 staniceSolo:(indepVotes < 2 && stanicePotvrzuje),
+                 radarSolo:(indepVotes < 2 && radarPotvrzuje),
                  end: estimateRainEnd(now, 0, blendTimeline), trend:trendPhrase,
                  station:stationNote, now:now};
     renderSolo();
