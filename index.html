@@ -144,11 +144,13 @@ html.compact .verdict, html.compact .when{display:none}
    nazyva jediny verdikt vse, co rika obrovsky pocet s wordem. */
 html.compact .solo .says,html.compact .solo .facts,html.compact .solo .talk{display:none}
 html.compact .solo{
-  /* Kolo 8w (Dave): verdikt už není přes celou šířku — sedí v levé
-     půlce a vedle něj radarový kompas jako na PC. Když radar nemá
-     co říct ([hidden]), :has pravidlo u mřížky aside ho vrátí
-     přes obě půlky, ať nezůstává prázdná díra. */
-  grid-column:1;
+  /* Kolo 8w (Dave): verdikt se zmenší na levou půlku (a vedle něj
+     usedne radarový kompas jako na PC) jen s třídou sKompasem na
+     <html>, kterou přepíná renderCompass — default zůstává přes obě
+     půlky jako v kolo 8m, ať při načítání ani bez radaru nevzniká
+     prázdná díra. :has() v CSS jsem zkoušel a nepodporují ho všechna
+     renderovací jádra (screenshoty), třída je spolehlivější. */
+  grid-column:1/-1;
   display:flex; flex-direction:column; gap:0;
   background:
     radial-gradient(120% 80% at 50% -20%, rgba(74,158,255,.10), transparent 65%),
@@ -441,11 +443,12 @@ html.compact aside{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-heigh
 html.compact .verdict{grid-column:1}
 html.compact .when{grid-column:2}
 /* Kolo 8w (Dave): radarový kompas v pravé půlce vedle verdiktu.
-   Bez radarových dat je [hidden] → nezabírá buňku mřížky a verdikt
-   se :has roztáhne přes obě půlky (původní stav z kola 8m). */
+   Verdikt se zmenší na levou půlku jen s třídou sKompasem na <html>
+   (přepíná ji renderCompass, jakmile kompas něco ukazuje). Bez
+   radarových dat je kompas [hidden], nezabírá buňku mřížky a verdikt
+   zůstává přes obě půlky (původní stav z kola 8m). */
 html.compact .compass{grid-column:2}
-html.compact aside:has(> .compass[hidden]) .solo,
-html.compact aside:not(:has(> .compass)) .solo{grid-column:1/-1}
+html.compact.sKompasem .solo{grid-column:1}
 /* Lišta souhrnů na mobilu: jeden tenký pruh se čtyřmi oddělenými
    hodnotami — vždy na jednom řádku, bez zalamování buněk. Oddělovače
    mezi buňkami ji dělají čitelnou i na úzkých displejích. */
@@ -4465,6 +4468,17 @@ function compassMmAt(dtMin, fallback){
 }
 
 function renderCompass(){
+  try{ renderCompassBase(); }
+  finally{
+    /* Kolo 8w: mobilní mřížka aside — verdikt zmenšený na půlku jen
+       tehdy, kdy kompas skutečně něco ukazuje. Stav nese třída na
+       <html>, protože :has() v CSS nepodporují všechna renderovací
+       jádra. Kompas [hidden] → bez třídy → verdikt přes obě půlky. */
+    var komp = document.getElementById("compass");
+    if(komp) document.documentElement.classList.toggle("sKompasem", !komp.hidden);
+  }
+}
+function renderCompassBase(){
   var el = document.getElementById("compass");
   if(!el) return;
   if(radarCoverage === "none"){
