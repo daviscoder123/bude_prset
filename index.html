@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="cs">
 <head>
 <meta charset="UTF-8">
@@ -3873,7 +3874,8 @@ function loadRadar(lat, lon, myId){
       metarPreskoceno = preskoceno;
       if(!best){ obsMetar = "error"; recomputeWhen(); return; }
       obsMetar = {wx: best.wxString || "", name: best.name || best.icaoId || "stanice",
-                  km: Math.round(bestD), raw: best.rawOb || ""};
+                  km: Math.round(bestD), raw: best.rawOb || "",
+                  ageMin: Math.max(0, Math.round((Date.now()/1000 - (best.obsTime || 0))/60))};
       satVerifyAgainstMetar();      /* družice si tímhle buduje (nebo kazí) důvěru */
       recomputeWhen();
     })
@@ -6110,8 +6112,10 @@ function renderSolo(){
     big.innerHTML = cap(W.type.t);
     var sil = W.mmh >= 4 ? "vydatný" : W.mmh >= 1 ? "mírný" : "slabý";
     if(word) word.textContent = sil + " déšť";
-    sub.innerHTML = "<b>" + fmtMM(W.mmh) + " mm/h</b> · potvrzeno <b>"
-                  + W.indep + "</b> nezávislými zdroji.";
+    sub.innerHTML = "<b>" + fmtMM(W.mmh) + " mm/h</b> · "
+                  + (W.staniceSolo
+                      ? "potvrzeno stanicí — pozemní měření"
+                      : "potvrzeno <b>" + W.indep + "</b> nezávislými zdroji") + ".";
 
     var zbyva = null, konecTxt = "";
     if(W.end && !W.end.beyond && W.end.min != null){
@@ -7803,6 +7807,37 @@ function recomputeWhen(){
     }
   }
 
+  /* ---- STANICE JAKO POTVRZENÍ SAMA (kolo 8v) ----
+     METAR je pozemní měření, ne predikce — a právě při slabém dešti bývá
+     jediný zdroj, který zbude: radar svým paprskem nad mrholením často
+     nevidí, modely mřížkou pod 0,1 mm/h neprotlačí, a appka pak říká
+     „možná mrholí“, ačkoliv venku férově prší a letiště o deset kilometrů
+     dál hlásí -RA. (Případ z Líšně u Brna 31. 10. 2026: LKTB -RA, modely
+     0,0 mm/h, AccuWeather „déšť“.) Pravidla:
+       · stanice do 25 km potvrzuje „prší právě teď“ SAMA (u přeháňek a
+         bouří jen do 12 km — konvektivní pole je lokální) a jen s čerstvým
+         pozorováním (do 60 min),
+       · vzdálenější stanice stačí, když jí do ±15 min souhlasí i model
+         (sousední 15min okna, ne jen aktuální — slabý déšť spadne mezi
+         mřížky zrovna kolem půlky okna). */
+  var staniceWet = !!(obsMetar && obsMetar !== "error" && metarHasPrecip(obsMetar.wx));
+  var staniceKm = (staniceWet && typeof obsMetar.km === "number") ? obsMetar.km : null;
+  var staniceKonvektivni = !!(staniceWet && /SH|TS/.test(obsMetar.wx.toUpperCase()));
+  var staniceCerstve = !!(staniceWet
+                          && (obsMetar.ageMin == null || obsMetar.ageMin <= 60));
+  var modSign = false;
+  if(altSeries && altSeries.length){
+    for(var si2 = 0; si2 < Math.min(2, altSeries.length); si2++){
+      if(altSeries[si2].mmh != null && altSeries[si2].mmh >= 0.1){ modSign = true; break; }
+    }
+  }
+  if(modelCurrent && modelCurrent !== "error"
+     && modelCurrent.mmh != null && modelCurrent.mmh >= 0.1) modSign = true;
+  var stanicePotvrzuje = !!(staniceWet
+    && ((staniceCerstve && staniceKm != null
+         && staniceKm <= (staniceKonvektivni ? 12 : 25))
+        || (modSign && staniceKm != null && staniceKm <= 60)));
+
   /* ---- VÝŠKA PAPRSKU RADARU (proč radar říká sucho, ač stanice prší) ----
      Radarový paprsek se od antény zvedá nad obzor a s rostoucí vzdáleností
      sleduje mete stovky metrů až kilometry nad zemí. Mrholení, mlha nebo
@@ -7863,8 +7898,16 @@ function recomputeWhen(){
     }
   }
 
-  /* ---- PRŠÍ PRÁVĚ TEĎ (potvrzeno ≥2 zdroji) ---- */
-  if(indepVotes >= 2){
+  /* ---- PRŠÍ PRÁVĚ TEĎ (potvrzeno ≥2 zdroji, nebo blízkou stanicí) ---- */
+  if(indepVotes >= 2 || stanicePotvrzuje){
+    /* Verdikt jen ze stanice: intenzitu neznámá žádný mm/h zdroj, kategorie
+       METARu dá aspoň hrubý odhad (-RA ≈ 0,3 mm/h) — poctivější než nic. */
+    if(!mmhVals.length){
+      var stMm = (staniceWet && obsMetar && obsMetar !== "error")
+                 ? saneMm(metarApproxMm(obsMetar.wx)) : null;
+      if(stMm == null || stMm <= 0) stMm = 0.1;
+      mmhVals.push(stMm);
+    }
     mmhVals.sort(function(a,b){ return a-b; });
     var med = mmhVals[Math.floor(mmhVals.length/2)];   /* medián = odolný vůči výstřelkům */
     med = saneMm(med); if(med == null) med = 0.1;
@@ -7887,12 +7930,18 @@ function recomputeWhen(){
     big.className = "big";
     big.innerHTML = cap(typeGuess.t) + " <small>právě teď</small>";
     sub.innerHTML = "Intenzita <b>" + fmtMM(med) + " mm/h</b> · " + typeGuess.i + "."
-      + stationNote + " Potvrzeno <b>" + indepVotes + "</b> nezávislými zdroji." + trendPhrase
+      + stationNote
+      + (indepVotes >= 2
+          ? " Potvrzeno <b>" + indepVotes + "</b> nezávislými zdroji."
+          : " Potvrzuje stanice — pozemní měření"
+            + (modSign ? ", se souhlasem modelu." : " blízko tebe."))
+      + trendPhrase
       + beamNote + blitzNote();
     var observedVotes = votes.filter(function(v){ return v.indexOf("model") < 0; });
     srcEl.textContent = "ověřeno: " + observedVotes.join(" + ") + sourceCaveat();
     renderRainEnd(now, 0, blendTimeline);
     whenState = {mode:"wet", mmh:med, type:typeGuess, votes:observedVotes, indep:indepVotes,
+                 staniceSolo:(indepVotes < 2),
                  end: estimateRainEnd(now, 0, blendTimeline), trend:trendPhrase,
                  station:stationNote, now:now};
     renderSolo();
