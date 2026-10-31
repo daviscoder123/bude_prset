@@ -2788,6 +2788,7 @@ function load(place, silent){
   loadRadar(place.lat, place.lon, myId);
   loadEnsemble(place.lat, place.lon, myId);
   loadAllEnhancements(place.lat, place.lon, myId);
+  integrateEnhancedNowcast(Date.now());
 }
 
 /* Obnova dat: pouze při viditelné aplikaci — na pozadí nula aktivity,
@@ -7464,6 +7465,9 @@ function weightedMedian(items){
 var blendMeta = null;   /* {anchor, arrival} — doplňky k míchané ose */
 
 function buildBlendTimeline(now, altSeries){
+  /* =========== ENHANCED NOWCAST INTEGRATION =========== */
+  integrateEnhancedNowcast(now);
+
   var DTGRID = [5,10,15,20,25,30,35,40,45,50,55,60];
   var gridSeries = null;
   if(gridNowcast && gridNowcast !== "error"){
@@ -7826,6 +7830,9 @@ function renderRainEnd(now, startMin, timeline){
 }
 
 function recomputeWhen(){
+  /* =========== ENHANCED NOWCAST IN RECOMPUTE =========== */
+  if(cur && cur.lat && cur.lon) { computeEnhancedNowcast(Date.now(), cur.lat, cur.lon); }
+
   var big = $("whenBig"), sub = $("whenSub"), srcEl = $("whenSrc");
   if(!modelState){ return; }
   setTimeout(fitPanels, 0);
@@ -8344,6 +8351,531 @@ function recomputeWhen(){
                          t, Math.max(0.05, Math.min(0.98, maxC/ms.N)), "agree");
   renderSolo();
 }
+
+/* =========== ENHANCED NOWCAST MODULE - Vylepšené nowcastování na minutu =========== */
+
+/* =========== KONFIGURACE =========== */
+var EnhancedNowcastConfig = {
+  timeResolution: 1,
+  maxHorizon: 60,
+  ensembleFrames: 8,
+  minSamples: 3
+};
+
+var enhancedNowcastState = null;
+
+/* =========== 1. KONSOLIDACE RADAROVÝCH DAT =========== */
+function consolidateRadarData(allData) {
+  var byTime = {};
+  allData.forEach(function(d) {
+    var timeKey = Math.round(d.dt / 5) * 5;
+    if(!byTime[timeKey]) byTime[timeKey] = {dt: timeKey, values: [], sources: []};
+    byTime[timeKey].values.push(d.mmh);
+    byTime[timeKey].sources.push(d.source);
+  });
+  
+  var timeline = [];
+  Object.keys(byTime).sort(function(a,b) { return Number(a) - Number(b); }).forEach(function(key) {
+    var group = byTime[key];
+    var sorted = group.values.slice().sort(function(a,b) { return a-b; });
+    var median = sorted[Math.floor(sorted.length/2)];
+    var confidence = calculateRadarConfidence(group.values, group.sources);
+    timeline.push({dt: Number(key), mmh: median, conf: confidence, sources: group.sources, count: group.values.length});
+  });
+  return timeline;
+}
+
+function calculateRadarConfidence(values, sources) {
+  var sourceConfidence = Math.min(0.95, sources.length * 0.25);
+  var mean = values.reduce(function(a,b) { return a+b; }, 0) / values.length;
+  var stdDev = standardDeviation(values);
+  var agreementConfidence = stdDev < mean * 0.3 ? 0.95 : (stdDev < mean * 0.5 ? 0.8 : 0.6);
+  return Math.min(0.99, (sourceConfidence * 0.4 + agreementConfidence * 0.6));
+}
+
+/* =========== 2. BLITZORTUNG EFEKT =========== */
+function calculateBlitzEffect(blitzState, lat, lon, dt) {
+  if(!blitzState || blitzState === "error") return null;
+  
+  var now = Date.now();
+  var ageMin = (now - blitzState.timestamp) / 60000;
+  
+  if(ageMin > 60) return null;
+  
+  var intensity = 0;
+  var confidence = 0;
+  
+  if(blitzState.stormConfirmed && blitzState.nearestKm <= 20) {
+    intensity = Math.max(0.1, 5 - blitzState.nearestKm * 0.2);
+    confidence = Math.min(0.95, 1 - ageMin / 60);
+  } else if(blitzState.n60 > 0) {
+    intensity = Math.min(2, blitzState.n60 * 0.05);
+    confidence = Math.min(0.8, blitzState.n60 * 0.1);
+  }
+  
+  return {intensity: intensity, confidence: confidence};
+}
+
+/* =========== 3. SATELITNÍ EFEKT =========== */
+function calculateSatelliteEffect(satData, lat, lon, dt) {
+  if(!satData || satData === "error") return null;
+  
+  var intensity = 0;
+  var confidence = satData.confidence || 0.7;
+  
+  if(satData.convection) {
+    intensity = Math.min(3, (satData.cth || 0) / 4);
+    confidence = Math.min(0.95, confidence + 0.2);
+  } else if(satData.cloudType === "cumulonimbus") {
+    intensity = 2.5;
+    confidence = 0.9;
+  } else if(satData.cloudDensity > 0.8) {
+    intensity = Math.min(1.5, satData.cloudDensity * 0.5);
+  }
+  
+  return {intensity: intensity, confidence: confidence};
+}
+
+/* =========== 4. LIDAR EFEKT =========== */
+function calculateLidarEffect(lidarData, dt) {
+  if(!lidarData || lidarData === "error") return null;
+  
+  var intensity = 0;
+  var confidence = 0.8;
+  
+  if(lidarData.convectionDetected) {
+    intensity = Math.min(3, lidarData.convectionIntensity * 2);
+    confidence = Math.min(0.95, 0.7 + lidarData.convectionIntensity * 0.2);
+  } else if(lidarData.cloudHeight < 2000) {
+    intensity = Math.min(1, lidarData.cloudHeight / 2000);
+  }
+  
+  return {intensity: intensity, confidence: confidence};
+}
+
+/* =========== 5. DYNAMICKÉ VÁHY =========== */
+function calculateNowcastWeights(lat, lon, dt) {
+  var weights = {
+    radar5min: 0.4,
+    radarStandard: 0.3,
+    blitzortung: 0.15,
+    satellite: 0.1,
+    lidar: 0.05
+  };
+  
+  if(!lat || !lon) return weights;
+  
+  var radarConf = calculateRadarConfidenceForTime(radar5minState, dt);
+  var blitzConf = calculateBlitzConfidence(blitzState, lat, lon);
+  var satConf = satMultiSpectral && satMultiSpectral !== "error" ? satMultiSpectral.confidence : 0;
+  var lidarConf = lidarState && lidarState !== "error" ? 0.8 : 0;
+  
+  var totalConf = radarConf + blitzConf + satConf + lidarConf;
+  if(totalConf > 0) {
+    weights.radar5min = radarConf / totalConf * 0.4;
+    weights.blitzortung = blitzConf / totalConf * 0.15;
+    weights.satellite = satConf / totalConf * 0.1;
+    weights.lidar = lidarConf / totalConf * 0.05;
+  }
+  
+  return weights;
+}
+
+function calculateRadarConfidenceForTime(radarState, dt) {
+  if(!radarState || radarState === "error" || !radarState.timeline) return 0.7;
+  var now = Date.now();
+  var ageMin = (now - radarState.lastUpdate) / 60000;
+  return Math.max(0.5, Math.min(0.95, 1 - ageMin / 30));
+}
+
+function calculateStandardRadarConfidence(radarState, lat, lon) {
+  if(!radarState || radarState === "error") return 0.7;
+  return 0.85;
+}
+
+function calculateBlitzConfidence(blitzState, lat, lon) {
+  if(!blitzState || blitzState === "error") return 0;
+  var now = Date.now();
+  var ageMin = (now - blitzState.timestamp) / 60000;
+  if(ageMin > 60) return 0;
+  if(blitzState.stormConfirmed) return Math.min(0.95, 1 - ageMin / 60);
+  if(blitzState.n60 > 0) return Math.min(0.8, blitzState.n60 * 0.1);
+  return 0.3;
+}
+
+/* =========== 6. HLAVNÍ FUNKCE: ENHANCED NOWCAST =========== */
+function createTimeLaggedEnsemble(baseTimeline, maxLag, dt) {
+  if(!baseTimeline || baseTimeline.length < 2) return null;
+  
+  var ensemble = [];
+  for(var lag = 0; lag <= Math.min(maxLag, baseTimeline.length - 1); lag++) {
+    var shifted = shiftTimeline(baseTimeline, lag);
+    if(shifted) ensemble.push(shifted);
+  }
+  return ensemble;
+}
+
+function shiftTimeline(timeline, shiftMin) {
+  if(!timeline || timeline.length === 0) return null;
+  return timeline.map(function(t) {
+    return {dt: t.dt + shiftMin, mmh: t.mmh, conf: t.conf, sources: t.sources};
+  });
+}
+
+function interpolateTimeline(timeline, dt) {
+  if(!timeline || timeline.length === 0) return null;
+  
+  var prev = null;
+  var next = null;
+  
+  for(var i = 0; i < timeline.length; i++) {
+    if(timeline[i].dt <= dt) prev = timeline[i];
+    if(timeline[i].dt >= dt && !next) next = timeline[i];
+  }
+  
+  if(!prev && !next) return null;
+  if(!prev) return next.mmh;
+  if(!next) return prev.mmh;
+  
+  var ratio = (dt - prev.dt) / (next.dt - prev.dt);
+  return prev.mmh + (next.mmh - prev.mmh) * ratio;
+}
+
+function interpolateRadar5min(timeline, dt) {
+  if(!timeline || timeline.length === 0) return null;
+  
+  var prev = null;
+  var next = null;
+  
+  for(var i = 0; i < timeline.length; i++) {
+    if(timeline[i].dt <= dt) prev = timeline[i];
+    if(timeline[i].dt >= dt && !next) next = timeline[i];
+  }
+  
+  if(!prev && !next) return null;
+  if(!prev) return {value: next.mmh, confidence: next.conf};
+  if(!next) return {value: prev.mmh, confidence: prev.conf};
+  
+  var ratio = (dt - prev.dt) / (next.dt - prev.dt);
+  return {
+    value: prev.mmh + (next.mmh - prev.mmh) * ratio,
+    confidence: prev.conf + (next.conf - prev.conf) * ratio
+  };
+}
+
+function interpolateRadarTimeline(radarState, dt) {
+  if(!radarState || radarState === "error" || !radarState.timeline) return null;
+  
+  var prev = null;
+  var next = null;
+  
+  for(var i = 0; i < radarState.timeline.length; i++) {
+    if(radarState.timeline[i].dt <= dt) prev = radarState.timeline[i];
+    if(radarState.timeline[i].dt >= dt && !next) next = radarState.timeline[i];
+  }
+  
+  if(!prev && !next) return null;
+  if(!prev) return next.mmh;
+  if(!next) return prev.mmh;
+  
+  var ratio = (dt - prev.dt) / (next.dt - prev.dt);
+  return prev.mmh + (next.mmh - prev.mmh) * ratio;
+}
+
+function calculateConvectionProbability(blitzState, satData, lidarData, dt) {
+  var prob = 0;
+  
+  if(blitzState && blitzState !== "error") {
+    if(blitzState.severeStorm) prob += 0.4;
+    else if(blitzState.stormConfirmed) prob += 0.3;
+    if(blitzState.n10 >= 3) prob += 0.2;
+    if(blitzState.nearestKm <= 10) prob += 0.1;
+  }
+  
+  if(satData && satData !== "error") {
+    if(satData.cloudType === "cumulonimbus") prob += 0.3;
+    if(satData.cth > 10) prob += 0.2;
+  }
+  
+  if(lidarData && lidarData !== "error") {
+    if(lidarData.convectionDetected) prob += 0.3;
+    if(lidarData.convectionIntensity > 0.5) prob += 0.2;
+  }
+  
+  return Math.min(1.0, prob);
+}
+
+function computeEnhancedNowcast(now, lat, lon) {
+  if(!lat || !lon) return null;
+  
+  var DTGRID = [];
+  for(var i = 0; i <= EnhancedNowcastConfig.maxHorizon; i++) {
+    DTGRID.push(i);
+  }
+  
+  var resultTimeline = [];
+  var metadata = {
+    sources: [],
+    weights: {},
+    confidence: [],
+    convectionProbability: [],
+    orographicFactor: []
+  };
+  
+  var weights = calculateNowcastWeights(lat, lon, 0);
+  metadata.weights = weights;
+  
+  DTGRID.forEach(function(dt) {
+    var predictions = [];
+    var sourceContributions = {};
+    
+    if(weights.radar5min > 0 && radar5minState && radar5minState !== "error") {
+      var radarPred = interpolateRadar5min(radar5minState.timeline, dt);
+      if(radarPred != null) {
+        predictions.push({
+          value: radarPred.value,
+          confidence: radarPred.confidence * weights.radar5min,
+          source: "radar5min"
+        });
+        sourceContributions.radar5min = radarPred.value;
+      }
+    }
+    
+    if(weights.radarStandard > 0 && radarState && radarState !== "error") {
+      var stdRadarPred = interpolateRadarTimeline(radarState, dt);
+      if(stdRadarPred != null) {
+        predictions.push({
+          value: stdRadarPred,
+          confidence: calculateStandardRadarConfidence(radarState, lat, lon) * weights.radarStandard,
+          source: "radarStandard"
+        });
+        sourceContributions.radarStandard = stdRadarPred;
+      }
+    }
+    
+    if(weights.blitzortung > 0 && blitzState && blitzState !== "error") {
+      var blitzEffect = calculateBlitzEffect(blitzState, lat, lon, dt);
+      if(blitzEffect) {
+        predictions.push({
+          value: blitzEffect.intensity,
+          confidence: blitzEffect.confidence * weights.blitzortung,
+          source: "blitzortung"
+        });
+        sourceContributions.blitzortung = blitzEffect.intensity;
+      }
+    }
+    
+    if(weights.satellite > 0 && satMultiSpectral && satMultiSpectral !== "error") {
+      var satEffect = calculateSatelliteEffect(satMultiSpectral, lat, lon, dt);
+      if(satEffect) {
+        predictions.push({
+          value: satEffect.intensity,
+          confidence: satEffect.confidence * weights.satellite,
+          source: "satellite"
+        });
+        sourceContributions.satellite = satEffect.intensity;
+      }
+    }
+    
+    if(weights.lidar > 0 && lidarState && lidarState !== "error") {
+      var lidarEffect = calculateLidarEffect(lidarState, dt);
+      if(lidarEffect) {
+        predictions.push({
+          value: lidarEffect.intensity,
+          confidence: lidarEffect.confidence * weights.lidar,
+          source: "lidar"
+        });
+        sourceContributions.lidar = lidarEffect.intensity;
+      }
+    }
+    
+    if(predictions.length > 0) {
+      var ensemble = createTimeLaggedEnsemble(
+        predictions.map(function(p) { return {dt: dt, mmh: p.value}; }),
+        5,
+        dt
+      );
+      if(ensemble) {
+        var ensembleMedian = ensemble.map(function(e) { return e.mmh; })
+          .sort(function(a,b) { return a-b; })[Math.floor(ensemble.length/2)];
+        predictions.push({
+          value: ensembleMedian,
+          confidence: 0.85 * weights.radar5min,
+          source: "ensemble"
+        });
+      }
+    }
+    
+    var totalWeight = predictions.reduce(function(sum, p) { return sum + p.confidence; }, 0);
+    var weightedSum = predictions.reduce(function(sum, p) { return sum + p.value * p.confidence; }, 0);
+    var finalMmh = totalWeight > 0 ? weightedSum / totalWeight : 0;
+    var finalConf = totalWeight > 0 ? totalWeight / predictions.length : 0;
+    
+    var convectionProb = calculateConvectionProbability(blitzState, satMultiSpectral, lidarState, dt);
+    
+    var orographicFactor = 1.0;
+    if(demHighRes && demHighRes !== "error") {
+      orographicFactor = calculateOrographicFactor(demHighRes, lat, lon);
+    }
+    
+    finalMmh *= orographicFactor;
+    
+    resultTimeline.push({
+      dt: dt,
+      mmh: Math.max(0, finalMmh),
+      conf: Math.min(0.99, finalConf),
+      sources: predictions.map(function(p) { return p.source; }),
+      sourceValues: sourceContributions,
+      convectionProbability: convectionProb,
+      orographicFactor: orographicFactor
+    });
+    
+    metadata.confidence.push(finalConf);
+    metadata.convectionProbability.push(convectionProb);
+    metadata.orographicFactor.push(orographicFactor);
+  });
+  
+  resultTimeline = smoothTimeline(resultTimeline);
+  
+  var onset = detectOnset(resultTimeline, now);
+  var end = detectEnd(resultTimeline, now);
+  
+  enhancedNowcastState = {
+    timeline: resultTimeline,
+    metadata: metadata,
+    onset: onset,
+    end: end,
+    lastUpdate: Date.now()
+  };
+  
+  return enhancedNowcastState;
+}
+
+function calculateOrographicFactor(dem, lat, lon) {
+  if(!dem) return 1.0;
+  var elevation = dem.elevation || 0;
+  var slope = dem.slope || 0;
+  var aspect = dem.aspect || 0;
+  
+  var factor = 1.0 + elevation / 5000.0;
+  
+  if(slope > 15) factor *= 1.0 + slope / 100.0;
+  
+  return Math.max(0.8, Math.min(1.2, factor));
+}
+
+/* Vyhlazení časové řady (odstranění šumu) */
+function smoothTimeline(timeline) {
+  if(!timeline || timeline.length < 3) return timeline;
+  
+  var smoothed = [];
+  
+  for(var i = 0; i < timeline.length; i++) {
+    var sum = 0;
+    var count = 0;
+    
+    for(var j = Math.max(0, i-1); j <= Math.min(timeline.length-1, i+1); j++) {
+      if(timeline[j].mmh != null) {
+        sum += timeline[j].mmh;
+        count++;
+      }
+    }
+    
+    if(count > 0) {
+      smoothed.push({
+        dt: timeline[i].dt,
+        mmh: sum / count,
+        conf: timeline[i].conf,
+        sources: timeline[i].sources,
+        sourceValues: timeline[i].sourceValues,
+        convectionProbability: timeline[i].convectionProbability,
+        orographicFactor: timeline[i].orographicFactor
+      });
+    } else {
+      smoothed.push(timeline[i]);
+    }
+  }
+  
+  return smoothed;
+}
+
+/* Detekce začátku srážek */
+function detectOnset(timeline, now) {
+  if(!timeline || timeline.length === 0) return null;
+  
+  var threshold = THRESH_OBS;
+  
+  for(var i = 0; i < timeline.length; i++) {
+    if(timeline[i].mmh != null && timeline[i].mmh >= threshold) {
+      return timeline[i].dt;
+    }
+  }
+  
+  return null;
+}
+
+/* Detekce konce srážek */
+function detectEnd(timeline, now) {
+  if(!timeline || timeline.length === 0) return null;
+  
+  var threshold = THRESH_END;
+  var inPrecip = false;
+  var lastPrecipTime = null;
+  
+  for(var i = 0; i < timeline.length; i++) {
+    if(timeline[i].mmh != null && timeline[i].mmh >= threshold) {
+      inPrecip = true;
+      lastPrecipTime = timeline[i].dt;
+    } else if(inPrecip && (timeline[i].mmh == null || timeline[i].mmh < threshold)) {
+      return lastPrecipTime;
+    }
+  }
+  
+  return null;
+}
+
+/* Pomocná funkce: výpočet směrodatné odchylky */
+function standardDeviation(values) {
+  if(!values || values.length < 2) return 0;
+  
+  var mean = values.reduce(function(a, b) { return a + b; }, 0) / values.length;
+  var variance = values.reduce(function(a, b) { 
+    return a + Math.pow(b - mean, 2); 
+  }, 0) / values.length;
+  
+  return Math.sqrt(variance);
+}
+
+/* Integrace Enhanced Nowcast do buildBlendTimeline */
+function integrateEnhancedNowcast(now) {
+  if(!cur || !cur.lat || !cur.lon) return;
+  var enhanced = computeEnhancedNowcast(now, cur.lat, cur.lon);
+  if(!enhanced || !enhanced.timeline) return;
+  
+  if(gridNowcast && gridNowcast.length > 0) {
+    var enhancedMap = {};
+    enhanced.timeline.forEach(function(e) {
+      enhancedMap[e.dt] = e;
+    });
+    
+    for(var i = 0; i < gridNowcast.length; i++) {
+      var e = enhancedMap[gridNowcast[i].t];
+      if(e && e.mmh != null) {
+        gridNowcast[i].p = Math.min(100, e.mmh * 10);
+        gridNowcast[i].mm = e.mmh;
+      }
+    }
+  }
+}
+
+/* Inicializace Enhanced Nowcast v load() */
+function initEnhancedNowcast() {
+}
+
+/* Načtení všech dat pro Enhanced Nowcast */
+function loadAllEnhancedNowcastData(lat, lon, myId) {
+}
+
 </script>
 </body>
 </html>
