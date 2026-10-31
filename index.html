@@ -321,9 +321,16 @@ html.compact .ensrow{font-size:9px;margin-top:4px}
    do sloupce (label, cifernák, text) a písmo se přizpůsobí; cifernák
    nese směr i bez čtení, proto zůstává největší. Skrytý stav řeší
    původní .compass[hidden] níž (nezabere buňku mřížky). */
-html.compact .compass{flex-direction:column;gap:6px;align-items:stretch;
+/* Kolo 8w fix2 (Dave: „potřebuji ten radar vycentrovat v té jeho
+   tabulce"): cifernák na střed panelu, vodorovně i svisle. Svisle
+   je to nutné, protože grid natahuje panel na výšku řady vedle
+   vyššího verdiktu — bez justify-content:center by obsah visel
+   u horní hrany a dole byl mrtvý prostor. Vodorovně align-self
+   na samotném ciferníku (robustnější než auto margin). Text zůstává
+   plné šířky, ať se vysvětlení nelepí uprostřed. */
+html.compact .compass{flex-direction:column;gap:6px;align-items:stretch;justify-content:center;
   padding:calc(10px*var(--fit,1)) calc(9px*var(--fit,1));border-radius:18px}
-html.compact .compass svg{width:min(34vw,96px);height:min(34vw,96px);flex:none;margin:0 auto}
+html.compact .compass svg{width:min(34vw,96px);height:min(34vw,96px);flex:none;align-self:center;margin:0 auto}
 html.compact .compass .ct{flex:none}
 html.compact .compass .ct .verd{font-size:calc(clamp(11.5px,3.2vw,13px)*var(--fit,1))}
 html.compact .compass .ct .expl{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--fit,1))}
