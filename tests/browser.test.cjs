@@ -432,7 +432,7 @@ test('model without data gets a note under the table (kolo 8f)',async()=>{
      jako by appka modely sama omezila — chybející řádky jsou tiše.
      Když open-meteo některým modelem neodpoví, musí se pod tabulkou
      objevit poznámka s počtem, a tabulka nesmí vypadat rozbitě
-     (žádné useknutá jména ani po zmenšení počtu řádků). */
+     (žádná useknutá jména ani po zmenšení počtu řádků). */
   const {ctx,p,errors,control}=await fixture('Europe/Prague',393,852);
   try{
     await search(p,'Praha');await ready(p,'Praha');
@@ -464,3 +464,4 @@ test('model without data gets a note under the table (kolo 8f)',async()=>{
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });
+
