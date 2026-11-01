@@ -660,7 +660,7 @@ html.compact table{border-spacing:1.5px}
       </div>
 
       <div class="when">
-        <div class="label" id="whenLabel">Kdy začne pršet v horizontu 60 min</div>
+        <div class="label">Kdy začne pršet</div>
         <div class="big" id="whenBig">–</div>
         <div class="sub" id="whenSub">Počítám nejpravděpodobnější začátek…</div>
         <div class="until" id="whenUntil"></div>
@@ -7797,10 +7797,6 @@ function renderRainEnd(now, startMin, timeline){
 function recomputeWhen(){
   var big = $("whenBig"), sub = $("whenSub"), srcEl = $("whenSrc");
   if(!modelState){ return; }
-  /* Kolo 8z (Dave): label panelu slibuje horizont 60 min — radarový
-     nowcast dál totiž nevidí. Modelová větev níže ho přepíše, když
-     jde start déště za 60. minutu (tam už mluví jen modely). */
-  if($("whenLabel")) $("whenLabel").textContent = "Kdy začne pršet v horizontu 60 min";
   setTimeout(fitPanels, 0);
   if(cur) blitzMaybeStart(cur.lat, cur.lon);   /* blesky jen při konvektivním potenciálu */
 
@@ -8202,6 +8198,15 @@ function recomputeWhen(){
     }
     var wide = (lo != null && hi != null && hi - lo >= 3 && lo >= 1);
 
+    /* Kolo 8z fix (screenshot „za 137–304 min“): blend umí odhadnout
+       příchod pole i za 60. minutu — extrapoluje jeho pohyb. Label
+       pak nesmí slibovat horizont 60 min; řekne tedy, na čem odhad
+       stojí, ať název panelu obsahu neodporuje. */
+    if($("whenLabel")) $("whenLabel").textContent =
+      (wide ? hi : mins) > 60
+        ? "Kdy začne pršet · odhad z pohybu srážkového pole"
+        : "Kdy začne pršet v horizontu 60 min";
+
     big.className = "big";
     big.innerHTML = wide
       ? "za " + lo + "–" + hi + " <small>min</small>"
@@ -8293,11 +8298,6 @@ function recomputeWhen(){
   var t = ms.times[idx].getTime();
   var minM = Math.round((t - now)/60000);
   var pct = Math.round(maxC/ms.N*100);
-  /* Kolo 8z: model hlásí začátek dál než 60 min — radar tam nevidí,
-     tak to label řekne napřímo, ať slib „horizontu 60 min“ nelže. */
-  if($("whenLabel")) $("whenLabel").textContent =
-    minM > 60 ? "Kdy začne pršet · dál než 60 min vidí jen modely"
-              : "Kdy začne pršet v horizontu 60 min";
   big.className = "big";
   if(minM <= 0){
     big.innerHTML = "do hodiny";           /* pozorování déšť nepotvrdila → netvrdit "teď" */
