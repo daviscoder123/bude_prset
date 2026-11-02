@@ -1417,7 +1417,9 @@ function cachedJson(url, ttlMs){
   return fetchT(url).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
     .then(function(j){
       CACHE[url] = {t:Date.now(), ttl:ttlMs, d:j}; pruneCache();
-      offlineStore(url, CACHE[url].t, j);
+      /* offlineStore v izolovaných testovacích kontextech (vm) neexistuje —
+         ukládání zálohy je doplněk, nesmí shodit samotné čtení dat. */
+      try{ offlineStore(url, CACHE[url].t, j); }catch(e){}
       return j;
     })
     .catch(function(e){
@@ -1427,7 +1429,7 @@ function cachedJson(url, ttlMs){
       var o = null;
       try{ o = JSON.parse(localStorage.getItem(OFFLINE_KEY) || "{}")[url]; }catch(ignored){}
       if(!o) throw e;
-      offlineStale(o.t);
+      try{ offlineStale(o.t); }catch(e2){}
       return o.d;
     });
 }
