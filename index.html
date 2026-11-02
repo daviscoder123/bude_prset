@@ -370,6 +370,8 @@ footer{display:flex;justify-content:space-between;align-items:center;font-family
 @keyframes pl{50%{opacity:.35}}
 #offlineBar{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:calc(clamp(8px,1.4vh,18px) + env(safe-area-inset-bottom,0px));z-index:60;background:var(--warn);color:#141005;font-family:var(--sans);font-weight:800;font-size:12px;padding:9px 16px;border-radius:999px;box-shadow:0 8px 24px rgba(0,0,0,.5);white-space:nowrap}
 #offlineBar.show{display:block}
+#dataMeter{display:none}
+html.debugData #dataMeter{display:block;font-family:monospace;font-size:11px;line-height:1.5;opacity:.65;padding:4px 12px 0;text-align:center}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 /* kompaktní (mobilní) režim — řízeno JS třídou na <html> */
@@ -699,6 +701,7 @@ html.compact table{border-spacing:1.5px}
       <span class="mb-sep">·</span>
       <span class="mb-slogan">made by Skarka&nbsp;AI&nbsp;company</span>
     </div>
+    <div id="dataMeter"></div>
     <details class="srcwrap"><summary>Zdroje dat a licence</summary><div class="srcnote">obce: GeoNames + Photon/OSM · předpovědi: open-meteo.com · radar: RainViewer (globální kompozit, vlastní extrapolace posunu + jejich nowcast) · nad ČR navíc přímo ČHMÚ (PseudoCAPPI 2 km, mřížka 1×1 km, extrapolace COTREC do 60 min, opendata.chmi.cz, CC BY 4.0) · Skandinávie a Pobaltí: met.no nowcast · Rakousko a jižní Morava: GeoSphere INCA · USA: api.weather.gov · stanice: METAR · národní radarový nowcast: DWD (RADVOR/WN) a KNMI (radar_forecast, CC-BY-4.0) · družice: NASA GIBS a EUMETSAT Meteosat (EUMETView) · pravděpodobnost: ensemble Open-Meteo (ICON-D2/ICON-EU/ECMWF IFS, 20–51 členů) · terén: Open-Meteo Elevation · data MET Norway (met.no) pod licencí CC BY 4.0 · práh modelů se řídí konvekcí (základ 0,2 mm/h, při silné labilitě až 1,0 — konvektivní déšť je skvrnitý), radar ≥ 0,2 mm/h. Kde radar nedosahuje nebo jsou 15min data jen dopočítaná, aplikace to uvede u zdroje.</div></details>
   </footer>
 </div>
@@ -1349,6 +1352,32 @@ function pruneCache(){
 /* Časový limit pro všechna síťová volání. Zavěšené API jinak nechá
    panel viset v "Načítám" donekonečna — prohlížeč sám vzdává spojení
    až po minutách. Kde AbortController chybí, fallback bez limitu. */
+/* ===== Kolo 8aa: měřič přenesených dat (P9) + offline zásoba (P3) =====
+   Měřič je čistá diagnostika: bajty se sčítají jen v paměti, ukazatel
+   v patičce je defaultně skrytý a odhalí ho třída debugData
+   (localStorage bpDebug="1"). Offline zásoba ukládá poslední JSON
+   odpovědi do localStorage; při výpadku SÍTĚ (ne při HTTP chybě
+   serveru) je cachedJson vrátí a lišta dole přizná jejich stáří. */
+var meterData = {total:0, est:0, byHost:{}};
+function fmtBytes(n){
+  return n >= 1048576 ? (n/1048576).toFixed(1) + " MB"
+       : n >= 1024 ? Math.round(n/1024) + " kB" : n + " B";
+}
+function meterAdd(url, bytes, est){
+  if(!(bytes > 0)) return;
+  try{
+    var host = new URL(url).host;
+    meterData.total += bytes;
+    if(est) meterData.est += bytes;
+    else meterData.byHost[host] = (meterData.byHost[host]||0) + bytes;
+    var el = (typeof document !== "undefined") ? $("dataMeter") : null;
+    if(el) el.textContent = "přeneseno " + fmtBytes(meterData.total) +
+      (meterData.est ? " · dlaždice (odhad) " + fmtBytes(meterData.est) : "") +
+      Object.keys(meterData.byHost).map(function(h){
+        return " · " + h + " " + fmtBytes(meterData.byHost[h]);
+      }).join("");
+  }catch(e){}                    /* testovací kontexty bez URL/DOM: nevadí */
+}
 function fetchT(url, opts, timeoutMs){
   if(typeof AbortController === "undefined") return fetch(url, opts);
   var ac = new AbortController();
@@ -1356,13 +1385,51 @@ function fetchT(url, opts, timeoutMs){
   var p = fetch(url, Object.assign({}, opts || {}, {signal: ac.signal}));
   function done(){ clearTimeout(t); }
   p.then(done, done);
-  return p;
+  return p.then(function(r){
+    try{ meterAdd(url, Number(r.headers && r.headers.get("content-length"))); }catch(e){}
+    return r;
+  });
+}
+var OFFLINE_KEY = "bpOffline_v1", OFFLINE_MAX = 24, OFFLINE_MAX_JSON = 250000;
+function offlineStore(url, t, j){
+  try{
+    var raw = JSON.stringify(j);
+    if(raw.length > OFFLINE_MAX_JSON) return;   /* kvótou localStorage nepálit */
+    var o = {};
+    try{ o = JSON.parse(localStorage.getItem(OFFLINE_KEY) || "{}"); }catch(e){}
+    o[url] = {t:t, d:j};
+    var ks = Object.keys(o).sort(function(a,b){ return o[a].t - o[b].t; });
+    for(var i=0; i<ks.length-OFFLINE_MAX; i++) delete o[ks[i]];
+    localStorage.setItem(OFFLINE_KEY, JSON.stringify(o));
+  }catch(e){}                    /* plná kvóta / bez localStorage: nechat být */
+}
+function offlineStale(t){
+  var b = (typeof document !== "undefined") ? $("offlineBar") : null;
+  if(!b) return;
+  var dt = new Date(t);
+  var hh = ("0"+dt.getHours()).slice(-2), mm = ("0"+dt.getMinutes()).slice(-2);
+  b.textContent = "Offline · zobrazená data z " + hh + ":" + mm;
+  b.classList.add("show");
 }
 function cachedJson(url, ttlMs){
   var c = CACHE[url];
   if(c && (Date.now()-c.t) < ttlMs) return Promise.resolve(c.d);
   return fetchT(url).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
-    .then(function(j){ CACHE[url] = {t:Date.now(), ttl:ttlMs, d:j}; pruneCache(); return j; });
+    .then(function(j){
+      CACHE[url] = {t:Date.now(), ttl:ttlMs, d:j}; pruneCache();
+      offlineStore(url, CACHE[url].t, j);
+      return j;
+    })
+    .catch(function(e){
+      /* Výpadek sítě ≠ chybná odpověď serveru. HTTP 5xx se šíří dál —
+         server přece odpověděl; jen opravdu mrtvou síť zachrání záloha. */
+      if(typeof localStorage === "undefined" || !e || /^HTTP /.test(e.message)) throw e;
+      var o = null;
+      try{ o = JSON.parse(localStorage.getItem(OFFLINE_KEY) || "{}")[url]; }catch(ignored){}
+      if(!o) throw e;
+      offlineStale(o.t);
+      return o.d;
+    });
 }
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -1378,6 +1445,7 @@ function syncOfflineBar(){
   var off = (typeof navigator !== "undefined" && typeof navigator.onLine === "boolean")
             ? !navigator.onLine : false;
   b.classList.toggle("show", off);
+  if(!off) b.textContent = "Jsi offline — zobrazená data můžou být stará";
 }
 window.addEventListener("online", function(){
   syncOfflineBar();
@@ -1387,6 +1455,9 @@ window.addEventListener("online", function(){
 });
 window.addEventListener("offline", function(){ syncOfflineBar(); });
 syncOfflineBar();
+/* Kolo 8aa (P9): měřič přenesených dat se zapíná localStorage bpDebug="1"
+   (jinak zůstává skrytý — pro běžného uživatele nula vizuálního šumu). */
+try{ if(localStorage.getItem("bpDebug") === "1") document.documentElement.classList.add("debugData"); }catch(e){}
 
 function status(msg){
   var s = $("status");
@@ -5093,7 +5164,7 @@ function blendWeights(dt, cc){
 }
 /* Načte čtvercový výřez kolem bodu (poloměr r px, krok 1).
    Vrací dBZ, sněhový příznak a rovnou i přepočtenou intenzitu v mm/h. */
-function readTilePatch(url, px, py, r){
+function readTilePatchBase(url, px, py, r){
   return new Promise(function(resolve){
     var img = new Image();
     img.crossOrigin = "anonymous";
@@ -5133,6 +5204,24 @@ function readTilePatch(url, px, py, r){
     img.onerror = function(){ resolve(null); };
     img.src = url;
   });
+}
+/* Kolo 8aa (P2): historické radarové snímky jsou neměnné — stejný PNG
+   výřez (url+px+py+r) se při každém přepočtu pohybu srážkového pole
+   stahuje a dekóduje znovu, byť se data vůbec nezměnila. Wrapper kešuje
+   promise výsledku. Null (chyba/CORS) se kešovat nesmí, ať se příště
+   zkusí znovu; strop FIFO 64 výřezů drží paměť v řádu stovek kB. */
+var PATCH_CACHE = new Map();
+function readTilePatch(url, px, py, r){
+  var key = url + "|" + px + "|" + py + "|" + r;
+  if(PATCH_CACHE.has(key)) return PATCH_CACHE.get(key);
+  try{ meterAdd(url, 10000, true); }catch(e){}  /* ~10 kB PNG načteného snímku, odhad */
+  var p = readTilePatchBase(url, px, py, r).then(function(v){
+    if(v === null) PATCH_CACHE.delete(key);
+    return v;
+  }, function(){ PATCH_CACHE.delete(key); return null; });
+  PATCH_CACHE.set(key, p);
+  if(PATCH_CACHE.size > 64) PATCH_CACHE.delete(PATCH_CACHE.keys().next().value);
+  return p;
 }
 /* Odhad posunu srážkového pole mezi dvěma snímky (křížová korelace).
    Vrací {dx,dy} v pixelech — o kolik se pole posunulo za dt. */
