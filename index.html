@@ -1226,11 +1226,11 @@ function loadEnsemble(lat, lon, myId){
     }
     var M = cands[i];
     var pts = ensembleGrid(lat, lon);
-    cachedJson("https://ensemble-api.open-meteo.com/v1/ensemble?latitude="
-      + pts.map(function(p){ return p[0]; }).join(",")
+    cachedJson(omUrl("ensemble-api.open-meteo.com", "/v1/ensemble",
+      "latitude=" + pts.map(function(p){ return p[0]; }).join(",")
       + "&longitude=" + pts.map(function(p){ return p[1]; }).join(",")
       + "&hourly=precipitation&models=" + M.id
-      + "&forecast_hours=" + (HOURS+1) + "&timezone=auto", 900000)
+      + "&forecast_hours=" + (HOURS+1) + "&timezone=auto"), 900000)
       .then(function(j){
         if(isStale(myId)) return;
         var parsed = ensembleFromJson(j, HOURS);
@@ -1410,6 +1410,20 @@ function offlineStale(t){
   var hh = ("0"+dt.getHours()).slice(-2), mm = ("0"+dt.getMinutes()).slice(-2);
   b.textContent = "Offline · zobrazená data z " + hh + ":" + mm;
   b.classList.add("show");
+}
+/* Pilíř A (kolo 8ac): volitelná edge proxy na Cloudflare Workers.
+   Dokud je BP_PROXY prázdný řetězec, omUrl() vrací přímé URL na
+   Open-Meteo — chování aplikace je pak identické s předchozí verzí.
+   Po nasazení Workera se sem vloží jeho URL (např.
+   "https://bude-prset.vase-subdomena.workers.dev") a proxy se tím
+   aktivuje: 1 dotaz na uživatele, cache sdílená napříč všemi
+   uživateli, retry a 503 logika na jednom místě.
+   Nouzové cesty (retry uvnitř load()) zůstávají vždy přímé — když
+   proxy nedopadne, fallback nezávisle trefí samotné Open-Meteo. */
+var BP_PROXY = "";
+function omUrl(host, path, qs){
+  return BP_PROXY ? BP_PROXY + "/om" + path + "?" + qs
+                  : "https://" + host + path + "?" + qs;
 }
 function cachedJson(url, ttlMs){
   var c = CACHE[url];
@@ -2788,8 +2802,9 @@ function load(place, silent){
      ve chvíli, kdy přímé volání na api.met.no neprojde. */
   if(hasMetno) ids.push("metno_seamless");
   ids = ids.join(",");
-  var url = "https://api.open-meteo.com/v1/forecast?latitude="+place.lat+"&longitude="+place.lon
-    + "&hourly=precipitation,snowfall&models="+ids+"&forecast_hours="+(HOURS_END+1)+"&timeformat=unixtime&timezone=auto";
+  var url = omUrl("api.open-meteo.com", "/v1/forecast",
+    "latitude="+place.lat+"&longitude="+place.lon
+    + "&hourly=precipitation,snowfall&models="+ids+"&forecast_hours="+(HOURS_END+1)+"&timeformat=unixtime&timezone=auto");
 
   var metnoPromise = hasMetno
     ? metnoJson("https://api.met.no/weatherapi/locationforecast/2.0/compact?lat="

@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "node tools/build.cjs",
-    "test": "node --test tests/regression.test.cjs",
+    "test": "node --test tests/regression.test.cjs tests/worker.test.cjs",
     "test:browser": "node --test tests/browser.test.cjs"
   },
   "devDependencies": {

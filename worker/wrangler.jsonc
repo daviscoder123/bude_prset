@@ -1,0 +1,9 @@
+{
+  // Konfigurace Wrangleru pro deploy edge proxy (Pilíř A, kolo 8ac).
+  // Nasazení: viz worker/README.md — jednorázově `npx wrangler login`,
+  // poté z tohoto adresáře `npx wrangler deploy`.
+  "name": "bude-prset-proxy",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-11-06",
+  "workers_dev": true
+}

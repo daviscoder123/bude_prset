@@ -105,6 +105,12 @@ npm run test:browser     # end-to-end v řízeném prohlížeči
 
 CI (`.github/workflows/tests.yml`) spouští obě sady na každý pull request a push do `main`.
 
+## ☁️ Edge proxy (Pilíř A, kolo 8ac)
+
+Aplikace umí směrovat hlavní předpověď a ensemble přes **edge proxy na Cloudflare Workers** (zdarma): jeden dotaz na uživatele místo série, cache sdílená napříč všemi uživateli, retry a 503 logika na jednom místě. Worker je transparentní passthrough se whitelistou parametrů a validací — žádná agregace, žádné API klíče. Podrobnosti, testy i postup nasazení: [`worker/README.md`](worker/README.md); testy proxy běží v `tests/worker.test.cjs` (součást `npm test`).
+
+Proxy je **standardně vypnutá**: konstanta `BP_PROXY` v `src/main.js` je prázdný řetězec a aplikace jde přímo na Open-Meteo — chování je identické s předchozí verzí. Po nasazení Workera se do `BP_PROXY` vloží jeho URL a tím se proxy aktivuje; při jejím výpadku klient automaticky spadne na přímé volání (nouzové cesty jsou vždy přímé).
+
 ## 🖼️ Generování screenshotů
 
 Snímky v sekci [Screenshoty](#-screenshoty) negeneruje člověk ručně. Workflow **Screenshots** (`.github/workflows/screenshots.yml`) spustí aplikaci v CI s deterministickými ukázkovými daty — jednou scénář „déšť", jednou „sucho" — a přes Playwright vyfotí desktopové i mobilní zobrazení. Výsledné PNG se commitnou do `docs/screenshots/`, takže je vidí každý, kdo si prohlédne README bez spouštění aplikace. Při každé změně `index.html` se snímky samy přegenerují — dokumentace nikdy „neleží" o vzhledu aplikace.

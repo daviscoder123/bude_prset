@@ -103,6 +103,9 @@ test('new load clears complete state before starting any data source',()=>{
     modelState:{old:true},verdictState:{old:true},orogState:{factor:1.5},
     threshFor:()=>0.2,status:()=>{},pickModels:()=>[],MODELS:[],HOURS_END:24,
     cachedJson:never,loadEnsemble:()=>{},
+    /* Kolo 8ac: load() sestavuje URL přes omUrl(); v testu odpovídá
+       stub produkčnímu výchozímu stavu (BP_PROXY="" → přímé URL). */
+    omUrl:(h,p,qs)=>'https://'+h+p+'?'+qs,
     blitzState:{n10:4,n60:9},blitzHits:[{ms:1}],blitzStarted:true,
     blitzTries:1,blitzHostIdx:1,blitzLastRenderMs:99,blitzWs:blitzWsStub,
     loadRadar:()=>{
