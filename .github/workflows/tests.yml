@@ -17,6 +17,14 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      # Kolo 8ab: index.html je build artifact (template + src/main.js).
+      # Build přepíše index.html v pracovním stromu; diff proti commitnuté
+      # verzi musí být prázdný, jinak někdo upravil artifact ručně nebo
+      # zapomněl přegenerovat (a Pages by servírovala něco jiného, co CI
+      # netestuje). Tato brána to zakáže dřív, než se to dostane do produkce.
+      - run: npm run build
+      - name: Artifact freshness (index.html musi odpovidat buildu)
+        run: git diff --exit-code -- index.html || { echo "::error::index.html v repu neni aktualni — spust 'npm run build' a commitni artifact spolu se zmenami src/"; exit 1; }
       - run: npm test
       - name: Pri selhani testu vloz vystup jako komentar do PR
         if: failure() && github.event_name == 'pull_request'

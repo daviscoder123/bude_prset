@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0A1017">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Bude pršet?">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Bude pršet? — srovnání modelů + radar</title>
+<style>
+:root{
+  --sans:system-ui,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,'Cascadia Mono','SF Mono',Menlo,Consolas,monospace;
+  --ink:#0A1017; --panel:rgba(255,255,255,.12); --panel2:rgba(255,255,255,.06);
+  --line:rgba(255,255,255,.22);
+  --rain:#A8E4FF; --rain-deep:rgba(168,228,255,.42); --text:#F4F8FC; --muted:rgba(255,255,255,.72);
+  --dry:rgba(255,255,255,.42); --warn:#FFE3A3; --nat:#B9F0C8;
+  --cell-h: clamp(20px, 4.4vh, 38px);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+/* iOS Safari (17.4+) umí "text autosizing": malé fonty (na mobilu máme
+   8–9,5 px) si sám nafoukne, čímž rozsype tabulku — názvy modelů se
+   oříznou na "ICO…" a nowrap texty přetečou přes layout. 100 % = nerušit
+   velikosti, které si appka nastavila sama. Android Chrome má stejný
+   mechanismus ("font boosting") a i ten tohle vypíná. */
+html,body{height:100%;overflow:hidden;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+/* ==== SKLO: pozadí nese stav počasí, panely jsou průsvitné ====
+   Gradient je na body::before (position:fixed), NE na background-
+   attachment:fixed na body: iOS Safari fixed attachment nerespektuje
+   (29. 10. 2026 — mobil vykreslil místo gradientu bílou stránku,
+   průsvitné panely pak působily jako rozbitý světlý motiv). Pevně
+   pozicovaný pseudo-element je na iOS spolehlivý a drží se viewportu
+   i při scrollu kompaktního režimu — přesně to, co fixed attachment
+   sliboval. Body nese jen plnou pojistnou barvu pro hraniční případy. */
+body{
+  background:#1B3A8F;
+  color:var(--text); font-family:var(--sans);
+}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;
+  /* světelné skvrny až od středu obrazovky — horní lišta zůstává čistý gradient */
+  /* Kolo 8t (Dave): prší = obloha do modra, ne do fialova.
+     Fialova zustava jen stavum „bude prset", kde jeste nic nepadá. */
+  background:radial-gradient(900px 480px at 88% 32%, rgba(255,255,255,.09), transparent 60%),
+             radial-gradient(640px 420px at 8% 96%, rgba(120,220,255,.10), transparent 65%),
+             linear-gradient(165deg,#152E6E 0%,#1F49B8 45%,#3E7DDB 100%)}
+body.soon{background:#7C3AED}
+body.dry{background:#0E5A4E}
+body.soon::before{background:radial-gradient(900px 480px at 88% 32%, rgba(255,255,255,.09), transparent 60%),
+             radial-gradient(640px 420px at 8% 96%, rgba(120,220,255,.10), transparent 65%),
+             linear-gradient(165deg,#7C3AED 0%,#B558D8 55%,#E88A5C 100%)}
+body.dry::before{background:radial-gradient(900px 480px at 88% 32%, rgba(255,255,255,.09), transparent 60%),
+             radial-gradient(640px 420px at 8% 96%, rgba(120,220,255,.10), transparent 65%),
+             linear-gradient(165deg,#0E5A4E 0%,#2E8A6E 60%,#4CA67E 100%)}
+.matrix,.verdict,.when,.stats,.loc,.solo,.sugg,.madeby{
+  -webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
+}
+#app{height:100vh;display:grid;grid-template-rows:auto 1fr auto;gap:clamp(6px,1.2vh,14px);padding:calc(clamp(8px,1.4vh,18px) + env(safe-area-inset-top,0px)) calc(clamp(12px,2vw,28px) + env(safe-area-inset-right,0px)) clamp(8px,1.4vh,18px) calc(clamp(12px,2vw,28px) + env(safe-area-inset-left,0px))}
+
+/* ---------- HORNÍ PANEL ---------- */
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{display:flex;flex-direction:column;line-height:1}
+.brand .t{font-weight:850;font-size:clamp(16px,2.1vh,23px);letter-spacing:-.02em}
+.brand .s{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;margin-top:4px}
+.loc{flex:1;min-width:260px;max-width:640px;position:relative;z-index:40;overflow:visible;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;padding:5px;cursor:text}
+.loc:focus-within{border-color:var(--rain)}
+.pinBtn{background:none;border:none;color:var(--rain);flex:none;padding:0 6px 0 10px;cursor:pointer;display:flex;align-items:center}
+.pinBtn:active{transform:scale(.9)}
+.loc input{flex:1;min-width:0;width:100%;background:none;border:none;outline:none;color:var(--text);font-family:var(--sans);font-size:clamp(13px,1.8vh,16px);font-weight:600;padding:8px 10px;text-overflow:ellipsis}
+.loc input::placeholder{color:var(--muted);font-weight:400}
+.loc .coords{font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;padding:8px 10px;pointer-events:none}
+.locBtn{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.30);color:#fff;padding:8px 16px;border-radius:7px;cursor:pointer;font-weight:800;font-family:var(--sans);font-size:clamp(12px,1.7vh,14px);flex:none;transition:background .2s}
+.locBtn:hover{background:rgba(255,255,255,.28);border-color:rgba(255,255,255,.45)}
+.locBtn:active{transform:scale(.97)}
+.locBtn .bmin{display:none;font-size:17px;font-weight:900;line-height:1}
+html.compact .locBtn .bfull{display:none}
+html.compact .locBtn .bmin{display:inline}
+.sugg{position:absolute;top:calc(100% + 8px);left:5px;right:5px;z-index:100;background:rgba(9,16,34,.94);border:1px solid var(--rain);border-radius:10px;display:none;max-height:300px;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,.7);animation:slideDown .18s cubic-bezier(.16,.1,0,1)}
+.sugg.open{display:block}
+.sugg button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;background:none;border:none;border-bottom:1px solid var(--line);color:var(--text);font-family:var(--sans);font-size:clamp(12px,1.6vh,14px);padding:11px 12px;cursor:pointer;transition:background .12s}
+.sugg button:last-child{border-bottom:none}
+.sugg button:hover{background:rgba(168,228,255,.14)}
+.sugg button.sel{background:rgba(168,228,255,.26);border-left:2px solid var(--rain);padding-left:10px}
+.sugg .cc{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.sugg .src{font-size:9px;color:var(--rain);border:1px solid var(--rain-deep);border-radius:4px;padding:1px 4px;margin-left:4px}
+@keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.updated{font-family:var(--mono);font-size:10px;color:var(--muted);text-align:right;line-height:1.5}
+
+/* ---------- HLAVNÍ PLOCHA ---------- */
+main{display:grid;grid-template-columns:1fr clamp(210px,23vw,310px);gap:clamp(10px,1.4vw,18px);min-height:0}
+.matrix{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(8px,1.4vh,16px);display:flex;flex-direction:column;min-height:0}
+.mhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:clamp(4px,.8vh,10px)}
+.mhead h2{font-size:clamp(13px,1.8vh,16px);font-weight:800;letter-spacing:-.01em}
+.mhead .u{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.08em}
+table{width:100%;border-collapse:separate;border-spacing:3px;flex:1;table-layout:fixed}
+th{font-family:var(--sans);font-weight:600;font-size:clamp(9px,1.25vh,11px);color:var(--muted)}
+th.hr{text-align:center}
+th.model{text-align:left;width:clamp(118px,14vw,188px)}
+th.sum{width:clamp(44px,5vw,60px);text-align:right}
+/* Kolo 8r (Dave: „cislice v tabulce vypada strasne"): hodnoty i casove
+   hlavicky z monospace do cisteho sansu — tabular-nums drzi zarovnani,
+   tvar cislic je moderni a harmonicka s nazvy modelu (ktere sans uz mely). */
+td{height:var(--cell-h);border-radius:6px;text-align:center;font-family:var(--sans);font-size:clamp(9px,1.3vh,11px);white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums}
+td.name{background:none;text-align:left;padding-right:6px;overflow:hidden}
+td.name .n{font-family:var(--sans);font-weight:700;font-size:clamp(10px,1.45vh,13px);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+td.name .a{font-family:var(--mono);font-size:8.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mnote{font-family:var(--sans);font-size:10px;color:var(--muted);padding:6px 2px 0;line-height:1.35}
+#mnote:empty{display:none}
+/* Kolo 8j: mini legenda bunek — jen kompaktni rezim (desktop ma plnou
+   legendu v paticce, viz footer). */
+.mlegend{display:none}
+td.name .flag{font-style:normal;font-size:12px;line-height:1.1;margin-right:2px} /* vlajka před názvem modelu — viz render() */
+td.cell{background:var(--panel2);color:var(--dry);transition:background .3s}
+td.cell.wet{color:#DFF0FC;font-weight:600}
+/* srážky pod prahem — jsou v součtu, ale za déšť se nepovažují */
+td.cell.sub{color:rgba(255,255,255,.45);background:var(--panel2)}
+td.sumcell{background:none;text-align:right;font-weight:600}
+tr.national td.name .n{color:var(--nat)}
+tr.national td.cell{border:1px solid rgba(185,240,200,.35)}
+tr.national .badge{display:inline-block;font-size:8px;color:var(--nat);border:1px solid rgba(185,240,200,.55);border-radius:4px;padding:0 4px;margin-left:4px;vertical-align:1px}
+tr.consensus td.cell{border:1px solid var(--line);background:rgba(168,228,255,.07)}
+tr.consensus td.name .n{color:var(--rain)}
+
+/* ---------- PRAVÝ PANEL ---------- */
+aside{display:flex;flex-direction:column;gap:clamp(8px,1.2vh,14px);min-height:0}
+.verdict,.when{overflow:hidden;overflow-wrap:anywhere;word-break:break-word;hyphens:auto}
+.verdict{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(10px,1.6vh,16px);display:flex;flex-direction:column;gap:4px}
+.verdict .label{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.verdict .pct{font-weight:900;font-size:clamp(26px,6.5vh,62px);letter-spacing:-.04em;line-height:.95;font-variation-settings:'wdth' 78}
+.verdict .word{font-size:clamp(13px,2vh,17px);font-weight:700}
+.verdict .expl{font-size:clamp(10px,1.5vh,12px);color:var(--muted);line-height:1.4}
+/* ===== SLOUČENÝ PANEL (jen mobil) =====
+   Na PC zůstávají dva panely vedle sebe — je tam místo a víc detailu
+   neškodí. Na telefonu je jeden panel, který podle situace mění obsah. */
+.solo{display:none}
+html.compact .verdict, html.compact .when{display:none}
+/* Kolo 8m (vize navrh 02): mobil je cisty verdikt — VERDIKT panel,
+   lista souhrnu, tabulka. Says/facts/talk zustavaji na desktopu,
+   kde jsou soucasti popisu obou panelu a je tam misto. Na telefonu
+   nazyva jediny verdikt vse, co rika obrovsky pocet s wordem. */
+html.compact .solo .says,html.compact .solo .facts,html.compact .solo .talk{display:none}
+html.compact .solo{
+  /* Kolo 8w (Dave): verdikt se zmenší na levou půlku (a vedle něj
+     usedne radarový kompas jako na PC) jen s třídou sKompasem na
+     <html>, kterou přepíná renderCompass — default zůstává přes obě
+     půlky jako v kolo 8m, ať při načítání ani bez radaru nevzniká
+     prázdná díra. :has() v CSS jsem zkoušel a nepodporují ho všechna
+     renderovací jádra (screenshoty), třída je spolehlivější. */
+  grid-column:1/-1;
+  display:flex; flex-direction:column; gap:0; justify-content:center;
+  background:
+    radial-gradient(120% 80% at 50% -20%, rgba(74,158,255,.10), transparent 65%),
+    var(--panel);
+  border:1px solid var(--line); border-radius:22px;
+  padding:0; position:relative; overflow:hidden;
+  transition:border-color .5s ease;
+}
+html.compact .solo::before{
+  content:""; position:absolute; left:0; right:0; top:0; height:3px;
+  background:var(--line); transition:background .5s ease; z-index:2;
+}
+html.compact .solo.wet::before{background:linear-gradient(90deg,var(--rain-deep),var(--rain),var(--rain-deep))}
+html.compact .solo.soon::before{background:linear-gradient(90deg,var(--rain-deep),var(--warn))}
+html.compact .solo.dry::before{background:linear-gradient(90deg,var(--nat),#2f7d5a)}
+html.compact .solo.wet{border-color:var(--rain-deep)}
+html.compact .solo.soon{border-color:var(--warn)}
+
+/* Jemné pozadí podle stavu — nese náladu, nekrade pozornost. */
+html.compact .solo.wet{
+  background:
+    radial-gradient(130% 90% at 50% -25%, rgba(255,255,255,.12), transparent 62%),
+    linear-gradient(180deg, rgba(255,255,255,.06), transparent 40%),
+    var(--panel);
+}
+html.compact .solo.dry{
+  background:
+    radial-gradient(120% 80% at 50% -20%, rgba(255,255,255,.08), transparent 60%),
+    var(--panel);
+}
+
+.solo .hero{padding:13px 15px 10px}
+/* Kolo 8k (navrh 02 „typografie z desktopu“): pill na mobilu neni bublina
+   s LED, ale mono kapitalka „VERDIKT · …“ — stav nesou barvy textu. */
+.solo .pill{display:block;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--muted);
+  background:none;padding:0;margin-bottom:7px}
+.solo.wet .pill{color:var(--rain)}
+.solo.soon .pill{color:var(--warn)}
+.solo.dry .pill{color:var(--nat)}
+
+.solo .big{font-weight:900;font-size:clamp(30px,10.5vw,42px);letter-spacing:-.04em;
+  line-height:.95;overflow-wrap:anywhere;font-variation-settings:'wdth' 78;
+  text-transform:uppercase}
+.solo .big small{font-size:.42em;font-weight:800;color:var(--muted);letter-spacing:0;
+  font-variation-settings:'wdth' 100}
+/* Kolo 8k (navrh 02): slovni verdikt pod obrim cislem — „ZA 23 MIN“
+   je cas, „Vydatny dest“ je vyznam. Procenta samotna nestaci. */
+.solo .word{font-weight:700;font-size:clamp(12.5px,3.6vw,14px);letter-spacing:-.01em;
+  margin-top:3px}
+.solo.wet .big{color:var(--rain)}
+.solo.soon .big{color:var(--text)}
+.solo .sub{font-size:13px;color:var(--muted);line-height:1.45;margin-top:5px}
+.solo .sub b{color:var(--text);font-weight:700}
+
+/* ===== ANIMACE AKTUÁLNÍHO STAVU =====
+   Vpravo nahoře, na místě, kde stával ciferník. Kreslí se jako SVG
+   a hýbe se čistě přes CSS — žádná smyčka v JavaScriptu, takže to
+   nestojí baterii. Údaj, který nesl ciferník, se přesunul mezi fakta.
+
+   Animace není ozdoba: stav počasí se z ní pozná dřív, než člověk
+   stihne přečíst nadpis. */
+.solo .wart{flex:none;width:82px;height:82px;margin:-4px -2px 0 0}
+.solo .wart svg{width:100%;height:100%;overflow:visible}
+.wart .cloud{fill:#41536b}
+.solo.wet .wart .cloud{fill:#3d5a7d}
+.wart .sun{fill:#f2c14e}
+.wart .rays{stroke:#f2c14e;stroke-width:2.6;stroke-linecap:round}
+.wart .moon{fill:#c9d6e5}
+.wart .drops line{stroke:var(--rain);stroke-width:2.6;stroke-linecap:round}
+.wart .flake{fill:#dbe7f5}
+.wart .bolt{fill:var(--warn)}
+
+@keyframes wDrift{0%,100%{transform:translateX(0)}50%{transform:translateX(2.5px)}}
+@keyframes wDrop{0%{transform:translateY(-7px);opacity:0}
+                 25%{opacity:1}75%{opacity:1}
+                 100%{transform:translateY(13px);opacity:0}}
+@keyframes wFlake{0%{transform:translate(0,-7px);opacity:0}
+                  25%{opacity:1}75%{opacity:1}
+                  100%{transform:translate(3px,13px);opacity:0}}
+@keyframes wSpin{to{transform:rotate(360deg)}}
+@keyframes wBolt{0%,88%,100%{opacity:.25}90%,96%{opacity:1}}
+@keyframes wGlow{0%,100%{opacity:.5}50%{opacity:.9}}
+
+.wart .cloud{animation:wDrift 5.5s ease-in-out infinite}
+.wart .drops line{animation:wDrop 1.25s linear infinite}
+.wart .drops line:nth-child(2){animation-delay:.42s}
+.wart .drops line:nth-child(3){animation-delay:.84s}
+.wart .drops line:nth-child(4){animation-delay:.21s}
+.wart .flakes circle{animation:wFlake 3.2s linear infinite}
+.wart .flakes circle:nth-child(2){animation-delay:1.05s}
+.wart .flakes circle:nth-child(3){animation-delay:2.1s}
+.wart .rays{animation:wSpin 30s linear infinite;transform-origin:32px 32px}
+.wart .bolt{animation:wBolt 3.4s ease-in-out infinite}
+.wart .halo{animation:wGlow 4s ease-in-out infinite}
+
+@media (prefers-reduced-motion:reduce){
+  .wart *{animation:none!important}
+}
+
+/* ===== TEXTOVÉ BLOKY =====
+   Nahradily graf průběhu i pruh hodin. Věta unese na úzkém displeji
+   víc informace než křivka, u které si uživatel musí domýšlet měřítko.
+
+   Vodorovné linky mezi bloky vystřídal SVISLÝ AKCENT vlevo. Linka přes
+   celou šířku krájí panel na proužky a působí rozdrobeně; tenký pruh
+   u okraje bloky naopak drží pohromadě a nechá text dýchat. */
+.solo .says{padding:13px 16px 0;display:flex;flex-direction:column;gap:11px}
+.solo .say{padding:1px 0 1px 13px;border-left:2px solid var(--line);
+  transition:border-color .5s ease}
+.solo .say.wet{border-left-color:var(--rain)}
+.solo .say .tag{display:block;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.solo .say p{margin:0;font-size:16px;line-height:1.42;font-weight:650;
+  color:var(--text);letter-spacing:-.008em;text-wrap:balance}
+.solo .say.off p{color:#8fa0b4;font-weight:550}
+.solo .say b{color:var(--rain)}
+
+.solo .facts{display:flex;flex-wrap:wrap;gap:5px;padding:11px 16px 0}
+.solo .facts span{font-size:12px;color:var(--muted);background:rgba(255,255,255,.08);max-width:100%;overflow-wrap:anywhere;
+  border-radius:8px;padding:5px 9px;line-height:1.3}
+.solo .facts b{color:var(--text);font-weight:700}
+
+.solo .talk{font-size:13px;line-height:1.55;color:var(--text);
+  margin:12px 16px 0;padding:12px 0 0;border-top:1px solid var(--line)}
+.solo .talk em{font-style:normal;color:var(--warn);font-weight:700}
+.solo .talk s{text-decoration:none;color:var(--nat);font-weight:700}
+.solo .src{font-family:var(--mono);font-size:10px;color:var(--muted);
+  padding:9px 16px 13px;overflow-wrap:anywhere}
+
+@media (prefers-reduced-motion:reduce){
+  .solo.wet .pill i{animation:none}
+}
+
+.gauge{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden;margin-top:6px}
+.gauge i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--rain-deep),var(--rain));transition:width .6s ease}
+/* druhý názor: pravděpodobnost z ensemblu / z precipitation_probability */
+.ensrow{font-size:clamp(9.5px,1.4vh,11.5px);color:var(--muted);line-height:1.45;margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 10px}
+.ensrow b{color:var(--text);font-weight:700}
+.ensrow .ok{color:var(--nat)} .ensrow .dis{color:var(--warn)}
+html.compact .ensrow{font-size:9px;margin-top:4px}
+
+.when{background:var(--panel);border:1px solid var(--rain-deep);border-radius:18px;padding:clamp(10px,1.6vh,16px);display:flex;flex-direction:column;gap:3px}
+.when .label{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.when .big{font-weight:900;font-size:clamp(22px,5.8vh,54px);max-width:100%;overflow-wrap:anywhere;letter-spacing:-.04em;line-height:1;color:var(--rain)}
+.when .big.none{color:var(--muted);font-size:clamp(20px,3.6vh,32px)}
+.when .big small{font-size:.42em;font-weight:700;color:var(--text);letter-spacing:0}
+.when .sub{font-size:clamp(10px,1.5vh,12px);color:var(--muted);line-height:1.4}
+.when .sub b{color:var(--text)}
+.when .src{font-family:var(--mono);font-size:8.5px;color:var(--rain);margin-top:2px}
+
+.stats{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(8px,1.4vh,14px);display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat .k{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.stat .v{font-weight:800;font-size:clamp(13px,2.1vh,18px);margin-top:2px}
+.stat .v small{font-size:.6em;font-weight:500;color:var(--muted)}
+.vextra{font-size:clamp(9.5px,1.4vh,11.5px);color:var(--muted);line-height:1.45;margin-top:6px;border-top:1px solid var(--line);padding-top:6px}
+.vextra b{font-weight:700}
+.agree-hi{color:var(--nat)} .agree-mid{color:var(--warn)} .agree-lo{color:#E8926A}
+.warnrow{color:var(--warn)}
+.when .until{font-size:clamp(10px,1.55vh,12.5px);color:var(--text);line-height:1.35;margin-top:3px;font-weight:600}
+.when .until b{color:var(--rain)}
+
+/* ---------- RADAROVÝ KOMPAS ---------- */
+.compass{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(8px,1.4vh,14px);display:flex;flex-wrap:wrap;gap:clamp(8px,1vw,14px);align-items:center;overflow:hidden}
+.compass[hidden]{display:none}
+/* Kolo 8w (Dave): radarový kompas na mobilu taky viditelný — vedle
+   verdiktu v pravé půlce. Půlka displeje je úzká, takže panel jde
+   do sloupce (label, cifernák, text) a písmo se přizpůsobí; cifernák
+   nese směr i bez čtení, proto zůstává největší. Skrytý stav řeší
+   původní .compass[hidden] níž (nezabere buňku mřížky). */
+/* Kolo 8w fix4 (Dave: „vyřeš ten ciferník, ať je s textem přesně
+   v tom čtverci"): kompas na mobilu BEZ flexu. Desktopový flex s
+   wrapem ve zúženém panelu zalamoval text vedle cifernáku (fix2)
+   a nowrap obsah ořezával, když je řada nízká (fix3). Blokové
+   rozvržení nemá ani jedno: label nahoře, cifernák centrovaný
+   margin:auto (učebnicové, jede ve všech jádrech), text pod
+   ciferníkem, panel si sám naroste na výšku obsahu. */
+html.compact .compass{display:block;padding:calc(10px*var(--fit,1)) calc(9px*var(--fit,1));border-radius:18px}
+html.compact .compass .label{margin-bottom:4px}
+html.compact .compass svg{display:block;width:min(32vw,84px);height:min(32vw,84px);margin:5px auto 7px}
+html.compact .compass .ct{flex:none}
+html.compact .compass .ct .verd{font-size:calc(clamp(11.5px,3.2vw,13px)*var(--fit,1))}
+html.compact .compass .ct .expl{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--fit,1))}
+html.compact .compass .ct .src{font-size:calc(clamp(8px,2.2vw,9px)*var(--fit,1))}
+.compass .label{flex:0 0 100%;font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.compass svg{flex:none}
+.compass .ct{min-width:0;flex:1}
+.compass .ct .verd{font-weight:800;font-size:clamp(11px,1.65vh,14px);letter-spacing:-.01em}
+.compass .ct .verd.hit{color:var(--rain)}
+.compass .ct .verd.miss{color:var(--nat)}
+.compass .ct .expl{font-size:clamp(9px,1.4vh,11px);color:var(--muted);line-height:1.45;margin-top:3px}
+.compass .ct .expl b{color:var(--text)}
+.compass .ct .src{font-family:var(--mono);font-size:8.5px;color:rgba(255,255,255,.55);margin-top:4px}
+html.compact .vextra{font-size:9px;margin-top:5px;padding-top:5px}
+html.compact .when .until{font-size:9.5px}
+.tzhint{display:block;font-family:var(--mono);font-size:8.5px;color:var(--rain);margin-top:1px;font-weight:500}
+
+footer{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.05em;flex-wrap:wrap;gap:6px}
+.madeby{display:flex;align-items:center;gap:7px;padding:4px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel)}
+/* zdroje dat a licence: složit jako rozbalovací seznam — nezabírají místo,
+   dokud si je čtenář sám neotevře */
+.srcwrap{width:100%}
+.srcwrap summary{cursor:pointer;font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.05em;opacity:.85;padding:2px 0;user-select:none}
+.srcwrap summary:hover{color:var(--text);opacity:1}
+.srcwrap[open] summary{margin-bottom:3px;opacity:1}
+.mb-drop{flex:none;filter:drop-shadow(0 1px 3px rgba(168,228,255,.45))}
+.mb-name{font-family:var(--sans);font-weight:900;font-size:10px;letter-spacing:.12em;color:var(--text)}
+.mb-sep{color:var(--dry)}
+.mb-slogan{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--rain);white-space:nowrap;text-transform:uppercase}
+.legend{display:flex;gap:12px;align-items:center}
+.legend span{display:flex;gap:5px;align-items:center}
+.sw{width:14px;height:10px;border-radius:3px;display:inline-block}
+
+#status{position:fixed;inset:0;display:none;place-items:center;background:rgba(12,20,45,.60);z-index:50;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);font-family:var(--mono);font-size:13px;color:var(--muted);text-align:center;line-height:1.8;padding:20px}
+#status.show{display:grid}
+.pulse{color:var(--rain);animation:pl 1.2s infinite}
+@keyframes pl{50%{opacity:.35}}
+#offlineBar{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:calc(clamp(8px,1.4vh,18px) + env(safe-area-inset-bottom,0px));z-index:60;background:var(--warn);color:#141005;font-family:var(--sans);font-weight:800;font-size:12px;padding:9px 16px;border-radius:999px;box-shadow:0 8px 24px rgba(0,0,0,.5);white-space:nowrap}
+#offlineBar.show{display:block}
+#dataMeter{display:none}
+html.debugData #dataMeter{display:block;font-family:monospace;font-size:11px;line-height:1.5;opacity:.65;padding:4px 12px 0;text-align:center}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* kompaktní (mobilní) režim — řízeno JS třídou na <html> */
+/* --fit: nouzové zmenšení celé mobilní škály (jen výjimečně krátké
+   displeje). Zmenšuje se JEDNA proměnná, ne zoom stránky — vw fonty
+   by zoomem nezmenšily a layout by se rozpadl. Všechny velikosti
+   compact režimu jsou proto calc(... * var(--fit,1)). */
+html.compact{--fit:1}
+/* Škála velikostí je ukotvená k reálným displejům telefonů (CSS px
+   na výšku; rešerše 29. 10. 2026 — ~95 % mobilních návštěv spadá
+   do pásu 360–430 px):
+     360 px    Galaxy S/A, Pixel a, většina Androidu (nejčastější šířka)
+     375 px    iPhone SE/mini · 384 px Galaxy S Ultra/+ a A-series
+     390/393 px iPhone 12–16 · 402 px iPhone 16 Pro/17
+     412 px    Pixel 7–10 · 430–440 px iPhone Plus/Pro Max
+   Každá velikost je clamp(dolní, X·vw, horní): od 360 px roste
+   lineárně se šířkou displeje a u ~430 px se zastaví. Velikost
+   textu tak závisí JEN na fyzické šířce displeje — stejný telefon
+   vykreslí PŘI KAŽDÉM NAČTENÍ stejnou velikost (nic se nepočítá
+   z obsahu) a text vyplní panely „akorát".
+   Kolo 8d — HARMONIZACE škály (screenshot 22:31): dominantní číslo
+   vedle drobných popisků působilo roztřeseně. Nová pravidla:
+   - nejmenší text (buňky, popisky lišty) má STROU pod 11 px;
+   - hlavní číslo je jen ~2,5–2,9násobek popisků (dřív ~4násobek);
+   - sousední úrovně škály se liší o ~15–25 %, ne o skok 40 %+;
+   - poměry jsou STEJNÉ na každé šířce — škála roste jako celek. */
+/* Mobil je JEDNA obrazovka: hlavička, tabulka, hlavní věta a lišta
+   souhrnů se musejí vejít vedle sebe na displej bez posouvání stránky.
+   Výškový řetězec html→body je v procentech záměrně (ne vw/dvh):
+   procenta se při zmenšení --fit přepočítají, takže appka vyplní
+   displej i po zmenšení, a scrollHeight pak pořád poctivě hlásí,
+   kolik obsah ve skutečnosti zabírá. */
+html.compact , html.compact body{overflow:hidden}
+html.compact{height:100%}
+html.compact body{min-height:100%}
+/* Pozor na jednotky: výškový řetězec drží v procentech — vw/dvh by
+   se s --fit netahaly dolů (fit škáluje jen prvky, ne viewport) a
+   appka by zabrala jen část obrazovky s prázdným rámem kolem.
+   Plynulé fonty (vw) se zmenšují společně se vším přes var(--fit,1). */
+/* Kolo 8o: obsah na mobilu o kus nize — nazev byl prilepeny
+   hned pod status barem a pres Dynamic Island jevil se rozmazane. */
+html.compact #app{height:auto;min-height:100%;padding:calc(clamp(20px,3.2vh,30px) + env(safe-area-inset-top,0px)) calc(12px + env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) calc(12px + env(safe-area-inset-left,0px));max-width:100%}
+html.compact #app>*, html.compact main>*, html.compact aside>*{min-width:0}
+/* Kolo 8n: na mobilu vyhledavaci okno na celou sirku displeje,
+   umistene POD nazev "Bude prset?" s podtitulem. */
+html.compact header{display:grid;grid-template-columns:1fr;gap:8px;align-items:stretch}
+html.compact .loc{min-width:0;max-width:none;margin-left:0;padding:3px 3px 3px 0;border-radius:9px}
+html.compact .pinBtn{padding:0 4px 0 7px}
+html.compact .pinBtn svg{width:13px;height:13px}
+html.compact .loc input{font-size:calc(clamp(13px,3.7vw,15px)*var(--fit,1));padding:7px 6px}
+html.compact .locBtn{padding:7px 11px;border-radius:7px;margin-left:2px}
+html.compact .sugg{left:0;right:0}
+html.compact .brand .s{display:block;font-size:calc(clamp(8px,2.3vw,9.5px)*var(--fit,1));margin-top:2px}
+/* Kolo 8p: nazev appky na mobilu o trochu vetsi. */
+html.compact .brand .t{font-size:calc(clamp(17px,5vw,21px)*var(--fit,1))}
+html.compact .updated{display:none}
+html.compact .loc{min-width:0;max-width:none}
+html.compact .loc .coords{display:none}
+html.compact .locBtn{padding:8px 12px}
+/* main na mobilu je sloupec: tabulka pruží (doplní volné místo),
+   panely pod ní drží přirozenou výšku — lišta souhrnů tak sedí
+   u spodního okraje displeje. */
+html.compact main{display:flex;flex-direction:column;gap:12px;min-height:0}
+/* Kolo 8h: tabulka nesmí přetéct panel a nechat řádky mizet pod
+   panely níž („Shoda 0/8, ale vidět jen 6 modelů"). .matrix má
+   vlastní scroll (schozený scrollbar, iOS momentum) jako pojistku
+   a tabulka přirozenou výšku — fitGuard pak obsah předem zmenší
+   (--fit), takže scroll nastane jen na extrémních výškách. */
+html.compact .matrix{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-ms-overflow-style:none}
+html.compact .matrix::-webkit-scrollbar{display:none}
+/* Kolo 8i (Dave: „okno nemůže být tak prázdné"): tabulka smí RŮST do
+   volného místa panelu (flex-grow), ale nesmí se smrsknout pod svou
+   přirozenou výšku (no shrink) — řádky tak vyplní panel, když je místa
+   dost (žádný prázdný pás pod tabulkou), a když není, .matrix scrolluje
+   (pojistka z kola 8h zůstává). */
+html.compact .matrix table{flex:1 0 auto}
+html.compact aside{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:0;order:-1}
+html.compact .verdict{grid-column:1}
+html.compact .when{grid-column:2}
+/* Kolo 8w (Dave): radarový kompas v pravé půlce vedle verdiktu.
+   Verdikt se zmenší na levou půlku jen s třídou sKompasem na <html>
+   (přepíná ji renderCompass, jakmile kompas něco ukazuje). Bez
+   radarových dat je kompas [hidden], nezabírá buňku mřížky a verdikt
+   zůstává přes obě půlky (původní stav z kola 8m). */
+html.compact .compass{grid-column:2}
+html.compact.sKompasem .solo{grid-column:1}
+/* Lišta souhrnů na mobilu: jeden tenký pruh se čtyřmi oddělenými
+   hodnotami — vždy na jednom řádku, bez zalamování buněk. Oddělovače
+   mezi buňkami ji dělají čitelnou i na úzkých displejích. */
+html.compact .stats{grid-column:1/-1;grid-template-columns:repeat(4,1fr);gap:0;padding:calc(10px*var(--fit,1)) calc(4px*var(--fit,1));border-radius:18px}
+html.compact .stat{min-width:0;overflow:hidden;padding:0 4px;text-align:center}
+html.compact .stat + .stat{border-left:1px solid rgba(255,255,255,.14)}
+/* Kolo 8k (navrh 02): mono kapitalky i v liste souhrnu — jednotna
+   instrumentova typografie jako u nadpisu tabulky a verdiktu. */
+html.compact .stat .k{font-family:var(--mono);font-size:calc(clamp(8px,2.3vw,9.5px)*var(--fit,1));letter-spacing:.12em;text-transform:uppercase;line-height:1.25;white-space:nowrap;text-align:center}
+html.compact .stat .v{font-size:calc(clamp(13.5px,3.6vw,15px)*var(--fit,1));white-space:nowrap;margin-top:2px;text-align:center}
+/* Hlavní panel na mobilu dýchá hustěji, ať zbude místo pro tabulku
+   i lištu — čitelnost hlídají zvětšené řádky, ne vzduch kolem. */
+html.compact .solo .hero{padding:calc(clamp(12px,3.4vw,14px)*var(--fit,1)) calc(clamp(10px,2.9vw,13px)*var(--fit,1)) calc(clamp(9px,2.9vw,11px)*var(--fit,1))}
+html.compact .solo .pill{font-size:calc(clamp(8.5px,2.4vw,9.5px)*var(--fit,1));letter-spacing:.12em;margin-bottom:6px}
+/* Kolo 8r (Dave: „tucny napis pusobi agresivne"): verdikt na mobilu
+   jemnejsi — 39 px → ~31 px na bezkem telefonu (test drzi spodni hranici 30 px). */
+html.compact .solo .big{font-size:calc(clamp(26px,8.4vw,34px)*var(--fit,1))}
+/* Kolo 8w fix5 (Dave: „větší procento, text níže“): v suchu je
+   hrdinou panelu ČÍSLO, ne slova. Procento se na mobilu zvětší —
+   i tři číslice se do půlky panelu pohodlně vejdou. Texty pod ním
+   už jsou na svém místě (word „Nemělo by pršet“, pak sub). Dlouhé
+   textové verdikty (MOŽNÁ KAPE, SLABÝ DÉŠŤ…) výše zůstávají
+   v původní velikosti — větší by se z půlky panelu vylomily. */
+html.compact .solo.dry .big{font-size:calc(clamp(40px,12vw,52px)*var(--fit,1))}
+html.compact .solo .word{font-size:calc(clamp(12.5px,3.6vw,14px)*var(--fit,1));margin-top:calc(3px*var(--fit,1))}
+html.compact .solo .sub{margin-top:4px;font-size:calc(clamp(11.5px,3.1vw,13px)*var(--fit,1))}
+html.compact .solo .says{padding:8px 13px 0;gap:8px}
+html.compact .solo .say{padding-left:11px}
+html.compact .solo .say .tag{margin-bottom:3px;font-size:calc(clamp(10.5px,3vw,12px)*var(--fit,1))}
+html.compact .solo .say p{font-size:calc(clamp(14px,4vw,16px)*var(--fit,1))}
+html.compact .solo .facts{padding:8px 13px 0;gap:4px}
+html.compact .solo .facts span{font-size:calc(clamp(12px,3.4vw,14px)*var(--fit,1));padding:4px 8px}
+html.compact .solo .talk{margin:8px 13px 0;padding:8px 0 0;font-size:calc(clamp(12.5px,3.6vw,15px)*var(--fit,1))}
+html.compact .solo .src{padding:6px 11px 9px;font-size:calc(clamp(10px,2.8vw,11.5px)*var(--fit,1))}
+html.compact{--cell-h:calc(clamp(23px,6.3vw,27px)*var(--fit,1))}
+html.compact .matrix{padding:8px 7px 9px;border-radius:18px}
+/* Kolo 8j (navrh 02 „typografie z desktopu“): nadpis tabulky se na mobilu meni
+   na mono kapitalku s poctem zdroju („Modely · 8 zdroju“) — desktop ma plny
+   nadpis, mobil instrumentovy souhrn. Kapitalka je nizsi nez dosavadni
+   h2, coz vraci par px rozpoctu vysky legendi pod tabulkou. */
+html.compact .mhead h2{font-family:var(--mono);font-weight:500;color:var(--muted);font-size:calc(clamp(8.5px,2.4vw,9.5px)*var(--fit,1));letter-spacing:.12em;text-transform:uppercase}
+html.compact .mhead .u{display:none}
+html.compact table{border-spacing:1.5px}
+html.compact th{font-size:calc(clamp(9px,2.6vw,10px)*var(--fit,1));letter-spacing:.06em}
+html.compact th.model{width:calc(clamp(78px,22vw,94px)*var(--fit,1))}
+html.compact th.sum{width:32px}
+html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1));border-radius:5px;overflow:hidden}
+html.compact td.name .n{font-size:calc(clamp(11.5px,3.3vw,13px)*var(--fit,1))}
+/* Kolo 8k (navrh 02): mokre bunky jen naznak svetle modle barvy,
+   konsenzus radek tenkou horni linkou misto plneho pruhu — na malem
+   displeji neni misto pro tezkou dekoraci, ciselna hrana staci. */
+html.compact td.cell.wet{background:rgba(168,228,255,.10)}
+html.compact tr.consensus td.cell{border:1px solid transparent;border-top:1px solid var(--line);background:transparent;color:var(--rain);font-weight:600}
+html.compact #mnote{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--fit,1));padding:4px 1px 0}
+/* Kolo 8j (navrh 02): mini legenda bunek pod tabulkou — na mobilu mizi
+   paticka (kolo 8) a s ni i klic k tabulce; „Shoda 0/8“ si bez legendy
+   precte jen znalec. Na desktopu se nezobrazuje — tam je plna legenda
+   v paticce. */
+html.compact .mlegend{display:flex;gap:14px;align-items:center;flex:none;
+  padding:0 4px;margin-top:calc(9px*var(--fit,1));font-size:calc(clamp(8.5px,2.4vw,9.5px)*var(--fit,1))}
+html.compact .mlegend span{display:flex;gap:5px;align-items:center;color:var(--muted)}
+html.compact .mlegend .sw{width:13px;height:9px;border-radius:3px;flex:none}
+html.compact td.name .a{display:none}
+html.compact td.name .flag{float:left;font-style:normal;font-size:calc(clamp(10px,2.9vw,12px)*var(--fit,1));line-height:1;transform:scale(.78);transform-origin:left center;margin-right:2px}
+html.compact tr.national .badge{display:none}
+html.compact td.sumcell{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
+html.compact .verdict, html.compact .when{padding:10px;border-radius:10px}
+html.compact .verdict .pct{font-size:32px}
+html.compact .verdict .word{font-size:12px}
+html.compact .verdict .expl{font-size:9.5px}
+html.compact .when .big{font-size:24px}
+html.compact .when .big.none{font-size:16px}
+html.compact .when .sub{font-size:9.5px}
+html.compact .when .src{font-size:7.5px}
+/* Zdroje dat na mobilu skryté (rozbalovák by kradl řádky);
+   vodoznak made by skarka ai company ale zůstává dole — kolo 8q. */
+html.compact footer{display:flex;justify-content:center}
+html.compact .legend{display:none}
+html.compact .srcnote,html.compact .srcwrap{display:none}
+html.compact .madeby{gap:6px;padding:4px 11px}
+html.compact .mb-name{font-size:10px}
+html.compact .mb-slogan{font-size:9px}
+html.compact{--cell-h:calc(clamp(23px,6.3vw,27px)*var(--fit,1));font-size:calc(15px*var(--fit,1))}
+html.compact body{overflow-x:hidden}
+html.compact #app{overflow-x:hidden}
+
+/* ===== Kolo 8s: animované pozadí dle počasí =====
+   Fyzika je v CSS (levné, GPU), JS jen nasype pár desítek čar.
+   Pozadí je pod panely (z-index), dlaždice s daty se nemění. */
+.wbg{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+#app{position:relative;z-index:1}
+.wbg .dr{position:absolute;top:0;border-radius:2px;
+  background:linear-gradient(rgba(168,228,255,0),rgba(168,228,255,.5))}
+@keyframes wbgFall{from{transform:translateY(-40px)}to{transform:translateY(115vh)}}
+@keyframes wbgStorm{from{transform:translate(-3vw,-40px)}to{transform:translate(-8vw,115vh)}}
+.wbg .sn{position:absolute;top:0;color:rgba(230,242,255,.8)}
+@keyframes wbgSn{0%{transform:translate(0,-20px)}
+  25%{transform:translate(12px,28vh)}
+  50%{transform:translate(-10px,56vh)}
+  75%{transform:translate(9px,84vh)}
+  100%{transform:translate(0,112vh)}}
+.wbg .sp{position:absolute;bottom:6px;width:6px;height:6px;border-radius:50%;
+  border:1.5px solid rgba(168,228,255,.55);transform:scale(.3);
+  animation:wbgSplash 1.05s ease-out infinite}
+@keyframes wbgSplash{from{transform:scale(.3);opacity:.8}to{transform:scale(3.4);opacity:0}}
+.wbg .fl{position:absolute;inset:0;background:rgba(195,225,255,.42);opacity:0;
+  animation:wbgFlash 9s infinite}
+@keyframes wbgFlash{0%,91%,100%{opacity:0}92%{opacity:.4}93%{opacity:0}94%{opacity:.28}95%{opacity:0}}
+.wbg .sun{position:absolute;top:-90px;right:-90px;width:340px;height:340px;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,236,170,.5),rgba(255,220,140,.14) 55%,transparent 72%);
+  animation:wbgPulse 6s ease-in-out infinite}
+.wbg .rays{position:absolute;top:-90px;right:-90px;width:340px;height:340px;border-radius:50%;
+  background:conic-gradient(rgba(255,236,170,.10) 0 5deg,transparent 5deg 22deg,rgba(255,236,170,.07) 22deg 27deg,transparent 27deg 48deg);
+  animation:wbgSpin 50s linear infinite}
+@keyframes wbgSpin{to{transform:rotate(360deg)}}
+@keyframes wbgPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
+html.compact td{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
+html.compact th{font-size:calc(clamp(9px,2.6vw,10px)*var(--fit,1));letter-spacing:.06em}
+html.compact th.model{width:calc(clamp(78px,22vw,94px)*var(--fit,1))}
+html.compact th.sum{width:32px}
+html.compact td.name .n{font-size:calc(clamp(11.5px,3.3vw,13px)*var(--fit,1))}
+html.compact table{border-spacing:1.5px}
+
+</style>
+</head>
+<body>
+<div class="wbg" id="wbg" aria-hidden="true"></div>
+<div id="app">
+  <header>
+    <div class="brand">
+      <div class="t">Bude pršet?</div>
+      <div class="s">Modely + národní model + radar</div>
+    </div>
+    <div class="loc" id="locBox">
+      <button class="pinBtn" id="pinBtn" type="button" title="Použít moji polohu"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 21s-7-6.1-7-11a7 7 0 1 1 14 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.6"/></svg></button>
+      <input id="locInput" type="text" placeholder="Zjišťuji polohu… nebo napiš obec / adresu" autocomplete="off" spellcheck="false">
+      <span class="coords" id="coords"></span>
+      <button class="locBtn" id="locBtn" title="Potvrdit a načíst předpověď"><span class="bfull">Hledat</span><span class="bmin">⌕</span></button>
+      <div class="sugg" id="sugg"></div>
+    </div>
+    <div class="updated" id="updated"></div>
+  </header>
+
+  <main>
+    <section class="matrix">
+      <div class="mhead">
+        <h2 data-full="Předpověď srážek podle modelu" data-short="Modely">Předpověď srážek podle modelu</h2>
+        <span class="u">mm / hod · lokální čas</span>
+      </div>
+      <table id="tbl"><thead><tr id="hdr"></tr></thead><tbody id="body"></tbody></table>
+      <!-- Kolo 8j (navrh 02): mini legenda bunek v panelu tabulky. -->
+      <div class="mlegend" aria-hidden="true">
+        <span><i class="sw" style="background:rgba(168,228,255,.45)"></i>mokrá</span>
+        <span><i class="sw" style="background:var(--panel2);color:var(--muted);font-size:7px;line-height:9px;text-align:center">·</i>pod prahem</span>
+        <span><i class="sw" style="background:var(--panel2)"></i>suchá</span>
+        <span><i class="sw" style="background:transparent;box-shadow:inset 0 0 0 1px var(--nat)"></i>národní model</span>
+      </div>
+      <!-- Poznámka o modelech bez odpovědi (kolo 8f): když open-meteo
+           některým modelem neodpoví, jeho řádek tiše vypadne a tabulka
+           vypadala „rozbitá“ — Dave 29. 10. 22:47 viděl jen 6 řádků.
+           Jedna věta pod tabulkou řekne, kolik modelů odpovědět
+           nedokázalo, aby to nebylo záhadné. -->
+      <div id="mnote"></div>
+    </section>
+
+    <aside>
+      <!-- ===== MOBILNÍ SLOUČENÝ PANEL =====
+           Na telefonu nahrazuje oba panely níž. Důvod není jen místo:
+           když prší, je otázka "jaká je pravděpodobnost deště" už
+           zodpovězená pozorováním. Ukazovat vedle sebe "prší" a "80 %"
+           je rozpor, ne dvě informace. -->
+      <div class="solo" id="solo" aria-live="polite">
+        <div class="hero">
+          <div class="pill" id="soloPill"><span id="soloPillTxt">Načítám</span></div>
+          <div class="big" id="soloBig">–</div>
+          <div class="word" id="soloWord"></div>
+          <div class="sub" id="soloSub"></div>
+        </div>
+        <div class="says">
+          <div class="say" id="soloHourWrap" hidden>
+            <span class="tag">Příští hodina</span>
+            <p id="soloHour"></p>
+          </div>
+          <div class="say" id="soloOutWrap" hidden>
+            <span class="tag">Dalších 8 hodin</span>
+            <p id="soloOut"></p>
+          </div>
+        </div>
+        <div class="facts" id="soloFacts"></div>
+        <div class="talk" id="soloTalk"></div>
+        <div class="src" id="soloSrc"></div>
+      </div>
+
+      <div class="verdict">
+        <div class="label" id="pctLabel">Shoda modelů na dešti do 8 h</div>
+        <div class="pct" id="pct" aria-live="polite">–</div>
+        <div class="word" id="word"></div>
+        <div class="gauge"><i id="gaugeFill"></i></div>
+        <div class="ensrow" id="ensrow"></div>
+        <div class="expl" id="expl">Načítám data modelů…</div>
+        <div class="vextra" id="vextra"></div>
+      </div>
+
+      <div class="when">
+        <div class="label">Kdy začne pršet</div>
+        <div class="big" id="whenBig">–</div>
+        <div class="sub" id="whenSub">Počítám nejpravděpodobnější začátek…</div>
+        <div class="until" id="whenUntil"></div>
+        <div class="src" id="whenSrc"></div>
+      </div>
+
+      <div class="compass" id="compass" hidden></div>
+
+      <div class="stats">
+        <div class="stat"><div class="k" data-short="Shoda" data-full="Shoda modelů">Shoda modelů</div><div class="v" id="agree">–</div></div>
+        <div class="stat"><div class="k" id="firstRainK" data-short="Déšť od" data-full="Nejbližší déšť">Nejbližší déšť</div><div class="v" id="firstRain">–</div></div>
+        <div class="stat"><div class="k" data-short="Ø úhrn" data-full="Ø úhrn / 8 h">Ø úhrn / 8 h</div><div class="v" id="avgSum">–</div></div>
+        <div class="stat"><div class="k" data-short="Max int." data-full="Max. intenzita">Max. intenzita</div><div class="v" id="maxInt">–</div></div>
+      </div>
+    </aside>
+  </main>
+
+  <footer>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--panel2)"></i> sucho</span>
+      <span><i class="sw" style="background:var(--panel2);color:#4E6377;text-align:center;font-size:9px;line-height:10px">·</i> pod prahem</span>
+      <span><i class="sw" style="background:rgba(168,228,255,.28)"></i> slabý</span>
+      <span><i class="sw" style="background:rgba(168,228,255,.6)"></i> mírný</span>
+      <span><i class="sw" style="background:var(--rain)"></i> silný</span>
+      <span><i class="sw" style="background:rgba(142,209,143,.5)"></i> národní model</span>
+    </div>
+    <div class="madeby">
+      <svg class="mb-drop" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+        <path d="M12 2.5C12 2.5 5.5 10.2 5.5 14.7a6.5 6.5 0 0 0 13 0C18.5 10.2 12 2.5 12 2.5Z" fill="url(#mbg)"/>
+        <circle cx="9.8" cy="14.2" r="1.6" fill="#DFF0FC" opacity=".85"/>
+        <defs><linearGradient id="mbg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#5BB3E8"/><stop offset="1" stop-color="#1E6FA8"/>
+        </linearGradient></defs>
+      </svg>
+      <span class="mb-name">BUDE&nbsp;PRŠET?</span>
+      <span class="mb-sep">·</span>
+      <span class="mb-slogan">made by Skarka&nbsp;AI&nbsp;company</span>
+    </div>
+    <div id="dataMeter"></div>
+    <details class="srcwrap"><summary>Zdroje dat a licence</summary><div class="srcnote">obce: GeoNames + Photon/OSM · předpovědi: open-meteo.com · radar: RainViewer (globální kompozit, vlastní extrapolace posunu + jejich nowcast) · nad ČR navíc přímo ČHMÚ (PseudoCAPPI 2 km, mřížka 1×1 km, extrapolace COTREC do 60 min, opendata.chmi.cz, CC BY 4.0) · Skandinávie a Pobaltí: met.no nowcast · Rakousko a jižní Morava: GeoSphere INCA · USA: api.weather.gov · stanice: METAR · národní radarový nowcast: DWD (RADVOR/WN) a KNMI (radar_forecast, CC-BY-4.0) · družice: NASA GIBS a EUMETSAT Meteosat (EUMETView) · pravděpodobnost: ensemble Open-Meteo (ICON-D2/ICON-EU/ECMWF IFS, 20–51 členů) · terén: Open-Meteo Elevation · data MET Norway (met.no) pod licencí CC BY 4.0 · práh modelů se řídí konvekcí (základ 0,2 mm/h, při silné labilitě až 1,0 — konvektivní déšť je skvrnitý), radar ≥ 0,2 mm/h. Kde radar nedosahuje nebo jsou 15min data jen dopočítaná, aplikace to uvede u zdroje.</div></details>
+  </footer>
+</div>
+
+<div id="offlineBar">Jsi offline — zobrazená data můžou být stará</div>
+<div id="status" class="show"><div><span class="pulse">●</span><br>Zjišťuji tvou polohu…</div></div>
+
+<script>/*__BP_MAIN__*/</script>
+</body>
+</html>

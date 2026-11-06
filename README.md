@@ -33,7 +33,7 @@ Srovnává hodinové předpovědi srážek ze špičkových globálních modelů
 - 🎨 **Sklo design** — průsvitné panely nad živým gradientem pozadí, který mění barvu podle stavu počasí: modrofialová = prší, fialovo-oranžová = blíží se, petrolejovo-zelená = sucho
 - ♻️ **automatická aktualizace každých 15 minut, pouze když je aplikace viditelná** (na pozadí nulová aktivita — šetří baterii i mobilní data)
 - 📱 **PWA**: lze přidat na plochu telefonu, funguje i bez připojení (cache statického shellu), bez webfontů
-- 🔒 **bez API klíčů, bez sledování, bez reklam** — a bez buildu: celá aplikace je jediný statický `index.html`
+- 🔒 **bez API klíčů, bez sledování, bez reklam** — v produkci pořád jediný statický `index.html` (generovaný, viz [Vývoj a testy](#️-vývoj-a-testy))
 
 ## 🧠 Jak aplikace funguje
 
@@ -77,7 +77,7 @@ Při každém načtení lokality se předchozí stav odstraní. Nová předpově
 ## 🚀 Nasazení na GitHub Pages
 
 1. Vytvoř nový veřejný repozitář (např. `bude-prset`).
-2. Nahraj do něj všechny soubory z této složky (`index.html`, `manifest.webmanifest`, `sw.js`, `icon-192.png`, `icon-512.png`, `README.md`, `tests/`, `scripts/`, `.github/`).
+2. Nahraj do něj všechny soubory z této složky (`index.html`, `index.template.html`, `src/`, `tools/`, `manifest.webmanifest`, `sw.js`, `icon-192.png`, `icon-512.png`, `README.md`, `tests/`, `scripts/`, `.github/`).
 3. V repozitáři otevři **Settings → Pages**, v sekci *Build and deployment* zvol **Deploy from a branch**, větev `main` a složku `/ (root)`. Ulož.
 4. Za chvíli poběží aplikace na `https://TVOJE-JMENO.github.io/bude-prset/`.
 
@@ -88,14 +88,17 @@ Při každém načtení lokality se předchozí stav odstraní. Nová předpově
 
 ## 🛠️ Vývoj a testy
 
-Aplikace stále běží jako statický HTML soubor, bez sestavení a bez runtime npm závislostí. Node.js 20+ slouží pouze pro testy:
+Aplikace stále běží jako statický HTML soubor, bez runtime npm závislostí. Od kola 8ab se ale `index.html` **negeneruje ručně**: zdrojem pravdy je `src/main.js` (JavaScript aplikace) a `index.template.html` (HTML + CSS). Skript `npm run build` (`tools/build.cjs`) je složí zpět do jednoho `index.html` — deterministicky a bez závislostí. Commitnutý `index.html` je build artifact (Pages ho servíruje přímo) a CI hlídá, že nezevstal: po každém pushu znovu sestaví a selže, pokud neodpovídá commitnuté verzi.
 
 ```sh
 npm ci
-npm test                 # jednotkové testy — funkce vytažené přímo ze zdrojového HTML
+npm run build           # složí index.template.html + src/main.js -> index.html
+npm test                # jednotkové testy — funkce vytažené přímo z index.html
 npx playwright install --with-deps chromium
 npm run test:browser     # end-to-end v řízeném prohlížeči
 ```
+
+Úprava kódu aplikace tedy vždy probíhá tak: uprav `src/main.js` → `npm run build` → commitni **oba** soubory (`src/main.js` i `index.html`) najednou.
 
 - **Jednotkové testy** (`tests/regression.test.cjs`) používají přímo funkce ze zdrojového HTML a ověřují časová pásma, přechody letního času, jednotky srážek, reset stavu a rozdíl mezi modely a pozorováním.
 - **Prohlížečové testy** (`tests/browser.test.cjs`) spouštějí lokální server, používají řízené API odpovědi a kontrolují hledání, geolokaci, mobilní zobrazení, opožděné odpovědi, selhání i záložní modely; neověřují dlouhodobou meteorologickou přesnost ani dostupnost externích služeb.
