@@ -22,7 +22,7 @@ before(async()=>{
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   base=`http://127.0.0.1:${server.address().port}`;
-  browser=await chromium.launch({headless:true,channel:'chromium'});
+  browser=await chromium.launch({headless:true,channel:process.env.BP_BROWSER_CHANNEL||'chromium'});
 });
 after(async()=>{await browser?.close();await new Promise(r=>server?.close(r));});
 async function fixture(timezone='America/Los_Angeles',width=1280,height=900){

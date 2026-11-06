@@ -123,7 +123,7 @@ async function main() {
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + server.address().port;
-  const browser = await chromium.launch({ headless: true, channel: 'chromium' });
+  const browser = await chromium.launch({ headless: true, channel: process.env.BP_BROWSER_CHANNEL || 'chromium' });
   try {
     const made = [];
     made.push(...await runScenario(browser, base, 'dest', true));
