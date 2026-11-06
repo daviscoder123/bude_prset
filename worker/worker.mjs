@@ -21,7 +21,12 @@
  *      (±0.1° lat / ±0.15° lon, zrcadlí ensembleGrid aplikace),
  *      model icon_d2 (střední Evropa) nebo icon_eu (okraj);
  *   3. aviationweather.gov /api/data/metar — všechny stanice jednoho
- *      dílku v JEDNOM hromadném dotazu (ground truth: prší/nesní...).
+ *      dílku v JEDNOM hromadném dotazu (ground truth: prší/nesní...);
+ *   4. RainViewer radar (kolo 8ag) — aktuální snímek nad obcí: PNG
+ *      dlaždice (schéma 0 „Black and White dBZ“, zoom 7) se dekóduje
+ *      PŘÍMO ve Workeru (žádný canvas; inflate přes DecompressionStream
+ *      + ruční unfiltr řádků) a uloží se medián mm/h z 3×3 pixelů —
+ *      tentýž postup jako radarový „druhý svědek“ aplikace.
  *
  *   Výsledek se uloží do KV (binding HISTORY) pod klíč
  *   raw/{YYYYMMDDHH}:{mm} s TTL 14 dní.
@@ -35,7 +40,9 @@
  *                zbytek drží rezervu pro provoz proxy)
  *   METAR:       12 hromadných dotazů/hod = 288/den (bez významného limitu)
  *   KV zápisy:   12/hod = 288/den (limit 1 000)
- *   Subrequesty: ~20–28 na jedno probuzení (limit 50)
+ *   RainViewer:  12 maps.json + 288 dlažnic/den (veřejné API bez klíče)
+ *   Subrequesty: ~21–29 na jedno probuzení (limit 50; nejhorší případ
+ *                s ensemble fallbacky ~38)
  *
  * Chyby jedné obce (výpadek API) se tolerují — záznam dostane err značku,
  * ale kolo pokračuje. Bez KV bindingu sběrač tiše stojí (status hlásí
@@ -410,6 +417,178 @@ export function parseEns(body) {
   return out.length ? out : null;
 }
 
+/* ================= RADAR RAINVIEWER (kolo 8ag) =================
+   Aplikace čte radar přes <img>+canvas; Worker canvas nemá. PNG ale
+   zvládne dekódovat sám: IDAT je zlib proud (DecompressionStream),
+   unfiltr řádků je pět krátkých aritmetik. Dlaždice 256×256, 8 bitů,
+   RGBA (ověřeno na živém snímku). Čteme jen výřez (2r+1)² kolem
+   obce — ostatní řádky se sice musí unfiltrovat (filtry odkazují na
+   řádek předchozí), ale v paměti držíme vždy jen dva řádky. */
+
+var RV_Z = 7;                                   /* detail intenzity — nativní maximum appky */
+var RV_OPTS = "/0/0_1.png";                     /* schéma 0 (dBZ v červeném kanálu) + sněhový příznak */
+var RV_TOL_MS = 12 * 60 * 1000;                  /* snímek nesmí být starší ~12 min */
+var RV_MAPS_URL = "https://api.rainviewer.com/public/weather-maps.json";
+var RV_SANE_MMH = 150;                          /* strop fyzikální kontrola — jako MAX_SANE_MMH appky */
+var RV_MAPS_TTL = 5 * 60 * 1000;                /* maps.json v izolátu 5 min (appka stejně) */
+var MAPS_MEM = { t: 0, v: null };               /* izolát zaniká, cache je jen optimalizace */
+
+/* Zrcadlí tileCoords aplikace. */
+export function tileCoords(lat, lon, z) {
+  var n = Math.pow(2, z);
+  var latR = lat * Math.PI / 180;
+  var xf = (lon + 180) / 360 * n;
+  var yf = (1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * n;
+  var tx = Math.floor(xf), ty = Math.floor(yf);
+  return { z: z, n: n, tx: tx, ty: ty, px: Math.floor((xf - tx) * 256), py: Math.floor((yf - ty) * 256) };
+}
+
+/* Zrcadlí dbzToMm aplikace: Z=200·R^1,6 déšť, Z=2000·R² sníh (vodní
+   ekvivalent). Pod 10 dBZ šum/mrholení → 0, nad 75 dBZ vadný pixel → 0. */
+export function dbzToMm(dbz, isSnow) {
+  if (dbz == null || typeof dbz !== "number" || isNaN(dbz)) return 0;
+  if (dbz < 10) return 0;
+  if (dbz > 75) return 0;
+  var zlin = Math.pow(10, dbz / 10);
+  var mm = isSnow ? Math.sqrt(zlin / 2000) : Math.pow(zlin / 200, 1 / 1.6);
+  return Math.min(mm, RV_SANE_MMH);
+}
+
+/* Ze weather-maps.json vybere snímek z radar.past nejbližší času now.
+   Vrací {host, path, time} nebo null (žádný čerstvý snímek / rozbitý JSON). */
+export function pickFrame(mapsJson, nowMs) {
+  try {
+    var j = typeof mapsJson === "string" ? JSON.parse(mapsJson) : mapsJson;
+    var past = (j && j.radar && j.radar.past) || [];
+    var best = null, bestDt = Infinity;
+    for (var i = 0; i < past.length; i++) {
+      var dt = Math.abs(past[i].time * 1000 - nowMs);
+      if (dt < bestDt) { bestDt = dt; best = past[i]; }
+    }
+    if (!best || bestDt > RV_TOL_MS) return null;
+    return { host: j.host || "https://tilecache.rainviewer.com", path: best.path, time: best.time };
+  } catch (e) { return null; }
+}
+
+export function rvTileUrl(host, path, tc) {
+  return host + path + "/256/" + tc.z + "/" + tc.tx + "/" + tc.ty + RV_OPTS;
+}
+
+/* ---- PNG dekodér (jen výřez) ---- */
+
+async function inflateZlib(chunks) {
+  var total = 0;
+  for (var i = 0; i < chunks.length; i++) total += chunks[i].length;
+  var z = new Uint8Array(total);
+  var off = 0;
+  for (var k = 0; k < chunks.length; k++) { z.set(chunks[k], off); off += chunks[k].length; }
+  var DS = (typeof DecompressionStream !== "undefined") ? DecompressionStream : null;
+  if (!DS) throw new Error("runtime bez DecompressionStream");
+  var stream = new Blob([z]).stream().pipeThrough(new DS("deflate"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function paeth(a, b, c) {
+  var p = a + b - c;
+  var pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
+}
+
+/* Dekóduje PNG (8bit RGBA, neklacovaný) a vrátí výřez (2r+1)² pixelů
+   kolem [px,py] jako pole {d: dBZ|null, s: sníh, m: mm/h}. Alfa 0 =
+   bez odrazu → d:null, m:0 (přesně jako readTilePatch aplikace).
+   Jakákoli chyba → null (nikdy nevyhazuje). */
+export async function pngDecodePatch(bytes, px, py, r) {
+  try {
+    if (!bytes || bytes.length < 8) return null;
+    var sig = [137, 80, 78, 71, 13, 10, 26, 10];
+    for (var s = 0; s < 8; s++) if (bytes[s] !== sig[s]) return null;
+    var pos = 8, w = 0, h = 0, idat = [], seenIhdr = false;
+    while (pos + 8 <= bytes.length) {
+      var len = ((bytes[pos] << 24) | (bytes[pos + 1] << 16) | (bytes[pos + 2] << 8) | bytes[pos + 3]) >>> 0;
+      if (pos + 12 + len > bytes.length) return null;
+      var type = String.fromCharCode(bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7]);
+      var data = bytes.subarray(pos + 8, pos + 8 + len);
+      if (type === "IHDR") {
+        w = ((data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3]) >>> 0;
+        h = ((data[4] << 24) | (data[5] << 16) | (data[6] << 8) | data[7]) >>> 0;
+        if (data[8] !== 8 || data[9] !== 6 || data[12] !== 0) return null; /* 8bit RGBA, bez interlacingu */
+        seenIhdr = true;
+      } else if (type === "IDAT") {
+        idat.push(data);
+      }
+      pos += 12 + len;
+      if (type === "IEND") break;
+    }
+    if (!seenIhdr || !w || !h || !idat.length) return null;
+    var raw = await inflateZlib(idat);
+    var bpp = 4, stride = w * bpp;
+    if (raw.length < (stride + 1) * h) return null;
+    var x0 = Math.max(0, Math.min(w - 1 - 2 * r, px - r));
+    var y0 = Math.max(0, Math.min(h - 1 - 2 * r, py - r));
+    var n = 2 * r + 1;
+    var prev = new Uint8Array(stride), cur = new Uint8Array(stride);
+    var out = new Array(n * n), oi = 0;
+    for (var y = 0; y < h; y++) {
+      var f = raw[y * (stride + 1)];
+      var rs = y * (stride + 1) + 1;
+      for (var x = 0; x < stride; x++) cur[x] = raw[rs + x];
+      if (f === 1) { for (var x1 = bpp; x1 < stride; x1++) cur[x1] = (cur[x1] + cur[x1 - bpp]) & 255; }
+      else if (f === 2) { for (var x2 = 0; x2 < stride; x2++) cur[x2] = (cur[x2] + prev[x2]) & 255; }
+      else if (f === 3) { for (var x3 = 0; x3 < stride; x3++) { var le = x3 < bpp ? 0 : cur[x3 - bpp]; cur[x3] = (cur[x3] + ((le + prev[x3]) >> 1)) & 255; } }
+      else if (f === 4) { for (var x4 = 0; x4 < stride; x4++) { cur[x4] = (cur[x4] + paeth(x4 < bpp ? 0 : cur[x4 - bpp], prev[x4], x4 < bpp ? 0 : prev[x4 - bpp])) & 255; } }
+      else if (f > 4) return null;
+      if (y >= y0 && y < y0 + n) {
+        for (var p = 0; p < n; p++) {
+          var xi = (x0 + p) * bpp;
+          if (cur[xi + 3] === 0) { out[oi] = { d: null, s: false, m: 0 }; }
+          else {
+            var red = cur[xi];
+            var snow = (red & 128) !== 0;
+            var dbz = (red & 127) - 32;
+            out[oi] = { d: dbz, s: snow, m: dbzToMm(dbz, snow) };
+          }
+          oi++;
+        }
+      }
+      var tmp = prev; prev = cur; cur = tmp;
+    }
+    return out;
+  } catch (e) { return null; }
+}
+
+/* maps.json s keší izolátu (5 min); chybu vrací jako výjimku, voličel
+   v collectSlice ji toleruje (radar jen chybí v záznamu). */
+async function radarFrame(fetchImpl, nowMs) {
+  if (MAPS_MEM.v && nowMs - MAPS_MEM.t < RV_MAPS_TTL) return MAPS_MEM.v;
+  var res = await fetchImpl(RV_MAPS_URL, { headers: { "user-agent": "bude-prset-proxy/1.0" } });
+  if (!res.ok) throw new Error("maps " + res.status);
+  var frame = pickFrame(await res.text(), nowMs);
+  MAPS_MEM = { t: nowMs, v: frame };
+  return frame;
+}
+
+/* Jedno radarové čtení pro obec: medián mm/h z 3×3 pixelů (r=1) kolem
+   obce + sněhový příznak většiny odrazů. Vrací {t, mm, ec, sn}. */
+async function rvRead(fetchImpl, frame, p) {
+  var tc = tileCoords(p.lat, p.lon, RV_Z);
+  var res = await fetchImpl(rvTileUrl(frame.host, frame.path, tc), { headers: { "user-agent": "bude-prset-proxy/1.0" } });
+  if (!res.ok) throw new Error("tile " + res.status);
+  var patch = await pngDecodePatch(new Uint8Array(await res.arrayBuffer()), tc.px, tc.py, 1);
+  if (!patch) throw new Error("tile decode");
+  var vals = patch.map(function (q) { return q.m; }).filter(function (v) { return v != null; }).sort(function (a, b) { return a - b; });
+  if (!vals.length) throw new Error("tile bez dat");
+  var echo = patch.filter(function (q) { return q.d != null; }).length;
+  return {
+    t: frame.time,
+    mm: q2(vals[Math.floor(vals.length / 2)]),
+    ec: echo,
+    sn: patch.filter(function (q) { return q.d != null && q.s; }).length * 2 > echo ? 1 : 0
+  };
+}
+
 /* ---- klíč raw záznamu ---- */
 function pad2(n) { return (n < 10 ? "0" : "") + n; }
 function hourKey(d) {
@@ -441,6 +620,11 @@ async function collectSlice(deps, slice, now) {
 
   var record = { t: Math.floor(now.getTime() / 1000), h: h, slice: slice, p: {} };
 
+  /* Radar RainViewer: snímek sdílený pro celý dílek (1 dotaz na
+     maps.json, keš izolátu 5 min), pak 1 dlaždice na obec. */
+  var rvFrame = null;
+  try { rvFrame = await radarFrame(fetchImpl, now.getTime()); } catch (e) { rvFrame = null; }
+
   await Promise.all(places.map(async function (p) {
     var entry = { n: p.n, cc: p.cc, lat: p.lat, lon: p.lon, icao: p.icao };
     var errs = [];
@@ -463,6 +647,10 @@ async function collectSlice(deps, slice, now) {
       if (!parsed) throw new Error("ens bez clenu");
       entry.ens = { m: usedModel, t0: parsed[0] && parsed[0].t0, g: parsed.map(function (pt) { return pt.v; }) };
     } catch (e) { errs.push("ens"); }
+    if (rvFrame) {
+      try { entry.rv = await rvRead(fetchImpl, rvFrame, p); }
+      catch (e) { /* radar chybí → err níže */ }
+    }
     record.p[p.n] = entry;
   }));
 
@@ -478,6 +666,7 @@ async function collectSlice(deps, slice, now) {
     if (!e.fc) errs.push("fc");
     if (!e.ens) errs.push("ens");
     if (!e.met) errs.push("met");
+    if (!e.rv) errs.push("rv");
     if (errs.length) e.err = errs;
   });
 

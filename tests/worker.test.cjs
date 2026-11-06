@@ -6,6 +6,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert");
+const zlib = require("zlib");
 
 /* Jednoduchá mock cache se stejným kontraktem jako CF Cache API. */
 function mockCache() {
@@ -217,8 +218,96 @@ function ensFixture() {
   return pts;
 }
 
+/* ---- RainViewer radar: fixture snímku a PNG dlaždice (kolo 8ag) ---- */
+
+/* Základní čas testů: 2026-11-06 14:00 UTC (jako scheduledTime cron testů). */
+const T0 = Math.floor(Date.UTC(2026, 10, 6, 14, 0) / 1000);
+
+function mapsFixture() {
+  const past = [];
+  for (let t = T0 - 1800; t <= T0 + 1800; t += 600) past.push({ time: t, path: "/v2/radar/fix" + t });
+  return { version: "2.0", host: "https://tilecache.rainviewer.com", radar: { past } };
+}
+
+/* CRC32 (PNG chunky) — bez tabulek, stačí pro testovací data. */
+function crc32(buf) {
+  let c = ~0;
+  for (let i = 0; i < buf.length; i++) {
+    c ^= buf[i];
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1));
+  }
+  return (~c) >>> 0;
+}
+
+/* Sestaví platné 8bit RGBA PNG. pixel(x,y) → [r,g,b,a];
+   filters = jedna hodnota nebo pole filtrů per řádek (0–4). Data se
+   při zápisu SKUTEČNĚ filtrují (jako to dělá libpng), jinak by deklarace
+   filtru lhala a dekodér je správně odmítl jinak dekódovat. */
+function paethPred(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
+}
+function makePng(w, h, pixel, filters) {
+  const bpp = 4, stride = w * bpp;
+  /* nejprve nefiltrované řádky (vstup filtrovacích transformací) */
+  const rows = [];
+  for (let y = 0; y < h; y++) {
+    const r = Buffer.alloc(stride);
+    for (let x = 0; x < w; x++) {
+      const [cr, cg, cb, ca] = pixel(x, y);
+      r[x * bpp] = cr; r[x * bpp + 1] = cg; r[x * bpp + 2] = cb; r[x * bpp + 3] = ca;
+    }
+    rows.push(r);
+  }
+  const raw = Buffer.alloc((stride + 1) * h);
+  for (let y = 0; y < h; y++) {
+    const f = Array.isArray(filters) ? filters[y] : filters;
+    const src = rows[y], up = y > 0 ? rows[y - 1] : null;
+    raw[y * (stride + 1)] = f;
+    const off = y * (stride + 1) + 1;
+    for (let x = 0; x < stride; x++) {
+      const left = x >= bpp ? src[x - bpp] : 0;
+      const above = up ? up[x] : 0;
+      const ul = (x >= bpp && up) ? up[x - bpp] : 0;
+      let v;
+      if (f === 0) v = src[x];
+      else if (f === 1) v = (src[x] - left) & 255;
+      else if (f === 2) v = (src[x] - above) & 255;
+      else if (f === 3) v = (src[x] - ((left + above) >> 1)) & 255;
+      else v = (src[x] - paethPred(left, above, ul)) & 255;
+      raw[off + x] = v;
+    }
+  }
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td));
+    return Buffer.concat([len, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlib.deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0))
+  ]);
+}
+
+/* Dlaždice 16×16, všude stejný déšť: červený kanál 62 → (62&127)-32 = 30 dBZ,
+   bez sněhového přízaku. Prostřední červený = 32+dBZ (schéma 0 RainVieweru). */
+const RAIN_DBZ = 30;
+function tileFixture() {
+  return makePng(16, 16, () => [32 + RAIN_DBZ, 0, 0, 255], 0);
+}
+
 function collectorFetch(opts) {
   opts = opts || {};
+  const tile = tileFixture();
   const state = { urls: [], calls: 0 };
   const impl = async (url) => {
     state.calls++;
@@ -226,6 +315,8 @@ function collectorFetch(opts) {
     if (opts.failIf && opts.failIf(url)) {
       return new Response("upstream error", { status: 500 });
     }
+    if (url.indexOf("rainviewer.com/public/weather-maps.json") >= 0) return okJson(mapsFixture());
+    if (url.indexOf("/v2/radar/") >= 0) return new Response(tile, { status: 200 });
     if (url.indexOf("ensemble-api.open-meteo.com") >= 0) return okJson(ensFixture());
     if (url.indexOf("api.open-meteo.com") >= 0) return okJson(fcFixture());
     if (url.indexOf("aviationweather.gov") >= 0) {
@@ -387,6 +478,14 @@ test("cron: jedno probuzení sebere svůj dílek a zapíše JEDEN klíč s TTL 1
   assert.ok(!pra.err, "Praha bez chyb: " + JSON.stringify(pra.err));
   assert.strictEqual(pra.met.r, 1);
   assert.strictEqual(pra.met.i, 1);
+  /* radar: fixture dlaždice = 30 dBZ všude → medián 2.73 mm/h, 9/9 pixelů s odrazem */
+  assert.strictEqual(pra.rv.t, T0, "čas snímku = nejbližší frame maps fixture");
+  assert.strictEqual(pra.rv.mm, 2.73);
+  assert.strictEqual(pra.rv.ec, 9);
+  assert.strictEqual(pra.rv.sn, 0);
+  /* maps.json jednou pro celý dílek, jedna dlaždice na obec */
+  assert.strictEqual(up.state.urls.filter((u) => u.indexOf("weather-maps.json") >= 0).length, 1);
+  assert.strictEqual(up.state.urls.filter((u) => u.indexOf("/v2/radar/") >= 0).length, m.placesForSlice(0).length);
   assert.ok(rec.p[m.placesForSlice(0)[1].n].err.indexOf("met") >= 0, "ostatní obce hlásí chybějící METAR");
 });
 
@@ -477,6 +576,8 @@ test("sběrač: ensemble fallback — po výpadku icon_d2 sebere icon_eu (tryNex
     if (url.indexOf("models=icon_eu") >= 0) return okJson(ensFixture());
     if (url.indexOf("ensemble-api") >= 0) return new Response("no data", { status: 400 });
     if (url.indexOf("api.open-meteo.com") >= 0) return okJson(fcFixture());
+    if (url.indexOf("weather-maps.json") >= 0) return okJson(mapsFixture());
+    if (url.indexOf("/v2/radar/") >= 0) return new Response(tileFixture(), { status: 200 });
     if (url.indexOf("aviationweather.gov") >= 0) {
       return okJson([{ icaoId: "LKPR", obsTime: 1794000300, temp: 2, rawOb: "METAR LKPR 061930Z 07006KT 8000 -RA NSC 01/M00 Q1025 NOSIG" }]);
     }
@@ -491,4 +592,125 @@ test("sběrač: ensemble fallback — po výpadku icon_d2 sebere icon_eu (tryNex
   assert.ok(pra.ens, "ensemble musí dojít přes fallback");
   assert.strictEqual(pra.ens.m, "icon_eu");
   assert.ok(!pra.err, "bez chyby: " + JSON.stringify(pra.err));
+});
+
+/* ================= RADAR (kolo 8ag) ================= */
+
+test("dbzToMm: Marshall–Palmer pro déšť i sníh, šum a vadné pixely → 0", async () => {
+  const m = await collector();
+  /* Z = 200·R^1.6; 30 dBZ → Z = 1000 → R = 5^0.625 ≈ 2,73 mm/h */
+  assert.ok(Math.abs(m.dbzToMm(30, false) - 2.734) < 0.01, "30 dBZ ≈ 2.73 mm/h, vyšlo " + m.dbzToMm(30, false));
+  /* Z = 2000·R²; 30 dBZ → R = sqrt(1000/2000) ≈ 0.71 mm/h (vodní ekvivalent) */
+  assert.ok(Math.abs(m.dbzToMm(30, true) - 0.707) < 0.01, "30 dBZ sníh ≈ 0.71");
+  assert.strictEqual(m.dbzToMm(9, false), 0, "pod 10 dBZ šum");
+  assert.strictEqual(m.dbzToMm(76, false), 0, "nad 75 dBZ vadný pixel");
+  assert.strictEqual(m.dbzToMm(null, false), 0);
+  assert.strictEqual(m.dbzToMm(40, false), 22.72 > m.dbzToMm(40, false) ? m.dbzToMm(40, false) : 0, "40 dBZ pod stropem 150");
+  assert.ok(m.dbzToMm(40, false) > 10 && m.dbzToMm(40, false) < 30);
+});
+
+test("tileCoords: Praha na zoomu 7 spadne do dlaždice s platnými px/py", async () => {
+  const m = await collector();
+  const tc = m.tileCoords(50.10, 14.26, 7);
+  assert.ok(tc.z === 7);
+  assert.ok(tc.tx >= 0 && tc.tx < 128 && tc.ty >= 0 && tc.ty < 128, "dlaždice v rozsahu z7");
+  assert.ok(tc.px >= 0 && tc.px < 256 && tc.py >= 0 && tc.py < 256, "pixel v dlaždici");
+  /* zrcadlí vzorec aplikace — kontrola přes přepočet */
+  const n = Math.pow(2, 7);
+  const xf = (14.26 + 180) / 360 * n;
+  assert.strictEqual(tc.tx, Math.floor(xf));
+  assert.strictEqual(tc.px, Math.floor((xf - tc.tx) * 256));
+});
+
+test("PNG dekodér: filtry 0–4 dávejí stejný výřez jako filtr 0", async () => {
+  const m = await collector();
+  const pixel = (x, y) => [(x * 7 + y * 13 + 40) & 255, (x * 3) & 255, (y * 5) & 255, 255];
+  const ref = await m.pngDecodePatch(makePng(8, 8, pixel, 0), 4, 3, 1);
+  const mixed = await m.pngDecodePatch(makePng(8, 8, pixel, [0, 1, 2, 3, 4, 1, 2, 4]), 4, 3, 1);
+  assert.ok(ref && mixed, "oba dekódy proběhly");
+  assert.strictEqual(ref.length, 9);
+  for (let i = 0; i < 9; i++) {
+    assert.strictEqual(mixed[i].d, ref[i].d, "filtr nemění dBZ na indexu " + i);
+    assert.strictEqual(mixed[i].s, ref[i].s);
+    assert.strictEqual(mixed[i].m, ref[i].m);
+  }
+  /* hodnota odpovídá přímo pixelu (4,3): red = (4*7+3*13+40)&255 = 107
+     → (107&127)-32 = 75 dBZ; sněhový bit v 107 není (107 < 128) */
+  const center = ref[4]; /* prostřední pixel výřezu (r=1) */
+  assert.strictEqual(center.d, (107 & 127) - 32);
+  assert.strictEqual(center.s, false);
+});
+
+test("PNG dekodér: alfa 0 = bez odrazu (d:null, m:0), sněhový bit 128", async () => {
+  const m = await collector();
+  /* 8×8: vše jasno kromě středu, který sněží (red 128+64 → dbz 32, sníh) */
+  const png = makePng(8, 8, (x, y) => (x === 4 && y === 3) ? [192, 0, 0, 255] : [0, 0, 0, 0], 2);
+  const patch = await m.pngDecodePatch(png, 4, 3, 1);
+  assert.ok(patch);
+  assert.strictEqual(patch.length, 9);
+  /* medián 9 hodnot: 8× jasno (0), 1× sníh → medián 0, ale střed nese sníh */
+  const c = patch[4];
+  assert.strictEqual(c.d, 32, "(192&127)-32 = 32 dBZ");
+  assert.strictEqual(c.s, true, "nejvyšší bit = sněhový příznak");
+  assert.ok(Math.abs(c.m - 0.89) < 0.01, "32 dBZ sníh ≈ 0.89 mm/h");
+  const clear = patch[0];
+  assert.strictEqual(clear.d, null);
+  assert.strictEqual(clear.m, 0);
+});
+
+test("PNG dekodér: poškozená data → null, nikdy výjimka", async () => {
+  const m = await collector();
+  const good = makePng(8, 8, () => [62, 0, 0, 255], 0);
+  assert.strictEqual(await m.pngDecodePatch(good.subarray(0, 20), 4, 3, 1), null, "useknutá hlavička");
+  assert.strictEqual(await m.pngDecodePatch(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0]), 4, 3, 1), null, "žádné chunky");
+  const badMagic = Buffer.from(good); badMagic[1] = 81;
+  assert.strictEqual(await m.pngDecodePatch(badMagic, 4, 3, 1), null, "špatná signatura");
+  const corrupted = Buffer.from(good);
+  /* rozbitý zlib proud: přepíšeme IDAT data (offset za IHDR: 8+25+12=45) */
+  corrupted.fill(255, 45, 45 + 20);
+  assert.strictEqual(await m.pngDecodePatch(corrupted, 4, 3, 1), null, "rozbitý inflate");
+});
+
+test("pickFrame: nejbližší snímek z radar.past, tolerance 12 min", async () => {
+  const m = await collector();
+  const nowMs = T0 * 1000;
+  const j = { host: "https://tilecache.rainviewer.com", radar: { past: [
+    { time: T0 - 600, path: "/v2/radar/a" }, { time: T0, path: "/v2/radar/b" }
+  ] } };
+  const f = m.pickFrame(j, nowMs);
+  assert.ok(f);
+  assert.strictEqual(f.path, "/v2/radar/b");
+  assert.strictEqual(f.time, T0);
+  assert.strictEqual(f.host, "https://tilecache.rainviewer.com");
+  /* chybějící host → výchozí tilecache */
+  assert.strictEqual(m.pickFrame({ radar: { past: [{ time: T0, path: "/x" }] } }, nowMs).host, "https://tilecache.rainviewer.com");
+  /* příliš starý snímek → null */
+  assert.strictEqual(m.pickFrame({ radar: { past: [{ time: T0 - 1200, path: "/x" }] } }, nowMs), null, "20 min staré je mimo");
+  assert.strictEqual(m.pickFrame({ radar: { past: [] } }, nowMs), null);
+  assert.strictEqual(m.pickFrame("to není json", nowMs), null);
+});
+
+test("rvTileUrl: schéma 0 + sněhový příznak, zoom 7, 256px", async () => {
+  const m = await collector();
+  const tc = m.tileCoords(50.10, 14.26, 7);
+  const url = m.rvTileUrl("https://tilecache.rainviewer.com", "/v2/radar/abc", tc);
+  const u = new URL(url);
+  assert.strictEqual(u.host, "tilecache.rainviewer.com");
+  assert.strictEqual(u.pathname, "/v2/radar/abc/256/7/" + tc.tx + "/" + tc.ty + "/0/0_1.png");
+});
+
+test("cron: výpadek radaru shodí jen pole rv, záznam vznikne, kolo běží dál", async () => {
+  const m = await collector();
+  const up = collectorFetch({ failIf: (u) => u.indexOf("rainviewer") >= 0 || u.indexOf("/v2/radar/") >= 0 });
+  const kv = mockKv();
+  const w = m.createWorker({ fetchImpl: up.impl, kv });
+  const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 15, 0) });
+  assert.ok(res.ok);
+  const rec = JSON.parse(kv.store.get(res.key).v);
+  Object.keys(rec.p).forEach((n) => {
+    const e = rec.p[n];
+    assert.ok(e.fc && e.ens, "předpovědi přežily výpadek radaru u " + n);
+    assert.ok(!e.rv, "radar chybí u " + n);
+    assert.ok(e.err.indexOf("rv") >= 0, "rv označeno jako chyba u " + n);
+  });
 });

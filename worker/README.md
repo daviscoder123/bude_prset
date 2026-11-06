@@ -14,7 +14,14 @@ se zachytí STEJNÉ vstupy, ze kterých appka počítá verdikty:
 
 1. `current` + `minutely_15` (8 kroků = appčin minutecast) + `precipitation_probability`,
 2. ensemble srážkové členy na 3×3 mřížce (icon_d2 → icon_eu → ecmwf_ifs025 → gfs_seamless, tryNext jako v appce),
-3. METAR stanice obce jako ground truth (dávkový dotaz na aviationweather.gov, tentýž zdroj jako appka).
+3. METAR stanice obce jako ground truth (dávkový dotaz na aviationweather.gov, tentýž zdroj jako appka),
+4. **radar RainViewer (kolo 8ag)** — aktuální snímek nad obcí. Worker
+   nemá canvas, proto dekóduje PNG dlaždici sám (inflate přes
+   `DecompressionStream` + ruční unfiltr řádků, vždy jen dva řádky v
+   paměti). Schéma 0 „Black and White dBZ“ + sněhový příznak, zoom 7,
+   medián mm/h z 3×3 pixelů — tentýž postup jako radarový „druhý svědek“
+   verifikace v appce. Dekodér byl ověřen bitově proti nezávislé
+   implementaci na živých snímcích (déšť, sníh, jasno, vadné pixely).
 
 Záznamy se ukládají do KV pod `raw/{YYYYMMDDHH}:{mm}`, TTL 14 dní.
 
@@ -36,8 +43,9 @@ Záznamy se ukládají do KV pod `raw/{YYYYMMDDHH}:{mm}`, TTL 14 dní.
 | Open-Meteo volání | 4 800/den | 10 000 (zbytek = proxy provoz) |
 | KV zápisy | 288/den | 1 000 |
 | KV objem | ~10 MB/den → ~150 MB | 1 GB (TTL 14 dní) |
-| Subrequesty / probuzení | ~20–28 | 50 |
+| Subrequesty / probuzení | ~21–29 (nejhorší případ ~38) | 50 |
 | METAR dotazy | 288/den (dávkově) | bez významného limitu |
+| RainViewer dotazy | 12 maps.json + 288 dlažnic/den | veřejné API bez klíče a limitu |
 
 Whelista parametrů: `latitude`, `longitude`, `hourly`, `models`,
 `forecast_hours`, `timeformat`, `timezone`. Vše ostatní se zahodí;
@@ -84,10 +92,16 @@ obcí. Na obec:
 - `ens.m` — použitý ensemble model, `ens.t0` — první hodina, `ens.g` —
   9 bodů mřížky × členové × 9 h srážek (mm, 1 desetinné místo),
 - `met` — METAR ground truth: `{t (čas pozorování), tp (°C), r (prší), i (0–3 intenzita), s (sníh), th (bouřka), sh (přeháňka), re (recent), vc (v okolí), raw}`,
-- `err` — pole chybějících částí (fc/ens/met), pokud něco selhalo.
+- `rv` — radar ground truth (kolo 8ag): `{t (čas snímku, ~10 min mřížka), mm (medián mm/h z 3×3 pixelů; 0 = jasno), ec (počet pixelů s odrazem 0–9), sn (sněhový příznak většiny odrazů)}`,
+- `err` — pole chybějících částí (fc/ens/met/rv), pokud něco selhalo.
 
 Párování pro vyhodnocení přesnosti: předpověď z záznamu hodiny H pro
-cílový čas T porovnat s METAR `r/i` z záznamu, jehož `met.t` je blízko T.
+cílový čas T porovnat s METAR `r/i` z záznamu, jehož `met.t` je blízko T,
+a nezávisle s radarem `rv.mm` ze záznamu, jehož `rv.t` je blízko T.
+Radar měří ve výšce (virga ani bright band mu nedělají dobře) a je to
+globální mozaika — kde METAR mlčí nebo je daleko, radar je ground truth
+přímo v lokalitě; kde se rozcházejí, má METAR přednost (stejná pravidla
+poctivosti jako ve verifikaci appky).
 Dashboard `/analysis` umí hodinu/den stáhnout jako JSON soubor.
 
 ## Nasazení (jednou, na vašem stroji)
