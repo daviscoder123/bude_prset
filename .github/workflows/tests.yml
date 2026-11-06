@@ -35,6 +35,14 @@ jobs:
           node --test tests/regression.test.cjs > /tmp/test-out.txt 2>&1 || true
           tail -n 80 /tmp/test-out.txt > /tmp/test-tail.txt
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/test-tail.txt
+      # Stahovani chromium z Playwright CDN obcas zasekne ci spadne — browser
+      # cachujeme mezi runy (klic z lockfile, pri bumpu verze playwright se
+      # klic zmeni a cache se automaticky prestavi).
+      - name: Cache Playwright chromium
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-chromium-${{ hashFiles('package-lock.json') }}
       - name: Playwright chromium (retry s timeoutem proti zaseknutemu stahovani)
         run: |
           for i in 1 2 3; do
