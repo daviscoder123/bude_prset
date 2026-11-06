@@ -709,7 +709,7 @@ function offlineStale(t){
    uživateli, retry a 503 logika na jednom místě.
    Nouzové cesty (retry uvnitř load()) zůstávají vždy přímé — když
    proxy nedopadne, fallback nezávisle trefí samotné Open-Meteo. */
-var BP_PROXY = "";
+var BP_PROXY = "https://bude-prset-proxy.kopaci-podstavec1q.workers.dev";
 function omUrl(host, path, qs){
   return BP_PROXY ? BP_PROXY + "/om" + path + "?" + qs
                   : "https://" + host + path + "?" + qs;
