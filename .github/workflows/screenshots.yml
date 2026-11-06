@@ -17,7 +17,14 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - name: Playwright chromium (retry s timeoutem proti zaseknutemu stahovani)
+        run: |
+          for i in 1 2 3; do
+            echo "Pokus $i/3"
+            if timeout 150 npx playwright install --with-deps chromium; then exit 0; fi
+            sleep 10
+          done
+          exit 1
       - name: Vygenerovat screenshoty
         run: node scripts/screenshots.cjs 2>&1 | tee /tmp/shot-out.txt
       - name: Commitnout snimky do repa
