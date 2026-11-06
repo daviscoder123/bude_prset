@@ -10,7 +10,9 @@ concurrency:
   cancel-in-progress: true
 jobs:
   minify:
-    runs-on: ubuntu-latest
+    # ubuntu-latest je od 19. 10. 2026 Ubuntu 26 — playwright 1.59 --with-deps na něm
+    # selhává (apt závislosti). Stejný pin jako tests.yml.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
