@@ -1,9 +1,14 @@
 {
-  // Konfigurace Wrangleru pro deploy edge proxy (Pilíř A, kolo 8ac).
-  // Nasazení: viz worker/README.md — jednorázově `npx wrangler login`,
-  // poté z tohoto adresáře `npx wrangler deploy`.
+  // Konfigurace Wrangleru pro deploy edge proxy (Pilíř A, kolo 8ac)
+  // + sběrače historie (kolo 8af). Nasazení: viz worker/README.md.
   "name": "bude-prset-proxy",
   "main": "worker.mjs",
   "compatibility_date": "2026-11-06",
-  "workers_dev": true
+  "workers_dev": true,
+  // Sběrač: cron každých 5 minut (12 dílků × ~8–9 obcí za hodinu).
+  // Při deploy přes wrangler odkomentujte:
+  // "triggers": { "crons": ["*/5 * * * *"] },
+  // KV binding pro surové záznamy (TTL 14 dní): vytvořte namespace
+  // `bude-prset-history` a doplňte jeho ID:
+  // "kv_namespaces": [{ "binding": "HISTORY", "id": "<ID namespace>" }]
 }
