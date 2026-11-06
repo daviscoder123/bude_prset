@@ -36,6 +36,16 @@ async function runScenario(browser, base, label, wet) {
   await p.route('**/*', async route => {
     const u = new URL(route.request().url());
     if (u.origin === base) return route.continue();
+    /* Kolo 8ad: aplikace muze volat Open-Meteo pres edge proxy (BP_PROXY
+       v src/main.js). Tady proxy "rozbalime" zpet na upstream hostname,
+       aby vsechny nize definovane fixture zachytavaly tentýz dotaz —
+       screenshoty zustavaji deterministicke bez ohledu na proxy. */
+    if (u.hostname === 'bude-prset-proxy.kopaci-podstavec1q.workers.dev') {
+      const m = u.pathname.match(/^\/om\/v1\/(forecast|ensemble)$/);
+      if (!m) return route.fulfill({ status: 404, json: { error: 'unknown endpoint' } });
+      u.hostname = m[1] === 'ensemble' ? 'ensemble-api.open-meteo.com' : 'api.open-meteo.com';
+      u.pathname = '/v1/' + m[1];
+    }
     const json = body => route.fulfill({ json: body });
     if (u.hostname === 'geocoding-api.open-meteo.com') {
       const place = places[u.searchParams.get('name')];
