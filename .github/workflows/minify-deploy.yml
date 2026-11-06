@@ -22,7 +22,11 @@ jobs:
       # Minifikace PŘEPÍŠE index.html v pracovním stromu — browser testy
       # níže tedy servují a ověřují právě minifikovanou verzi.
       - run: node .github/minify.cjs
-      - run: npx playwright install --with-deps chromium
+      - name: Playwright chromium (1. pokus)
+        run: npx playwright install --with-deps chromium
+      - name: Playwright chromium (retry — stazeni prohlizece obcas spadne na sitove fluke)
+        if: failure()
+        run: npx playwright install --with-deps chromium
       - run: npm run test:browser
       # Pozn.: node regression testy (npm test) se nespouštějí — čtou
       # zdrojový index.html a hledají v něm neodsazené top-level zavírací
