@@ -114,6 +114,7 @@ td.name .a{font-family:var(--mono);font-size:8.5px;color:var(--muted);white-spac
    legendu v paticce, viz footer). */
 .mlegend{display:none}
 td.name .flag{font-style:normal;font-size:12px;line-height:1.1;margin-right:2px} /* vlajka před názvem modelu — viz render() */
+img.flag{width:14px;height:9.4px;margin-right:2px;vertical-align:-1px;border-radius:1px;object-fit:cover} /* kolo 8ae: SVG vlajky — Windows emoji fonty vlaječky nemají */
 td.cell{background:var(--panel2);color:var(--dry);transition:background .3s}
 td.cell.wet{color:#DFF0FC;font-weight:600}
 /* srážky pod prahem — jsou v součtu, ale za déšť se nepovažují */
@@ -522,6 +523,7 @@ html.compact .mlegend span{display:flex;gap:5px;align-items:center;color:var(--m
 html.compact .mlegend .sw{width:13px;height:9px;border-radius:3px;flex:none}
 html.compact td.name .a{display:none}
 html.compact td.name .flag{float:left;font-style:normal;font-size:calc(clamp(10px,2.9vw,12px)*var(--fit,1));line-height:1;transform:scale(.78);transform-origin:left center;margin-right:2px}
+html.compact img.flag{width:13px;height:8.7px;transform:scale(.78);transform-origin:left center;float:left}
 html.compact tr.national .badge{display:none}
 html.compact td.sumcell{font-size:calc(clamp(11px,3.1vw,12.5px)*var(--fit,1))}
 html.compact .verdict, html.compact .when{padding:10px;border-radius:10px}
@@ -1293,6 +1295,55 @@ function flagEmoji(cc){
   if(!cc || cc.length !== 2) return "";
   cc = cc.toUpperCase();
   return String.fromCodePoint(0x1F1E6 + cc.charCodeAt(0) - 65, 0x1F1E6 + cc.charCodeAt(1) - 65);
+}
+/* Kolo 8ae (Dave: „vlajky modelů chybí" na Windows): emoji vlaječky kreslí
+   operační systém a Windows je ve svých fontech nemá — na Chrome/Edge se
+   zobrazí prázdné místo. Aplikace proto nese vlastní vektorové vlajky
+   (SVG data URI, žádná síť, žádná závislost) a vypadá stejně na všech
+   zařízeních. Neznámý kód země o PADNE na emoji (kde funguje).
+   Sadu tvoří přesně cc hodnoty z MODEL_POOL a REGIONAL — nic navíc. */
+var FLAG_SVG = {
+  AT:'<path fill="#ED2939" d="M0 0h60v40H0z"/><path fill="#fff" d="M0 13h60v14H0z"/>',
+  AU:'<path fill="#012169" d="M0 0h60v40H0z"/><path stroke="#fff" stroke-width="3" d="M0 0l25 15M25 0L0 15"/><path stroke="#C8102E" stroke-width="1.5" d="M0 0l25 15M25 0L0 15"/><path fill="#fff" d="M9 0h7v15H0v7h25v-7H9z"/><path fill="#C8102E" d="M10.5 0h4v15H0v4h25v-4H10.5z"/><circle fill="#fff" cx="33" cy="10" r="2"/><circle fill="#fff" cx="40" cy="5" r="1.4"/><circle fill="#fff" cx="47" cy="9" r="1.6"/><circle fill="#fff" cx="52" cy="17" r="1.6"/><circle fill="#fff" cx="44" cy="25" r="1.8"/><circle fill="#fff" cx="35" cy="31" r="1.6"/><circle fill="#fff" cx="8" cy="33" r="2.2"/>',
+  BE:'<path fill="#000" d="M0 0h20v40H0z"/><path fill="#FAE042" d="M20 0h20v40H20z"/><path fill="#ED2939" d="M40 0h20v40H40z"/>',
+  CA:'<path fill="#fff" d="M0 0h60v40H0z"/><path fill="#D80621" d="M0 0h15v40H0z"/><path fill="#D80621" d="M45 0h15v40H45z"/><path fill="#D80621" d="M30 8l2.4 4 3.6-1.6-.9 4 4.1.9-3.3 3.3 1.7 3.6-4.3-.8-.8 4.3-2.5-2.5-2.5 2.5-.8-4.3-4.3.8 1.7-3.6-3.3-3.3 4.1-.9-.9-4 3.6 1.6z"/>',
+  CH:'<path fill="#DA291C" d="M0 0h60v40H0z"/><path fill="#fff" d="M26 6h8v28h-8z"/><path fill="#fff" d="M14 16h32v8H14z"/>',
+  CN:'<path fill="#DE2910" d="M0 0h60v40H0z"/><path fill="#FFDE00" d="M13 4l1.6 5 5.3.3-4.2 3.4 1.6 5-4.3-3.1-4.3 3.1 1.6-5-4.2-3.4 5.3-.3z"/><circle fill="#FFDE00" cx="25" cy="7" r="1.6"/><circle fill="#FFDE00" cx="28.5" cy="11.5" r="1.6"/><circle fill="#FFDE00" cx="28.5" cy="16.5" r="1.6"/><circle fill="#FFDE00" cx="25" cy="20.5" r="1.6"/>',
+  CZ:'<path fill="#fff" d="M0 0h60v20H0z"/><path fill="#D7141A" d="M0 20h60v20H0z"/><path fill="#11457E" d="M0 0l30 20L0 40z"/>',
+  DE:'<path fill="#000" d="M0 0h60v13.3H0z"/><path fill="#D00" d="M0 13.3h60v13.4H0z"/><path fill="#FFCE00" d="M0 26.7h60v13.3H0z"/>',
+  DK:'<path fill="#C8102E" d="M0 0h60v40H0z"/><path fill="#fff" d="M17 0h7v40h-7z"/><path fill="#fff" d="M0 17h60v7H0z"/>',
+  DZ:'<path fill="#006233" d="M0 0h30v40H0z"/><path fill="#fff" d="M30 0h30v40H30z"/><path fill="#D21034" d="M27 12a8 8 0 1 0 0 16 6.6 6.6 0 1 1 0-16z"/><circle fill="#D21034" cx="38" cy="20" r="2.2"/>',
+  EG:'<path fill="#CE1126" d="M0 0h60v13.3H0z"/><path fill="#fff" d="M0 13.3h60v13.4H0z"/><path fill="#000" d="M0 26.7h60v13.3H0z"/><path fill="#C09329" d="M30 15.5h4v3l-2 6-2-6z"/>',
+  EU:'<path fill="#003399" d="M0 0h60v40H0z"/><circle fill="#FFCC00" cx="41" cy="20" r="1.7"/><circle fill="#FFCC00" cx="39.5" cy="25.5" r="1.7"/><circle fill="#FFCC00" cx="35.5" cy="29.5" r="1.7"/><circle fill="#FFCC00" cx="30" cy="31" r="1.7"/><circle fill="#FFCC00" cx="24.5" cy="29.5" r="1.7"/><circle fill="#FFCC00" cx="20.5" cy="25.5" r="1.7"/><circle fill="#FFCC00" cx="19" cy="20" r="1.7"/><circle fill="#FFCC00" cx="20.5" cy="14.5" r="1.7"/><circle fill="#FFCC00" cx="24.5" cy="10.5" r="1.7"/><circle fill="#FFCC00" cx="30" cy="9" r="1.7"/><circle fill="#FFCC00" cx="35.5" cy="10.5" r="1.7"/><circle fill="#FFCC00" cx="39.5" cy="14.5" r="1.7"/>',
+  FI:'<path fill="#fff" d="M0 0h60v40H0z"/><path fill="#002F6C" d="M26 0h8v40h-8z"/><path fill="#002F6C" d="M0 16h60v8H0z"/>',
+  FR:'<path fill="#0055A4" d="M0 0h20v40H0z"/><path fill="#fff" d="M20 0h20v40H20z"/><path fill="#EF4135" d="M40 0h20v40H40z"/>',
+  GB:'<path fill="#012169" d="M0 0h60v40H0z"/><path stroke="#fff" stroke-width="7" d="M0 0l60 40M60 0L0 40"/><path stroke="#C8102E" stroke-width="4" d="M0 0l60 40M60 0L0 40"/><path fill="#fff" d="M24 0h12v40H24z"/><path fill="#fff" d="M0 14h60v12H0z"/><path fill="#C8102E" d="M26 0h8v40h-8z"/><path fill="#C8102E" d="M0 16h60v8H0z"/>',
+  IE:'<path fill="#169B62" d="M0 0h20v40H0z"/><path fill="#fff" d="M20 0h20v40H20z"/><path fill="#FF883E" d="M40 0h20v40H40z"/>',
+  IT:'<path fill="#009246" d="M0 0h20v40H0z"/><path fill="#fff" d="M20 0h20v40H20z"/><path fill="#CE2B37" d="M40 0h20v40H40z"/>',
+  JP:'<path fill="#fff" d="M0 0h60v40H0z"/><circle fill="#BC002D" cx="30" cy="20" r="11"/>',
+  KR:'<path fill="#fff" d="M0 0h60v40H0z"/><path fill="#CD2E3A" d="M30 20a10 10 0 0 1 10-10 8.5 8.5 0 0 0-10 10z"/><path fill="#0047A0" d="M30 20a10 10 0 0 1-10 10 8.5 8.5 0 0 0 10-10z"/><path fill="#CD2E3A" d="M30 20a5 5 0 0 1 5-5v2a3 3 0 0 0-3 3z"/><path fill="#0047A0" d="M30 20a5 5 0 0 1-5 5v-2a3 3 0 0 0 3-3z"/><path fill="#000" d="M10 6h9v2H10zM10 9.5h9v2H10zM10 13h9v2H10zM41 6h9v2h-9zM41 9.5h9v2h-9zM41 13h9v2h-9zM10 24h9v2H10zM10 27.5h9v2H10zM10 31h9v2H10zM41 24h9v2h-9zM41 27.5h9v2h-9zM41 31h9v2h-9z"/>',
+  LY:'<path fill="#E70013" d="M0 0h60v13.3H0z"/><path fill="#000" d="M0 13.3h60v13.4H0z"/><path fill="#239E46" d="M0 26.7h60v13.3H0z"/><path fill="#fff" d="M30 14l2 5 5-.5-3.8 3.3 1.6 4.8L30 24l-4.8 2.6 1.6-4.8L23 18.5l5 .5z"/>',
+  MA:'<path fill="#C1272D" d="M0 0h60v40H0z"/><path fill="none" stroke="#006233" stroke-width="1.6" d="M30 11l2.9 8.9h9.3l-7.5 5.5 2.9 8.9-7.6-5.5-7.6 5.5 2.9-8.9-7.5-5.5h9.3z"/>',
+  NL:'<path fill="#AE1C28" d="M0 0h60v13.3H0z"/><path fill="#fff" d="M0 13.3h60v13.4H0z"/><path fill="#21468B" d="M0 26.7h60v13.3H0z"/>',
+  NO:'<path fill="#BA0C2F" d="M0 0h60v40H0z"/><path fill="#fff" d="M13 0h12v40H13z"/><path fill="#fff" d="M0 14h60v12H0z"/><path fill="#00205B" d="M16 0h6v40h-6z"/><path fill="#00205B" d="M0 17h60v6H0z"/>',
+  PL:'<path fill="#fff" d="M0 0h60v20H0z"/><path fill="#DC143C" d="M0 20h60v20H0z"/>',
+  SE:'<path fill="#006AA7" d="M0 0h60v40H0z"/><path fill="#FECC02" d="M15 0h9v40h-9z"/><path fill="#FECC02" d="M0 16h60v8H0z"/>',
+  SK:'<path fill="#fff" d="M0 0h60v13.3H0z"/><path fill="#0B4EA2" d="M0 13.3h60v13.4H0z"/><path fill="#EE1C25" d="M0 26.7h60v13.3H0z"/><path fill="#fff" d="M14 8h14v13c0 4.5-3.5 7.5-7 8.8-3.5-1.3-7-4.3-7-8.8z"/><path fill="#EE1C25" d="M21 12.5c1.5 2.5 1 5-.6 7 1.4-.3 2.6-1 3.1-2.2.5 2.5-.5 5-2.5 6.7 3.6-.8 6-4 6-7.5h-6z"/>',
+  TN:'<path fill="#E70013" d="M0 0h60v40H0z"/><circle fill="#fff" cx="30" cy="20" r="10"/><path fill="#E70013" d="M26.5 13.7a7 7 0 1 0 0 12.6 5.6 5.6 0 1 1 0-12.6z"/><circle fill="#E70013" cx="32" cy="20" r="2"/>',
+  TR:'<path fill="#E30A17" d="M0 0h60v40H0z"/><circle fill="#fff" cx="25" cy="20" r="9"/><circle fill="#E30A17" cx="28" cy="20" r="7.4"/><path fill="#fff" d="M36.5 20l3.4 1.1-2.1-2.9v3.6l2.1-2.9z"/>',
+  US:'<path fill="#fff" d="M0 0h60v40H0z"/><path fill="#B22234" d="M0 0h60v3.08H0zM0 6.15h60v3.08H0zM0 12.31h60v3.08H0zM0 18.46h60v3.08H0zM0 24.62h60v3.08H0zM0 30.77h60v3.08H0zM0 36.92h60v3.08H0z"/><path fill="#3C3B6E" d="M0 0h24v21.5H0z"/><circle fill="#fff" cx="4.5" cy="4" r="1"/><circle fill="#fff" cx="11" cy="4" r="1"/><circle fill="#fff" cx="17.5" cy="4" r="1"/><circle fill="#fff" cx="7.8" cy="9.5" r="1"/><circle fill="#fff" cx="14.3" cy="9.5" r="1"/><circle fill="#fff" cx="4.5" cy="15" r="1"/><circle fill="#fff" cx="11" cy="15" r="1"/><circle fill="#fff" cx="17.5" cy="15" r="1"/>'
+};
+function flagData(cc){
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40">' + FLAG_SVG[cc] + "</svg>");
+}
+/* Plná značka vlajky: SVG všude (konec závislosti na emoji fontu systému),
+   emoji jen jako nouzovka pro kódy zemí, které v mapě nejsou. */
+function flagMarkup(cc){
+  cc = (cc || "").toUpperCase();
+  if(FLAG_SVG[cc]) return '<img class="flag" alt="" src="' + flagData(cc) + '"/>';
+  var e = flagEmoji(cc);
+  return e ? '<i class="flag">' + e + "</i>" : "";
 }
 var lastJ = null, lastModels = null, lastForecastId = null;
 var predictionsQueued = false;   /* render() běží 2–4× za jednu generaci: predikce do fronty jen jednou */
@@ -3136,7 +3187,7 @@ if(mh && NARROW.matches){
       return "<td class=\"cell wet"+(snowy?" snow":"")+"\" style=\"background:rgba("+rgb+","
            + alpha.toFixed(2)+");color:"+(alpha>0.55 ? "#0B2337" : "#EAF7FF")+"\">"+fmtMM(v)+"</td>";
     }).join("");
-    var fl = flagEmoji(pm.m.cc);
+    var fl = flagMarkup(pm.m.cc);
     /* Na mobilu krátký název (ns), ať se model vejde do úzkého sloupce
        bez useknutí — dlouhé názvy („ICON-D2 · střední Evropa" apod.)
        si přečte desktop, kde je sloupec široký. */
@@ -3146,7 +3197,7 @@ if(mh && NARROW.matches){
        Chromiumu; odhad šířky vlajky z kola 8e byl o ~40 % menší než
        skutečnost. Vlajka se vrací: na mobilu zmenšená (scale .78, ~10 px),
        na desktopu plná 12 px (kolo 8i). */
-    tr.innerHTML = "<td class=\"name\"><div class=\"n\">" + (fl ? "<i class=\"flag\">" + fl + "</i>" : "")
+    tr.innerHTML = "<td class=\"name\"><div class=\"n\">" + (fl ? fl : "")
       + (NARROW.matches && pm.m.ns ? pm.m.ns : pm.m.n)
       + (pm.m.national ? "<span class=\"badge\">NÁRODNÍ</span>" : "")
       + "</div><div class=\"a\">"+pm.m.a+"</div></td>" + cells

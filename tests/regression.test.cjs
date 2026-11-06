@@ -503,3 +503,24 @@ test('convective prior tilts blend toward models until its own samples arrive',(
   assert.ok(w2.radar/base.radar>0.85);
   assert.ok(Math.abs(w2.metno/base.metno-0.85)<1e-9);   /* bez vzorků drží prior */
 });
+
+/* Kolo 8ae (Dave: „vlajky modelů chybí" na Windows — emoji fonty je nemají):
+   vlajky jsou SVG vestavěné v aplikaci. invariant: každý kód země, který
+   MODEL_POOL nebo REGIONAL používá, musí mít vlajku v FLAG_SVG — nový model
+   bez vlajky nesmí projít CI. */
+test('SVG flagy pokryvaji vsechny zeme modelu (kolo 8ae)',()=>{
+  const m=script.match(/var FLAG_SVG = \{([\s\S]*?)\n\};/);
+  assert.ok(m,'FLAG_SVG nenalezen v index.html');
+  const keys=new Set([...m[1].matchAll(/^\s{2}([A-Z]{2}):/gm)].map(x=>x[1]));
+  assert.ok(keys.size>=29,'malo vlajek v mape: '+keys.size);
+  const ccs=new Set([...script.matchAll(/cc:"([A-Z]{2})"/g)].map(x=>x[1]));
+  const regs=new Set([...script.matchAll(/^\s{2}([A-Z]{2}):\{id:/gm)].map(x=>x[1]));
+  for(const cc of ccs) assert.ok(keys.has(cc),'vlajka '+cc+' (MODEL_POOL) chybi');
+  for(const cc of regs) assert.ok(keys.has(cc),'vlajka '+cc+' (REGIONAL) chybi');
+  /* struktura: kazda vlajka je vlnky fill/stroke, data URI je SVG */
+  assert.ok(script.includes('data:image/svg+xml;charset=utf-8,'),'flagData negeneruje SVG data URI');
+  for(const frag of m[1].split(/(?=\s{2}[A-Z]{2}:)/)){
+    if(!/^\s{2}[A-Z]{2}:/.test(frag)) continue;   /* uvodni prazdny fragment */
+    assert.ok(/fill=|stroke=/.test(frag),'vlajka bez vyplne: '+frag.slice(0,12));
+  }
+});
