@@ -470,9 +470,9 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     gen_s = gen.strftime("%d. %m. %Y %H:%M")
-    chart_horizon(m, gen, os.path.join(args.out, "presnost_horizont.svg"))
-    chart_reliability(m, gen, os.path.join(args.out, "spolehlivost.svg"))
-    chart_daily(m, gen, os.path.join(args.out, "denni_trend.svg"))
+    chart_horizon(m, gen_s, os.path.join(args.out, "presnost_horizont.svg"))
+    chart_reliability(m, gen_s, os.path.join(args.out, "spolehlivost.svg"))
+    chart_daily(m, gen_s, os.path.join(args.out, "denni_trend.svg"))
 
     badge = {
         "schemaVersion": 1,
