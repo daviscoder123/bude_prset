@@ -399,9 +399,27 @@ test('Brier verdict probability is honest without ensemble and calibrated with i
   assert.equal(c.verdictProb(3,0),0.8);
   assert.equal(c.verdictProb(4,0),0.9);
   const ens=context(['verdictProb'],{ensState:{prob:65},probSeries:[80,null,50],HOURS:48});
-  assert.equal(ens.verdictProb(2,0),0.8); /* okolí mřížky mluví hlasitěji než bod */
+  /* Kolo 8z3 (zpětný test 726 párů, sběrač 6.–7. 11. 2026): OM špička už
+     nepřebíjí ensemble celá — verdikt jde jen do poloviny cesty k ní:
+     max(ens, (ens+om)/2) = max(0.65, 0.725) = 0.725. Falešné poplachy
+     30→11, úspěšnost 91,3→92,6 %, Brier 0,0593→0,0579. */
+  assert.equal(Math.round(ens.verdictProb(2,0)*1000)/1000,0.725);
+  assert.equal(ens.verdictProb(2,0)>0.65,true);  /* OM nad ens zvedá, ale jen na polovinu cesty */
+  assert.equal(ens.verdictProb(2,0)<0.8,true);   /* a nikdy nepřebíjí ensemble celé */
+  const lowOm=context(['verdictProb'],{ensState:{prob:65},probSeries:[20,10],HOURS:48});
+  assert.equal(lowOm.verdictProb(2,0),0.65); /* nízké OM nesníží ensemble — podkladem je sdružení členů */
   const grid=context(['verdictProb'],{ensState:null,probSeries:[30,10],HOURS:48});
   assert.equal(grid.verdictProb(2,0),0.3); /* mřížka s 30 % vydává 30 %, ne domněnku */
+});
+test('verdict probability source mirror: mix when OM exceeds ensemble, ens otherwise',()=>{
+  const mix=context(['verdictProb','verdictProbSrc'],{ensState:{prob:65},probSeries:[80,null,50],HOURS:48});
+  assert.equal(mix.verdictProbSrc(),'mix');   /* verdikt = směs, kalibrace se učí na směsi */
+  const pure=context(['verdictProb','verdictProbSrc'],{ensState:{prob:65},probSeries:[20,10],HOURS:48});
+  assert.equal(pure.verdictProbSrc(),'ens');  /* bez OM špičky zůstává čistý ensemble */
+  const onlyOm=context(['verdictProb','verdictProbSrc'],{ensState:null,probSeries:[30,10],HOURS:48});
+  assert.equal(onlyOm.verdictProbSrc(),'om');
+  const nothing=context(['verdictProb','verdictProbSrc'],{ensState:null,probSeries:null,HOURS:48});
+  assert.equal(nothing.verdictProbSrc(),'agree');
 });
 test('AIFS joins the model pool as its own family next to ECMWF IFS',()=>{
   assert.match(script,/id:\s*"ecmwf_aifs025_single"[^\n]*fam:\s*"AIFS"/);
@@ -477,9 +495,10 @@ test('arrival probability uses ensemble onsets and mirrors the verdict source ch
   const c4=context(['arrivalProbPct','verdictProbSrc'],{ensState:null,probSeries:null,HOURS:8});
   assert.equal(c4.arrivalProbPct(30,60),null);
   assert.equal(c4.verdictProbSrc(),'agree');
-  /* OM přebije ensemble, když mluví hlasitěji — stejné pravidlo jako verdictProb. */
+  /* OM přebije ensemble, když mluví hlasitěji — kolo 8z3: verdikt pak nese
+     směs max(ens,(ens+om)/2), takže zdrojem je "mix", ne čisté "om". */
   const c5=context(['verdictProbSrc'],{ensState:{prob:65},probSeries:[80,null,50],HOURS:8});
-  assert.equal(c5.verdictProbSrc(),'om');
+  assert.equal(c5.verdictProbSrc(),'mix');
 });
 test('convective prior tilts blend toward models until its own samples arrive',()=>{
   const storeC={},storeS={};

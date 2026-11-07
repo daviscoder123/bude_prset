@@ -2079,7 +2079,21 @@ function verdictProb(agree, obsN){
   if(probSeries && probSeries.length){
     var om = 0;
     for(var i=0;i<probSeries.length && i<HOURS;i++) if(probSeries[i] != null && probSeries[i] > om) om = probSeries[i];
-    if(om > 0 && (p == null || om/100 > p)) p = om/100;
+    /* Kolo 8z3 (zpětný test sběrače 6.–7. 11. 2026, 726 oknových párů):
+       dosavadní pravidlo „přijmout OM, jen když mluví výš než ensemble"
+       přebíralo nadsazené špičky Open-Meteo bez zábrzdy — pásmo 50–90 %
+       mělo ve skutečnosti pršení jen v 20–32 % případů (horské a přechodné
+       oblasti: Portorož, Terst, Bern, Samedan…), 30 z 726 verdiktů byly
+       falešné poplachy. Nové pravidlo: ensemble zůstává podkladem (podíl
+       členů, kterým vyjde déšť, JE pravděpodobnost deště) a nikdy ho
+       Open-Meteo nesníží; když OM tvrdí víc než ensemble, jde verdikt
+       jen do POLUVINY cesty k němu: max(ens, (ens+om)/2). Zpětný test:
+       falešné poplachy 30→11, úspěšnost na prahu 50 % 91,3→92,6 %,
+       Brier 0,0593→0,0579, stabilně v obou polovinách okna dat. */
+    if(om > 0){
+      var q = om/100;
+      p = (p == null) ? q : Math.max(p, (p + q)/2);
+    }
   }
   if(p != null) return Math.max(0.05, Math.min(0.98, p));
   if(agree >= 4) return 0.9;
@@ -2109,7 +2123,10 @@ function verdictProbSrc(){
       var om = 0;
       for(var i=0;i<probSeries.length && i<HOURS;i++)
         if(probSeries[i] != null && probSeries[i] > om) om = probSeries[i];
-      if(om > ep) return "om";
+      /* Kolo 8z3: když OM mluví výš, verdikt nese směs max(ens,(ens+om)/2)
+         — vzorek patří vlastnímu zdroji "mix", ať se křivka učí na čem
+         skutečně tvrdí. Jinak zůstává čistý "ens". */
+      if(om > ep) return "mix";
     }
     return "ens";
   }
