@@ -1,0 +1,39 @@
+name: Grafy přesnosti
+on:
+  schedule:
+    # Denně 03:26 UTC (mimo dopravní špičku; GitHub cron může zdržet).
+    - cron: '26 3 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['scripts/accuracy_charts.py', '.github/workflows/graphics.yml']
+permissions:
+  contents: write
+jobs:
+  graphics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Vygenerovat grafy přesnosti
+        run: python3 scripts/accuracy_charts.py 2>&1 | tee /tmp/gfx-out.txt
+      - name: Commitnout grafy do repa
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/graphics
+          if ! git diff --cached --quiet; then
+            git commit -m "Auto: aktualizace grafů přesnosti pro README [skip ci]"
+            git push
+          else
+            echo "Grafy beze změn."
+          fi
+      - name: Pri selhani zaloz issue s vystupem
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tail -n 60 /tmp/gfx-out.txt > /tmp/gfx-tail.txt || echo "bez vystupu" > /tmp/gfx-tail.txt
+          if ! gh issue list --state open --json title --jq '.[].title' | grep -q "Grafy přesnosti workflow selhal"; then
+            gh issue create --title "Grafy přesnosti workflow selhal" --body-file /tmp/gfx-tail.txt --label "" || true
+          fi
