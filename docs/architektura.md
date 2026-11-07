@@ -62,8 +62,8 @@ kalibrují proti METAR pozorováním, která si aplikace ověří sama.
 | RainViewer / OPERA | globální meteoradar, 10-min snímky | advekce pole, radarový kompas, „prší teď" |
 | ČHMÚ radar | PseudoCAPPI 2 km, 1×1 km, snímek každých 5 min | nezávislé potvrzení, hlas do blendu |
 | DWD RADVOR, KNMI, met.no | národní radarové nowcasty | nejhustší extrapolace srážek |
-| EUMETSAT GIBS (IR) | satelitní infračervené kanály | ochlazování vrcholů mraků = konvekce dřív než radar |
-| GPM IMERG | satelitní srážky | kompas mimo dosah radarů |
+| EUMETSAT (IR 10,8 µm) | satelitní infračervený kanál (`msg_fes`/`msg_iodc`) | ochlazování vrcholů mraků = konvekce dřív než radar |
+| GPM IMERG (NASA GIBS) | satelitní srážky v mm/h (půlhodinový produkt, ~5–7 h starý) | kompas mimo dosah radarů |
 | METAR (aviationweather) | oficiální pozorování stanic | ground truth pro učení i měření přesnosti |
 | GeoNames / Photon / Nominatim, BigDataCloud | geokódování, reverzní poloha | vyhledávání obcí |
 
@@ -212,6 +212,77 @@ Workflow **Grafy přesnosti** (`.github/workflows/graphics.yml`) běží denně,
 grafy a badge `stats.json` commituje do main — README tedy vždy ukazuje
 aktuální naměřenou přesnost, ne marketingový údaj. Worker nedostupný nebo data
 prázdná nezakládají issue: grafy zůstávají z posledního úspěšného běhu.
+
+## 9. Zdraví zdrojů a proxy ČHMÚ (kolo 8ba)
+
+Každý datový zdroj v kódu musí skutečně fungovat — proto proběhl živý audit
+všech modulů. Stav po kole 8ba:
+
+| Modul | Stav | Co se změnilo |
+| :--- | :--- | :--- |
+| Blitzortung (blesky) | ✅ živý | WebSocket zrcadla ws1/ws2/ws8 (ws7 neodpovídá) |
+| ČHMÚ radar | ✅ živý | přes edge proxy (CORS), předpověď z TAR archivů |
+| EUMETSAT IR | ✅ živý | vrstvy `msg_fes`/`msg_iodc` + syntetická šedá škála |
+| GPM IMERG | ✅ živý | nová vrstva `IMERG_Precipitation_Rate_30min` + paleta mm/h |
+| NASA GIBS (rgb/kelvin) | ⛔ vypnuto | GIBS zrušil colormap XML — dekód nelze poctivě provést |
+
+**ČHMÚ:** Online publikace radarových snímků nemá CORS hlavičky, takže
+`canvas` v prohlížeči nemůže snímek přečíst. Kompozit i legenda proto jdou
+přes edge proxy (`/chmi/img` s whitelistem `/meteorology/weather/radar/*.png`),
+která přidává `Access-Control-Allow-Origin: *` a kešuje (kompozit 120 s,
+legenda 24 h). Předpověď +10…+60 min ČHMÚ už nepublikuje jako PNG, ale jako
+TAR archiv všech kroků — Worker ho stáhne podle času výpočtu a vybalí jen
+potřebný člen (`/chmi/fct`, `tarFindMember`, keš 240 s). Změnila se i legenda
+(`scl-dbz-mmh.png`): jde o paletové PNG, ze kterého se škála extrahuje skenem
+sloupců (barvy pod 70 RGB a průhledné vynechány), deduplikací a otočením
+pořadí na slabé→silné.
+
+**EUMETSAT:** původní vrstvy `meteosat:msg_rss_*` EUMETSAT vyřadil; dnes
+běží `msg_fes:ir108` a `msg_iodc:ir108`. Kanál je šedotón, takže se ordinály
+(0 = teplo, 1 = studeno) počítají proti škále 16 odstínů. Staré endpointy
+legendy už vrací jen ikonu 20×20 px — proto škála padá na syntetickou
+rovnoměrnou stupnici, u které fyzikální jednotky stejně nepotřebujeme:
+pracuje se s ordinály, ne kelviny.
+
+**GIBS:** satelitní rgb/kelvinové dlaždice NASA publikovala vždy bez hodnot —
+barvy se musely dekódovat přes colormap XML, které GIBS zrušil (404 u všech
+vrstev GOES/Himawari v cmap v1.0 i v1.3). Bez palety nelze z pixelů poctivě
+vydělat kelviny, takže modul není tiše rozbitý, ale vypnutý s vysvětlením
+(`satState = "off"`); tělo kódu zůstává pro případ, že NASA palety vrátí.
+
+**IMERG:** NASA přejmenovala datovou vrstvu na `IMERG_Precipitation_Rate_30min`
+a její paletu na `GPM_Precipitation_Rate`. Na rozdíl od IR jde o skutečné
+milimetry za hodinu (220 položek, 0,1–53,1 mm/h) — validace rozsahu v
+`parseImergPalette` nepustí paletu v jiné veličině. Dekódovaná intenzita se
+pro kompas převádí na pseudodBZ inverzním Marshallovým–Palmerovým vztahem,
+aby korelace pohybu pracovala ve stejné škále jako radar. IMERG nikdy
+nehlasuje do blendu ani do verdiktu — je to jen kompas tam, kde radary
+nedosáhnou (oceány, pouště), s latencí ~5–7 h.
+
+## 10. Sníh (kolo 8bb)
+
+Aplikace pozná sníh z pěti nezávislých stop a teď o něm i mluví:
+
+1. **radar** — RainViewer nese v pixelu bit 128 „sníh“;
+2. **METAR** — jevy se sněhem (SN = sněžení; PL/IC = zmrzlý déšť; kroupy
+   GS/GR a bouřka TS se hlásí zvlášť);
+3. **modely** — hodina je „sněhová“, když `snowfall` ≥ 50 % celkových srážek
+   (`isSnow`), úhrny se převádějí na vodní ekvivalent (1 cm ≈ 0,7 mm);
+4. **ensemble** — snow příznak přes 3×3 bodovou mřížku;
+5. **sněhová čára** — `freezing_level_height` z hourly dotazu
+   (`snowLineAt`), zaokrouhlená podle srozumitelnosti (pod 1000 m po
+   50 m, nad ní po 100 m).
+
+**Verdikt** se přepne na sněhový, když ≥ 50 % mokrých modelů v hodině
+vrcholu hlásí sníh (`snowShareAtPeak`), nebo když pozorovaný stav (radar,
+METAR) sníh potvrzuje. Pak se všechny texty přizpůsobí: „Pravděpodobnost
+sněžení do N h“, „Sněžení do / Sníh od“ v liště, pill „sníh se blíží“,
+intenzita v **cm/h** místo mm/h a u probíhajícího sněžení souhrn
+„napadne ~X cm“ během zbytku okna. Suchý stav o sněhu neumlčí: pokud
+modely na sníh souhlasí, výklad mluví o „pravděpodobnosti sněžení během N
+hodin“ a uvádí sněhovou čáru. Pozadí k sněhu přidává řídké tlumené vločky
+(`soonSnow`), na mobilu s poloviční hustotou; `prefers-reduced-motion`
+je respektuje stejně jako déšť.
 
 ---
 

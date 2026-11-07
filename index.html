@@ -556,6 +556,8 @@ html.compact #app{overflow-x:hidden}
 @keyframes wbgFall{from{transform:translateY(-40px)}to{transform:translateY(115vh)}}
 @keyframes wbgStorm{from{transform:translate(-3vw,-40px)}to{transform:translate(-8vw,115vh)}}
 .wbg .sn{position:absolute;top:0;color:rgba(230,242,255,.8)}
+/* kolo 8bb: „sníh se blíží“ — poloviční průhlednost, menší glyfy */
+.wbg .sn.dim{color:rgba(230,242,255,.4)}
 @keyframes wbgSn{0%{transform:translate(0,-20px)}
   25%{transform:translate(12px,28vh)}
   50%{transform:translate(-10px,56vh)}
@@ -1033,6 +1035,60 @@ var CONSENSUS_TOL_H = 1;
 var SNOW_CM_TO_MM = 0.7;
 var legacyAnyProb = null;   /* staré chování (.some) — jen pro srovnání v bpDiag */
 var stormRisk = null;       /* {cape, lightning, idx} přes celé okno předpovědi */
+
+/* ===== KOLO 8bb: sníh jako občan první třídy =====
+   Detekce sněhu už existovala (radarový bit, METAR, snowfall modelů,
+   ensemble), ale UX mluvilo o „dešti“ i tam, kde appka slibovala sníh.
+   Pomocníci níže jsou čisté funkce — regression testy je vytahují
+   přímo ze zdroje. */
+
+/* mm vodního ekvivalentu → cm napadaného sněhu (1 cm ≈ 0,7 mm vody).
+   Vstupem je buď úhrn (mm), nebo intenzita (mm/h) — rozměr se nezmění.
+   Pod 0,1 cm nic neužitečného neukazujeme; 1–5 cm po půlce, nad 5 celé. */
+function snowCmFromMm(mm){
+  if(mm == null || !isFinite(mm) || mm <= 0) return null;
+  var cm = mm / SNOW_CM_TO_MM;
+  if(cm < 0.1) return null;
+  if(cm < 1) return Math.round(cm*10)/10;
+  if(cm < 5) return Math.round(cm*2)/2;
+  return Math.round(cm);
+}
+/* Číselný údaj cm s českou desetinnou čárkou. */
+function fmtCm(cm){
+  if(cm == null) return "–";
+  return String(cm).replace(".", ",");
+}
+/* Podíl mokrých modelů hlásících sníh v hodině vrcholu (pkIdx).
+   ≥ 0,5 → „tohle je sněžení“. null = modely mlčí nebo nemají data. */
+function snowShareAtPeak(){
+  if(!modelState || !verdictState || verdictState.pkIdx == null || verdictState.pkIdx < 0) return null;
+  if(!modelState.snowFrac) return null;
+  var f = modelState.snowFrac[verdictState.pkIdx];
+  return (f == null) ? null : f;
+}
+/* Sněhová čára (m n.m.) v dané hodině okna verdiktu (0 = nejbližší
+   hodina). null = hourly pole chybí nebo je prázdné. */
+function snowLineAt(hourIdx){
+  if(!atmoState || atmoState === "error" || !atmoState.flh || !atmoState.flh.length) return null;
+  var base = (atmoState.nowIdx != null) ? atmoState.nowIdx : 0;
+  var i = base + (hourIdx == null || hourIdx < 0 ? 0 : hourIdx);
+  if(i >= atmoState.flh.length) i = atmoState.flh.length - 1;
+  var v = atmoState.flh[i];
+  return (v != null && isFinite(v)) ? Math.round(v) : null;
+}
+/* Sněhová čára se nehlásí na metr přesně: pod 1000 m na 50 m, nad ní
+   na stovky. */
+function snowLineTxt(m){
+  if(m == null || !isFinite(m)) return "–";
+  return String(m >= 1000 ? Math.round(m/100)*100 : Math.round(m/50)*50);
+}
+/* Jde v okně verdiktu o sníh? Pozorování (verdikt „sněžení“) nebo
+   shoda modelů ve vrcholu (≥ 50 % mokrých hlásí sníh). */
+function isSnowWindow(){
+  if(whenState && whenState.type && /sněž|sníh|sněh/i.test(whenState.type.t)) return true;
+  var f = snowShareAtPeak();
+  return f != null && f >= 0.5;
+}
 
 /* Útlum jistoty s délkou předstihu.
    POZOR: NENAMĚŘENO. Je to návrhové rozhodnutí, ne výsledek měření —
@@ -3262,27 +3318,45 @@ if(mh && NARROW.matches){
   var prob = Math.max(2, Math.min(98, Math.round(100*brierCalib(
     (ens ? ens.prob : agreeProb)/100, probSrc))));
 
+  /* KOLO 8bb: když většina mokrých modelů hlásí ve vrcholu sníh, hlavní
+     číslo nemluví o dešti, ale o sněžení — jinak by appka slibovala
+     „pravděpodobnost deště 80 %“ nad tabulkou plnou vloček. */
+  var snehuPk = 0, mokrychPk = 0;
+  if(pk.idx >= 0) active.forEach(function(p){
+    if(p.cvals[pk.idx] != null && p.cvals[pk.idx] >= THRESH){
+      mokrychPk++;
+      if(p.isSnow && p.isSnow[pk.idx]) snehuPk++;
+    }
+  });
+  var snihVerdict = mokrychPk > 0 && (snehuPk/mokrychPk) >= 0.5;
+
   $("pctLabel").textContent = jePravdepodobnost
-    ? "Pravděpodobnost deště do " + HOURS + " h"
-    : "Shoda modelů na dešti do " + HOURS + " h";
+    ? (snihVerdict ? "Pravděpodobnost sněžení do " : "Pravděpodobnost deště do ") + HOURS + " h"
+    : (snihVerdict ? "Shoda modelů na sněhu do " : "Shoda modelů na dešti do ") + HOURS + " h";
   $("pct").textContent = prob+"%";
   $("pct").style.color = prob>=60 ? "var(--rain)" : prob>=30 ? "var(--warn)" : "var(--text)";
   $("gaugeFill").style.width = prob+"%";
   if(jePravdepodobnost){
-    $("word").textContent = prob>=85 ? "Téměř jistě zaprší" : prob>=60 ? "Pravděpodobně zaprší"
-      : prob>=30 ? "Déšť je možný" : prob>0 ? "Spíš nezaprší" : "Sucho";
+    $("word").textContent = !snihVerdict
+      ? (prob>=85 ? "Téměř jistě zaprší" : prob>=60 ? "Pravděpodobně zaprší"
+        : prob>=30 ? "Déšť je možný" : prob>0 ? "Spíš nezaprší" : "Sucho")
+      : (prob>=85 ? "Téměř jistě zapadne" : prob>=60 ? "Pravděpodobně zapadne"
+        : prob>=30 ? "Sníh je možný" : prob>0 ? "Spíš nezapadne" : "Sucho");
   } else {
     /* Bez ensemblu je to jen shoda — slovní hodnocení proto opatrnější,
        ať velké číslo nesvádí ke čtení, které data neunesou. */
-    $("word").textContent = prob>=85 ? "Modely se shodují na dešti" : prob>=60 ? "Většina modelů čeká déšť"
-      : prob>=30 ? "Modely se neshodnou" : prob>0 ? "Déšť čeká menšina" : "Sucho";
+    $("word").textContent = !snihVerdict
+      ? (prob>=85 ? "Modely se shodují na dešti" : prob>=60 ? "Většina modelů čeká déšť"
+        : prob>=30 ? "Modely se neshodnou" : prob>0 ? "Déšť čeká menšina" : "Sucho")
+      : (prob>=85 ? "Modely se shodují na sněhu" : prob>=60 ? "Většina modelů čeká sníh"
+        : prob>=30 ? "Modely se neshodnou" : prob>0 ? "Sníh čeká menšina" : "Sucho");
   }
   $("expl").textContent = pk.idx < 0
     ? "Žádný z "+N+" modelů nehlásí srážky v příštích "+HOURS+" hodinách pro lokalitu "+cur.name+"."
     : rainModels+" z "+N+" modelů se shoduje na srážkách ≥ "+fmtThresh(THRESH)
       + " mm/h kolem "+fmtHr(times[pk.idx])+" pro lokalitu "+cur.name+"."
       + (THRESH > THRESH_BASE ? " Práh je zvýšený — konvektivní déšť je skvrnitý." : "");
-  $("agree").innerHTML = rainModels+"/"+N+" <small>déšť</small>";
+  $("agree").innerHTML = rainModels+"/"+N+" <small>"+(snihVerdict ? "sníh" : "déšť")+"</small>";
 
   renderEnsembleRow(ens, agreeProb, pk);
 
@@ -3936,7 +4010,7 @@ function loadRadar(lat, lon, myId){
     + "&hourly=pressure_msl,cape,lightning_potential,precipitation_probability,"
     + "relative_humidity_850hPa,relative_humidity_700hPa,relative_humidity_500hPa,"
     + "wind_speed_850hPa,wind_speed_500hPa,wind_direction_850hPa,wind_direction_500hPa,"
-    + "wind_speed_10m,wind_direction_10m"
+    + "wind_speed_10m,wind_direction_10m,freezing_level_height"
     + "&past_hours=3&forecast_hours="+(HOURS+1)
     + "&timeformat=unixtime&timezone=auto", 300000)
     .then(function(j){
@@ -4025,7 +4099,12 @@ function loadRadar(lat, lon, myId){
           cape:   cp.length ? Math.max.apply(null, cp.filter(function(x){ return x != null; }).concat([0])) : null,
           lightning: lp.length ? Math.max.apply(null, lp.filter(function(x){ return x != null; }).concat([0])) : null,
           dryAloft: dryAloft, moistDeep: moistDeep, shearKmh: shearKmh,
-          ws850: ws850, wd850: wd850, ws10: at(h.wind_speed_10m, nowIdx), wd10: at(h.wind_direction_10m, nowIdx)
+          ws850: ws850, wd850: wd850, ws10: at(h.wind_speed_10m, nowIdx), wd10: at(h.wind_direction_10m, nowIdx),
+          /* Sněhová čára (výška izo 0 °C, m n.m.) — celé okno, indexuje
+             se shodně s ostatními hourly poli (nowIdx = současnost).
+             Kolo 8bb: jde do faktů u sněžení. */
+          flh: h.freezing_level_height || [],
+          nowIdx: nowIdx
         };
         /* Vítr v 850 hPa je vstup do orografie — teprve teď je čím ji spustit. */
         loadOrography(lat, lon, myId);
@@ -5438,16 +5517,21 @@ function dbzToMm(dbz, isSnow){
 
    ČEHO SE TENHLE MODUL ZÁMĚRNĚ NEDOTKNE: intenzity v mm/h. Obrázek je
    obarvený podle publikované škály a barvu na dBZ převádí až legenda
-   (scl-dbzmmh.png). Dokud se legenda nenačte a neprojde kontrolou, modul
+   (scl-dbz-mmh.png). Dokud se legenda nenačte a neprojde kontrolou, modul
    NEHÁDÁ čísla — hlásí jen "tady echo je / není" a pořadí v barevné škále.
    Přesně jako u družice: raději méně informace než tiše vymyšlená.
 
    PROČ TO MŮŽE SELHAT A JE TO V POŘÁDKU. Appka čte pixely přes <canvas>,
-   což vyžaduje hlavičku Access-Control-Allow-Origin. Jestli ji
-   opendata.chmi.cz posílá, jsem odsud nemohl ověřit — kontejner, ve kterém
-   tohle píšu, nemá síť. Když hlavička chybí, prohlížeč čtení zablokuje,
-   modul se sám vypne a appka běží dál přesně jako dosud. Stav uvidíš
-   v bpDiag() jako "ČHMÚ: CORS blok". Řešením by pak byl malý proxy.        */
+   což vyžaduje hlavičku Access-Control-Allow-Origin. Ověřeno kolo 8ba:
+   opendata.chmi.cz ji NEPOSÍLÁ — prohlížeč čtení zablokuje, modul se sám
+   vypne (v bpDiag() jako "ČHMÚ: CORS blok") a appka běží dál přesně jako
+   dosud.
+
+   ŘEŠENÍ (kolo 8ba): Worker na Cloudflare umí passthrough — vrátí tutéž
+   PNG s CORS * (endpoint /chmi/img). Předpověď navíc ČHMÚ převedlo na
+   TAR archivy (viz chmiUrlFct), takže +10…+60 min PNG vybalí rovněž
+   Worker (/chmi/fct). Obojí se aktivuje samo, je-li nastaveno BP_PROXY;
+   bez něj se modul vypne poctivě jako dřív.                              */
 
 var CHMI_BASE = "https://opendata.chmi.cz/meteorology/weather/radar";
 /* Hranice CELÉHO obrázku (ne jen platných dat) — z dokumentace ČHMÚ v1.3. */
@@ -5486,13 +5570,26 @@ function chmiStamp(ms){
   return d.getUTCFullYear()+p(d.getUTCMonth()+1)+p(d.getUTCDate())
        + "." + p(d.getUTCHours())+p(d.getUTCMinutes());
 }
-function chmiUrlNow(ms){
-  return CHMI_BASE+"/composite/pseudocappi2km/png/pacz2gmaps3.z_cappi020."+chmiStamp(ms)+".0.png";
+/* Všechny ČHMÚ obrázky jdou (od kola 8ba) přes Worker, který dodá CORS.
+   Bez BP_PROXY zůstávají přímé URL — canvas je pak prohlížeč zablokuje
+   a modul se sám vypne, přesně jako dřív. */
+function chmiProxyImg(path){
+  return BP_PROXY ? BP_PROXY + "/chmi/img?u=" + encodeURIComponent(path)
+                  : CHMI_BASE + path;
 }
-/* U předpovědi je v názvu čas PLATNOSTI, ne čas výpočtu. */
-function chmiUrlFct(validMs, lead){
-  return CHMI_BASE+"/composite/fct_pseudocappi2km/png/pacz2gmaps3.fct_z_cappi020."
-       + chmiStamp(validMs)+"."+lead+".png";
+function chmiUrlNow(ms){
+  return chmiProxyImg("/composite/pseudocappi2km/png/pacz2gmaps3.z_cappi020."
+    + chmiStamp(ms) + ".0.png");
+}
+/* Předpověď: ČHMÚ přestalo publikovat jednotlivé +10…+60 min PNG a balí
+   je do TAR archivu pacz2gmaps3.fct_z_cappi020.<base>.ft60s10.tar
+   (ověřeno kolo 8ba). Člena vybalí Worker (/chmi/fct); parametr „base"
+   je čas VÝPOČTU (krok 5 min), „lead" 10–60 po deseti. Přímá adresa by
+   404čkovala — proto bez proxy modul COTREC kroky jednoduše nezíská. */
+function chmiUrlFct(baseMs, lead){
+  if(BP_PROXY) return BP_PROXY + "/chmi/fct?base=" + chmiStamp(baseMs) + "&lead=" + lead;
+  return CHMI_BASE + "/composite/fct_pseudocappi2km/png/pacz2gmaps3.fct_z_cappi020."
+       + chmiStamp(baseMs) + "." + lead + ".png";
 }
 
 /* Načte PNG a vrátí výřez kolem bodu. null = nešlo (404 / CORS / mimo obrázek). */
@@ -5534,6 +5631,46 @@ function readChmiPatch(url, lat, lon, r){
    Nezjišťuje mm/h, jen POŘADÍ. Pořadí stačí na "slabé / silnější" a je
    z obrázku odečitatelné bez hádání. Kdyby legenda nedávala smysl
    (málo barev), modul jede dál jen v režimu echo ano/ne. */
+/* Legenda → řazená posloupnost barev. Nová legenda ČHMÚ (kolo 8ba,
+   přejmenovaná na scl-dbz-mmh.png) má jiné rozložení než dřív: barevná
+   škála je VLEVO, vpravo je šedý panel a nahoře hlavička s textem —
+   střední sloupec (původní algoritmus) tedy trefí jen šedou. Proto se
+   projdou VŠECHNY sloupce a vybere se ten s nejvíc barvami; jednopixelové
+   oddělovače (tiky mezi segmenty) a tmavě šedý text hlavičky se zahazují
+   (běh ≥ 2 px a rgb < 70). Škála se pak OBRÁTÍ: ČHMÚ kreslí silné dBZ
+   nahoře a slabé dole, ale appka počítá s pořadím slabé → silné
+   (nejvyšší ordinál = nejsilnější echo), stejně jako u DWD/KNMI.
+   Vrací [{r,g,b}] nebo null. */
+function chmiScaleFromImageData(d, w, h){
+  var best = null;
+  function validPx(r, g, b, a){
+    if(a < 200) return null;
+    if(r > 240 && g > 240 && b > 240) return null;      /* bílé pozadí */
+    if(r < 70 && g < 70 && b < 70) return null;        /* text, tiky, panel */
+    return {r:r, g:g, b:b};
+  }
+  for(var x=0; x<w; x++){
+    var seq = [], cur = null, curLen = 0;
+    for(var y=0; y<h; y++){
+      var o = (y*w + x)*4;
+      var c = validPx(d[o], d[o+1], d[o+2], d[o+3]);
+      if(cur && c && c.r === cur.r && c.g === cur.g && c.b === cur.b){ curLen++; continue; }
+      if(cur && curLen >= 2){
+        var last = seq[seq.length-1];
+        if(!last || last.r !== cur.r || last.g !== cur.g || last.b !== cur.b) seq.push(cur);
+      }
+      cur = c; curLen = 1;
+    }
+    if(cur && curLen >= 2){
+      var lastE = seq[seq.length-1];
+      if(!lastE || lastE.r !== cur.r || lastE.g !== cur.g || lastE.b !== cur.b) seq.push(cur);
+    }
+    if(!best || seq.length > best.length) best = seq;
+  }
+  if(!best || best.length < 8) return null;
+  best.reverse();        /* slabé → silné, konvence zbytku appky */
+  return best;
+}
 function loadChmiScale(){
   if(chmiScale !== undefined) return Promise.resolve(chmiScale);
   return new Promise(function(resolve){
@@ -5545,27 +5682,14 @@ function loadChmiScale(){
         var c = document.createElement("canvas");
         c.width = w; c.height = h;
         c.getContext("2d").drawImage(img, 0, 0);
-        var along = w >= h;
-        var len = along ? w : h, mid = Math.floor((along ? h : w)/2);
-        var d = along ? c.getContext("2d").getImageData(0, mid, w, 1).data
-                      : c.getContext("2d").getImageData(mid, 0, 1, h).data;
-        var seq = [];
-        for(var i=0;i<len;i++){
-          var o = i*4;
-          if(d[o+3] < 200) continue;
-          var r=d[o], g=d[o+1], b=d[o+2];
-          if(r>240 && g>240 && b>240) continue;      /* bílé pozadí legendy */
-          if(r<15 && g<15 && b<15) continue;         /* černý text popisků */
-          var last = seq[seq.length-1];
-          if(last && last.r===r && last.g===g && last.b===b) continue;
-          seq.push({r:r, g:g, b:b});
-        }
-        chmiScale = seq.length >= 8 ? seq : null;
+        chmiScale = chmiScaleFromImageData(c.getContext("2d").getImageData(0, 0, w, h).data, w, h);
         resolve(chmiScale);
       }catch(e){ chmiScale = null; resolve(null); }
     };
     img.onerror = function(){ chmiScale = null; resolve(null); };
-    img.src = CHMI_BASE + "/scl/scl-dbzmmh.png";
+    /* Jméno souboru se změnilo: scl-dbzmmh.png → scl-dbz-mmh.png (kolo 8ba);
+       legenda také potřebuje CORS, takže jde přes proxy jako kompozity. */
+    img.src = chmiProxyImg("/scl/scl-dbz-mmh.png");
   });
 }
 /* Pořadí ve škále, 0–1. null = barva ve škále není. */
@@ -5634,7 +5758,7 @@ function loadChmi(lat, lon, myId){
         if(isStale(myId)) return;
         if(j >= CHMI_LEADS.length){ finish(); return; }
         var lead = CHMI_LEADS[j++];
-        readChmiPatch(chmiUrlFct(calc + lead*60000, lead), lat, lon, CHMI_R)
+        readChmiPatch(chmiUrlFct(calc, lead), lat, lon, CHMI_R)
           .then(function(p){
             var r = chmiReadPatch(p);
             if(r) steps.push({dt: lead + Math.round((calc - Date.now())/60000), lead:lead,
@@ -6185,12 +6309,26 @@ function wbgSet(kind, mmh){
   if(kind === "dry"){
     h = "<i class='rays'></i><i class='sun'></i>";
   } else if(kind === "snow"){
-    var ns = Math.round(Math.max(18, Math.min(44, 14 + (mmh||1)*8)));
+    /* Kolo 8bb: na mobilu méně vloček — 40 glyfů na úzkém displeči
+       bliká jako jackpot. */
+    var ns = Math.round(Math.max(18, Math.min(44, 14 + (mmh||1)*8))
+                        * (NARROW.matches ? 0.6 : 1));
     var fls = ["\u2744","\u2745","\u2746"];
     for(var j=0;j<ns;j++){
       h += "<i class='sn' style='left:" + rnd(0,100).toFixed(1) + "%;font-size:"
         + rnd(8,14).toFixed(0) + "px;animation:wbgSn " + rnd(5.5,10).toFixed(1)
         + "s linear infinite;animation-delay:-" + rnd(0,8).toFixed(1) + "s'>" + fls[j%3] + "</i>";
+    }
+  } else if(kind === "soonSnow"){
+    /* Blížící se sníh: řídké, drobné a pomalé vločky v poloviční
+       průhlednosti — ještě nesněží, ale nebe už si to nacvičuje. */
+    var ns2 = Math.round(Math.max(8, Math.min(14, 9 + (mmh||1)*2))
+                        * (NARROW.matches ? 0.6 : 1));
+    var fls2 = ["\u2744","\u2745","\u2746"];
+    for(var j2=0;j2<ns2;j2++){
+      h += "<i class='sn dim' style='left:" + rnd(0,100).toFixed(1) + "%;font-size:"
+        + rnd(7,11).toFixed(0) + "px;animation:wbgSn " + rnd(9,16).toFixed(1)
+        + "s linear infinite;animation-delay:-" + rnd(0,14).toFixed(1) + "s'>" + fls2[j2%3] + "</i>";
     }
   } else {
     var n, dur, len, wa, wpx;
@@ -6234,7 +6372,10 @@ function wbgFromState(st, W){
       else if(mmh < 1) kind = "drizzle";
       else kind = "rain";
     } else if(st === "soon"){
-      kind = (W && W.mode === "maybe") ? "drizzle" : "soon";
+      /* Kolo 8bb: blíží-li se sníh (verdikt nebo shoda modelů), padají
+         za fialové oblohy řídké vločky — ne dešťové čárky. */
+      kind = (W && W.type && /sněž|sníh|sněh/i.test(W.type.t)) ? "soonSnow"
+           : (W && W.mode === "maybe") ? "drizzle" : "soon";
     }
     wbgSet(kind, mmh);
   }catch(e){ /* pozadí je kosmetika, nesmí shodit verdikt */ }
@@ -6255,13 +6396,20 @@ function renderSolo(){
   /* Kolo 8u (Dave): jakmile prší, lišta souhrnů nemá smysl říkat
      „déšť od" — déšť už běží. Popisek se promění na „déšť do"
      a hodnota ukáže odhad konce deště. Ostatní stavy vrátí
-     původní „nejbližší déšť". */
+     původní „nejbližší déšť".
+     Kolo 8bb: totéž pro sníh — lišta řekne „sněžení do / sníh od",
+     jakmile jde o sněhovou událost (verdikt nebo shoda modelů). */
+  var snihUi = !!(W && W.type && /sněž|sníh|sněh/i.test(W.type.t));
+  if(!snihUi && W && W.mode !== "wet"){
+    var fPk = snowShareAtPeak();
+    if(fPk != null && fPk >= 0.5) snihUi = true;
+  }
   var frk = document.getElementById("firstRainK");
   if(frk){
     var wetEnd = W && W.mode === "wet" && W.end;
     var doTxt = !!(wetEnd && !wetEnd.beyond && wetEnd.min != null);
-    frk.dataset.short = doTxt ? "Déšť do" : "Déšť od";
-    frk.dataset.full  = doTxt ? "Konec deště" : "Nejbližší déšť";
+    frk.dataset.short = doTxt ? (snihUi ? "Sněžení do" : "Déšť do") : (snihUi ? "Sníh od" : "Déšť od");
+    frk.dataset.full  = doTxt ? (snihUi ? "Konec sněžení" : "Konec deště") : (snihUi ? "Nejbližší sníh" : "Nejbližší déšť");
     frk.textContent = NARROW.matches ? frk.dataset.short : frk.dataset.full;
     var frEl = document.getElementById("firstRain");
     if(frEl){
@@ -6331,10 +6479,15 @@ function renderSolo(){
     pill.textContent = "Verdikt · právě prší";
     big.innerHTML = cap(W.type.t);
     var sil = W.mmh >= 4 ? "vydatný" : W.mmh >= 1 ? "mírný" : "slabý";
-    /* Typ srážek patří do verdiktu: u sněžení nelze říkat „déšť“. */
-    if(word) word.textContent =
-      (W.type && /sněž|sníh|sněh/i.test(W.type.t)) ? "sněžení" : (sil + " déšť");
-    sub.innerHTML = "<b>" + fmtMM(W.mmh) + " mm/h</b> · "
+    /* Typ srážek patří do verdiktu: u sněžení nelze říkat „déšť“.
+       Kolo 8bb: sněžení navíc dostane přepočet na cm/h — vodní
+       ekvivalent (mm/h) si sám o sobě nikdo nepředstaví. */
+    var snihWet = !!(W.type && /sněž|sníh|sněh/i.test(W.type.t));
+    if(word) word.textContent = snihWet ? "sněžení" : (sil + " déšť");
+    var cmh = snihWet ? snowCmFromMm(W.mmh) : null;
+    sub.innerHTML = "<b>" + fmtMM(W.mmh) + " mm/h</b>"
+                  + (cmh != null ? " vody · <b>≈" + fmtCm(cmh) + " cm/h</b> čerstvého sněhu" : "")
+                  + " · "
                   + (W.staniceSolo
                       ? "potvrzeno stanicí — pozemní měření"
                       : W.radarSolo
@@ -6356,6 +6509,14 @@ function renderSolo(){
 
     var f = ["<span>" + konecTxt + (W.end && W.end.certain === false ? ", může se protáhnout" : "") + "</span>"];
     if(zbyva != null) f.push("<span>zbývá <b>" + fmtDurShort(zbyva) + "</b></span>");
+    /* Kolo 8bb: u sněžení co říct víc než „kolik napadne“. Úhrn se počítá
+       z vodního ekvivalentu intenzity a zbývajícího času; bez konce
+       se řekne aspoň hodinový přírůstek. */
+    if(snihWet){
+      var cmSum = snowCmFromMm(W.mmh * (zbyva != null ? zbyva : 60)/60);
+      if(cmSum != null) f.push("<span>napadne ~<b>" + fmtCm(cmSum)
+        + " cm</b>" + (zbyva == null ? " za hodinu" : "") + "</span>");
+    }
     if(W.trend) f.push("<span>" + W.trend.trim().replace(/^\s*/, "") + "</span>");
     facts.innerHTML = f.join("");
 
@@ -6388,19 +6549,31 @@ function renderSolo(){
     return;
   }
 
-  /* ================= 3. DÉŠŤ SE BLÍŽÍ ================= */
+  /* ================= 3. DÉŠŤ SE BLÍŽÍ =================
+     (kolo 8bb: nebo SNÍH SE BLÍŽÍ — podle typu slibované srážky) */
   if(W && (W.mode === "soon" || (W.mode === "model" && W.etaMin != null && W.etaMin < 90))){
     box.classList.add("soon");
-    pill.textContent = "Verdikt · déšť se blíží";
+    var snihSoon = !!(W.type && /sněž|sníh|sněh/i.test(W.type.t));
+    pill.textContent = snihSoon ? "Verdikt · sníh se blíží" : "Verdikt · déšť se blíží";
     var m = Math.round(W.etaMin == null ? 30 : W.etaMin);
     big.innerHTML = m <= 0 ? "Každou chvíli"
       : m < 60 ? ("za " + m + " min")
       : ("za " + Math.floor(m/60) + " h " + (m%60 ? (m%60)+" min" : ""));
     if(word) word.textContent = W.mmh == null ? "Slabé srážky"
-      : W.mmh >= 4 ? "Vydatný déšť" : W.mmh >= 1 ? "Mírný déšť" : "Slabý déšť";
+      : snihSoon
+        ? (W.mmh >= 4 ? "Vydatné sněžení" : W.mmh >= 1 ? "Mírné sněžení" : "Slabé sněžení")
+        : (W.mmh >= 4 ? "Vydatný déšť" : W.mmh >= 1 ? "Mírný déšť" : "Slabý déšť");
     var rozp = "";
     if(W.lo != null && W.hi != null && (W.hi - W.lo) >= 5) rozp = " · mezi " + W.lo + ". a " + W.hi + ". minutou";
-    sub.innerHTML = (W.mmh != null ? "Očekávaná intenzita <b>" + fmtMM(W.mmh) + " mm/h</b>" : "Slabé srážky")
+    var cmhSoon = snihSoon && W.mmh != null ? snowCmFromMm(W.mmh) : null;
+    sub.innerHTML = (W.mmh != null
+        ? (snihSoon
+            ? (cmhSoon != null
+                ? "Očekávané <b>≈" + fmtCm(cmhSoon) + " cm/h</b> čerstvého sněhu"
+                  + " · <b>" + fmtMM(W.mmh) + " mm/h</b> vodního ekvivalentu"
+                : "Slabé sněžení — <b>" + fmtMM(W.mmh) + " mm/h</b> vodního ekvivalentu")
+            : "Očekávaná intenzita <b>" + fmtMM(W.mmh) + " mm/h</b>")
+        : "Slabé srážky")
                   + rozp + ".";
     var fx = [];
     if(V) fx.push("<span>shoda <b>" + V.rainModels + "/" + V.N + "</b> modelů</span>");
@@ -6414,6 +6587,13 @@ function renderSolo(){
         fx.push("<span>pravděpodobnost <b>" + V.prob + " %</b> do " + HOURS + " h</span>");
     } else if(V && V.jePravdepodobnost){
       fx.push("<span>pravděpodobnost <b>" + V.prob + " %</b></span>");
+    }
+    /* Kolo 8bb: sněhová čára v hodině příchodu — “zapadne, ale kde
+       končí déšť a začíná sníh” je u sněhu první otázka. */
+    if(snihSoon){
+      var slIdx = (V && V.pkIdx != null && V.pkIdx >= 0) ? V.pkIdx : Math.max(0, Math.round(m/60));
+      var sl = snowLineAt(slIdx);
+      if(sl != null) fx.push("<span>sněhová čára ~<b>" + snowLineTxt(sl) + " m</b></span>");
     }
     facts.innerHTML = fx.join("");
     talk.innerHTML = W.chmi ? "Vidí to český radar — echo se blíží, ale ještě není nad tebou."
@@ -6445,13 +6625,22 @@ function renderSolo(){
     return;
   }
   big.textContent = V.prob + " %";
+  /* Kolo 8bb: když modely ve vrcholu slibují sníh, popisek se neztotožní
+     s deštěm — jinak by „pravděpodobnost deště“ visela nad sněhem. */
+  var snihDry = isSnowWindow();
   sub.textContent = V.jePravdepodobnost
-    ? ("pravděpodobnost deště během " + HOURS + " hodin")
-    : ("shoda modelů na dešti během " + HOURS + " hodin");
-  if(word) word.textContent = V.rainModels === 0 ? "Nemělo by pršet" : "Spíš sucho";
+    ? ((snihDry ? "pravděpodobnost sněžení během " : "pravděpodobnost deště během ") + HOURS + " hodin")
+    : ((snihDry ? "shoda modelů na sněhu během " : "shoda modelů na dešti během ") + HOURS + " hodin");
+  if(word) word.textContent = V.rainModels === 0
+    ? (snihDry ? "Nemělo by sněžit" : "Nemělo by pršet")
+    : "Spíš sucho";
   var fx2 = ["<span>shoda <b>" + V.rainModels + "/" + V.N + "</b> modelů</span>"];
   if(V.jePravdepodobnost) fx2.push("<span>shoda modelů <b>" + V.agreeProb + " %</b></span>");
   if(V.pkIdx >= 0 && V.times[V.pkIdx]) fx2.push("<span>nejblíž <b>" + fmtHr(V.times[V.pkIdx]) + "</b></span>");
+  if(snihDry){
+    var slDry = snowLineAt(V.pkIdx >= 0 ? V.pkIdx : 0);
+    if(slDry != null) fx2.push("<span>sněhová čára ~<b>" + snowLineTxt(slDry) + " m</b></span>");
+  }
   facts.innerHTML = fx2.join("");
 
   /* --- SLOVNÍ VÝKLAD ---
@@ -6459,20 +6648,37 @@ function renderSolo(){
      Věta ano. */
   var pomer = V.N ? V.rainModels/V.N : 0;
   var vyklad;
+  /* Kolo 8bb: když jde o sníh, výklad mluví sněhem — „deštník doma“
+     by nad zapadávající krajinou působil zvláštně. */
   if(V.rainModels === 0){
-    vyklad = "Žádný z " + V.N + " modelů déšť nečeká. <s>Sucho</s> — deštník doma.";
+    vyklad = snihDry
+      ? "Žádný z " + V.N + " modelů sníh nečeká. <s>Sucho</s>."
+      : "Žádný z " + V.N + " modelů déšť nečeká. <s>Sucho</s> — deštník doma.";
   } else if(pomer >= 0.75){
-    vyklad = "Modely se <s>shodují</s> — " + V.rainModels + " z " + V.N
+    vyklad = snihDry
+      ? "Modely se <s>shodují</s> — " + V.rainModels + " z " + V.N
+           + " čeká sníh. Silná shoda; teplé boty bych vzal."
+      : "Modely se <s>shodují</s> — " + V.rainModels + " z " + V.N
            + " čeká srážky. Tohle je silná shoda, deštník bych vzal.";
   } else if(pomer >= 0.45){
-    vyklad = "Většina modelů (" + V.rainModels + " z " + V.N + ") déšť čeká, ale ne všechny. "
+    vyklad = snihDry
+      ? "Většina modelů (" + V.rainModels + " z " + V.N + ") sníh čeká, ale ne všechny. "
+           + "Sníh je citlivý na teplotu — můžou z toho být i plískanice."
+      : "Většina modelů (" + V.rainModels + " z " + V.N + ") déšť čeká, ale ne všechny. "
            + "Deštník do batohu, i když nemusí přijít.";
   } else if(pomer >= 0.2){
-    vyklad = "Modely se <em>neshodnou</em> — jen " + V.rainModels + " z " + V.N
+    vyklad = snihDry
+      ? "Modely se <em>neshodnou</em> — jen " + V.rainModels + " z " + V.N
+           + " čeká sníh, zbytek sucho. Na takové shodě se nedá stavět; "
+           + "ber to jako \u201emůže, ale spíš ne\u201c."
+      : "Modely se <em>neshodnou</em> — jen " + V.rainModels + " z " + V.N
            + " čeká déšť, zbytek sucho. Na takové shodě se nedá stavět; "
            + "ber to jako \u201emůže, ale spíš ne\u201c.";
   } else {
-    vyklad = "Déšť čeká jen <em>menšina</em> modelů (" + V.rainModels + " z " + V.N
+    vyklad = snihDry
+      ? "Sníh čeká jen <em>menšina</em> modelů (" + V.rainModels + " z " + V.N
+           + "). To bývá spíš šum než signál."
+      : "Déšť čeká jen <em>menšina</em> modelů (" + V.rainModels + " z " + V.N
            + "). To bývá spíš šum než signál.";
   }
   if(V.jePravdepodobnost && Math.abs(V.prob - V.agreeProb) >= 30){
@@ -6819,15 +7025,15 @@ function wmsncSeries(nowMs){
    a jako varování, když radar mlčí, ale nad hlavou se něco staví.     */
 
 var EUMET_WMS = "https://view.eumetsat.int/geoserver/wms";
-/* RSS (Rapid Scan) — Meteosat-11 skenuje Evropu po 5 minutách místo 15.
-   To pro nowcasting znamená tři červrtě čekání méně: buňka, která vzniká,
-   se na třech snímcích za 15 minut jeví jako "trend", na 5min řadě jako
-   "růst přímo před očima". Jména RSS vrstev v EUMETView nejsou stejně
-   dokumentovaná jako plnodiskové, proto se zkoušejí PRVÍ a při neúspěchu
-   (GetMap nevrátí pixel) se seznam tiše propadá na ověřené plné disky. */
-var EUMET_LAYER_CANDS = ["meteosat:msg_rss_ir108", "meteosat:rss_ir108",
-                         "meteosat:msg_ir108", "meteosat:msg_ir108_3995",
-                         "meteosat:msg_convection", "meteosat:msg_cth"];
+/* Jména vrstev se v EUMETView měnila (kolo 8ba): staré „meteosat:*"
+   už GeoServer nezná (LayerNotDefined). Dnes žijí plné disky pod
+   oborem „msg_fes" (Meteosat Full Earth Scanning, 15 min) a
+   „msg_iodc" (Indický oceán — pokrývá i východní okraj Evropy,
+   0°–100° východně). Obojí je ověřené živě: GetMap vrací PNG včetně
+   parametru TIME pro minulé snímky, CORS je otevřený.
+   RSS 5min kanál („msg_rss") dnes nabízí jen ir039 a RGB kompozity —
+   pro sledování růstu konvekce zůstává kanonické ir108 z plného disku. */
+var EUMET_LAYER_CANDS = ["msg_fes:ir108", "msg_iodc:ir108"];
 /* Meteosat-0° vidí Evropu, Afriku a Atlantik. Za okrajem disku je šum. */
 var EUMET_AREA = {latMin:-60, latMax:70, lonMin:-60, lonMax:60};
 var EUMET_HALFKM = 60;      /* širší výřez — konvekce se staví v desítkách km */
@@ -6868,11 +7074,25 @@ function eumetBaseMs(layer){
   var step = eumetStepFor(layer) * 60000;
   return Math.floor((Date.now() - eumetLagMsFor(layer)) / step) * step;
 }
+/* msg_fes/iodc jsou ŠEDOTÓNOVÉ IR snímky — GetLegendGraphic k nim dnes
+   vrací jen maličkou ikonu, ne barevnou rampu (ověřeno kolo 8ba), takže
+   původní cesta přes wmsncLoadScale skončí nulou. Ordinálová logika ale
+   kelviny nepotřebuje — pracuje výhradně s POŘADÍM — a pořadí umí dodat
+   i syntetická šedá škála. Pixely msg_fes:ir108 jsou skutečně grayscale
+   (R=G=B, ověřeno na výřezu 200×200 px), takže 16 odstínů 0–255 pokryje
+   celý rozsah a wmsncOrdinal přiřadí každému pixelu pozici v rampě.
+   Skutečná legenda se zkusí stále první; fallback nastupuje, jen když
+   nevyjde — kdyby EUMETSAT barevnou rampu vrátil, použije se ta. */
+function eumetGrayScale(){
+  var s = [];
+  for(var i=0;i<16;i++){ var v = Math.round(i*255/15); s.push({r:v, g:v, b:v}); }
+  return s;
+}
 function eumetLoadScale(layer){
   if(eumetScale !== undefined) return Promise.resolve(eumetScale);
   var fake = {id:"eumet", base:EUMET_WMS, extra:""};
   return wmsncLoadScale(fake, layer).then(function(s){
-    eumetScale = wmsncScale["eumet"];
+    eumetScale = (s && s.length >= 6) ? s : eumetGrayScale();
     return eumetScale;
   });
 }
@@ -6882,11 +7102,10 @@ function loadEumetsat(lat, lon, myId){
   if(!eumetInArea(lat, lon)){
     eumetState = "off"; eumetNote = "mimo disk Meteosatu-0°"; return;
   }
-  /* Kde funguje GIBS, nemá smysl mít dvě družice — GIBS umí absolutní
-     kelviny, takže je silnější. EUMETView je náhrada tam, kde GIBS mlčí. */
-  if(satLayerFor(lat, lon)){
-    eumetState = "off"; eumetNote = "GIBS tuhle oblast pokrývá (umí i kelviny)"; return;
-  }
+  /* Dřív se tady EUMETSAT vypínalo, když oblast pokrýval GIBS (ten uměl
+     absolutní kelviny). GIBS ale datové palety zrušil (viz loadSatellite),
+     takže silnější zdroj tu už není — a bránu by jen tiše zapínala
+     „off" tam, kde už nikdo jiný družici nedodá. */
 
   var base = eumetBaseMs(null);
   function tryLayer(i){
@@ -7005,7 +7224,10 @@ function eumetGrowthNudge(){
    se spojení vůbec neotevírá: za klidného počasí nemá smysl držet
    otevřený socket. Selže-li zrcadlo třikrát, appka to vzdá do příštího
    otevření — žádné nekonečné reconnect smyčky. */
-var BLITZ_HOSTS = ["wss://ws1.blitzortung.org", "wss://ws7.blitzortung.org"];
+/* Zrcadla se liší dostupností: ws7 leží mimo (ověřeno kolo 8ba — spojení
+   vůbec nenaváže), kdežto ws1/ws2/ws8 žijí a posílají údery. Seznam
+   je záloha: když první host nezvedne telefon, zkouší se další. */
+var BLITZ_HOSTS = ["wss://ws1.blitzortung.org", "wss://ws2.blitzortung.org", "wss://ws8.blitzortung.org"];
 var BLITZ_RADIUS_KM = 200;   /* zajímají nás bouřky v dohledu, ne celá Evropa */
 var BLITZ_GIVEUP = 3;
 var blitzState = null;       /* {host, n10, n60, lastKm, lastPol} | "error" | null */
@@ -7141,7 +7363,10 @@ var SAT_LAYERS = [
    latMin:-60, latMax:60, lonMin:75, lonMax:180}
 ];
 var SAT_HOST = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best";
-var SAT_TMS  = "GoogleMapsCompatible_Level7";
+/* Level6, ne Level7 (kolo 8ba): WMTS capabilities dávají tyhle vrstvy
+   JEN v „GoogleMapsCompatible_Level6" — Level7 vrací 400. Sadu Level6
+   používá i IMERG; samotná čísla dlaždic (z=5 a výše) zůstala. */
+var SAT_TMS  = "GoogleMapsCompatible_Level6";
 var SAT_Z    = 5;              /* ~4,9 km/px — odpovídá rozlišení kanálu */
 var SAT_R    = 20;             /* výřez ±20 px ≈ ±98 km */
 
@@ -7262,6 +7487,22 @@ function readSatPatch(url, px, py, r, cm){
 
 function loadSatellite(lat, lon, myId){
   satState = null; satNote = "";
+  /* KOLO 8ba — GIBS u GOES/Himawari skončil jako zdroj ČÍSEL.
+     1. TileMatrixSet „GoogleMapsCompatible_Level7" už tyhle vrstvy
+        neznají (jen Level6, jinak 400) — viz IMERG, který to má
+        opravené.
+     2. Hlavní ale je, že NASA z cmap služby (v1.0 i v1.3) stáhla
+        datové palety pro GOES/Himawari — dnešní snímky jsou jen
+        vizuální produkty. Bez palety nejsou pixely kelviny, a tohle
+        modul zásadně odmítá hádat: satDecode by vrátil samé null a
+        modul by se stejně vypnul. Takže se vypne rovnou, s upřímným
+        důvodem v bpDiag().
+     Evropu a Afriku mezitím pokrývá EUMETSAT (ordinálový trend,
+     kolo 8ba). Pokud NASA palety vrátí, tělo níže zůstává připravené
+     (stačí smazat tento return). */
+  satState = "off";
+  satNote = "GIBS zrušil datové palety GOES/Himawari — bez nich nelze číst kelviny";
+  return;
   var L = satLayerFor(lat, lon);
   if(!L){
     satState = "off";
@@ -7385,7 +7626,11 @@ function satVerifyAgainstMetar(){
    PALETA se NEHÁDÁ stejně jako u IR: NASA publikuje XML, tady se ale
    čekají milimetry za hodinu (0–150), ne kelviny. Nesedí-li rozsah,
      modul se nepoužije. */
-var IMERG_LAYERS = ["GPM_3IMERGHH"];   /* kandidáti vrstev — první, co vrátí data, vyhrává */
+/* Jméno vrstvy se změnilo (kolo 8ba): „GPM_3IMERGHH" už GIBS nezná
+   (404); dnes ji publikuje jako IMERG_Precipitation_Rate_30min
+   (půlhodinový krok) a IMERG_Precipitation_Rate (hodinový).
+   Ověřeno živě: dlaždice Level6 vrací PNG, latence ~5–7 h. */
+var IMERG_LAYERS = ["IMERG_Precipitation_Rate_30min", "IMERG_Precipitation_Rate"];   /* první, co vrátí data, vyhrává */
 var IMERG_Z = 5;                       /* ~3,2 km/px na 49° — u 10km dat dvojnásobný nadvzorek,
                                           dosah ~153 km: fronty se mají kde otočit */
 var IMERG_R = 48;                      /* výřez ±48 px (97×97) */
@@ -7401,33 +7646,51 @@ function imergTimeStr(ms){
   return d.getUTCFullYear()+"-"+p(d.getUTCMonth()+1)+"-"+p(d.getUTCDate())
        + "T"+p(d.getUTCHours())+":"+p(d.getUTCMinutes())+":00Z";
 }
+/* Paleta se NEHÁDÁ stejně jako u IR: NASA publikuje XML, tady se ale
+   čekají milimetry za hodinu (0–150), ne kelviny. Nesedí-li rozsah,
+   modul se nepoužije.
+   Záludnost (kolo 8ba): colormap XML už NELEZÍ pod jménem vrstvy —
+   GIBS přejmenoval datovou paletu obou IMERG vrstev na
+   „GPM_Precipitation_Rate" (potvrzeno v konfiguraci Worldview).
+   Ověřeno živě: 436 položek, rozsah 0,1–53,1 mm/h, a barvy z těchto
+   položek se 1:1 shodují s barevnými pixely skutečných dlaždic. */
+var IMERG_PALETTE = "GPM_Precipitation_Rate";
+function fetchImergPaletteXml(name){
+  return fetchT("https://gibs.earthdata.nasa.gov/colormaps/v1.3/"+name+".xml", null, 12000)
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); });
+}
+function parseImergPalette(txt){
+  var doc = new DOMParser().parseFromString(txt, "text/xml");
+  var nodes = doc.getElementsByTagName("ColorMapEntry");
+  var entries = [];
+  for(var i=0;i<nodes.length;i++){
+    var el = nodes[i];
+    if((el.getAttribute("transparent")||"") === "true") continue;
+    var rgb = (el.getAttribute("rgb")||"").split(",").map(Number);
+    var raw = el.getAttribute("value") || el.getAttribute("sourceValue") || "";
+    var nums = raw.match(/-?\d+(\.\d+)?/g);
+    if(rgb.length !== 3 || !nums || !nums.length) continue;
+    var lo = parseFloat(nums[0]), hi = nums.length>1 ? parseFloat(nums[1]) : lo;
+    if(!isFinite(lo) || !isFinite(hi)) continue;
+    if(Math.abs(lo) > 9000) continue;                 /* -9999 = chybí data */
+    entries.push({r:rgb[0], g:rgb[1], b:rgb[2], v:(lo+hi)/2});
+  }
+  if(entries.length < 8) throw new Error("paleta má jen "+entries.length+" položek");
+  var vs = entries.map(function(e){ return e.v; });
+  var mn = Math.min.apply(null, vs), mx = Math.max.apply(null, vs);
+  /* Kontrola rozsahu: mm/h. Ne kelviny, ne dBZ — jiná veličina → nepoužít. */
+  if(mn < -0.01 || mn > 5 || mx < 5 || mx > 160)
+    throw new Error("rozsah "+mn.toFixed(1)+"–"+mx.toFixed(1)+" nesedí na mm/h");
+  return {entries:entries};
+}
 function loadImergColormap(layerId){
   if(imergColormapCache[layerId] !== undefined) return Promise.resolve(imergColormapCache[layerId]);
-  return fetchT("https://gibs.earthdata.nasa.gov/colormaps/v1.3/"+layerId+".xml", null, 12000)
-    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); })
-    .then(function(txt){
-      var doc = new DOMParser().parseFromString(txt, "text/xml");
-      var nodes = doc.getElementsByTagName("ColorMapEntry");
-      var entries = [];
-      for(var i=0;i<nodes.length;i++){
-        var el = nodes[i];
-        if((el.getAttribute("transparent")||"") === "true") continue;
-        var rgb = (el.getAttribute("rgb")||"").split(",").map(Number);
-        var raw = el.getAttribute("value") || el.getAttribute("sourceValue") || "";
-        var nums = raw.match(/-?\d+(\.\d+)?/g);
-        if(rgb.length !== 3 || !nums || !nums.length) continue;
-        var lo = parseFloat(nums[0]), hi = nums.length>1 ? parseFloat(nums[1]) : lo;
-        if(!isFinite(lo) || !isFinite(hi)) continue;
-        if(Math.abs(lo) > 9000) continue;                 /* -9999 = chybí data */
-        entries.push({r:rgb[0], g:rgb[1], b:rgb[2], v:(lo+hi)/2});
-      }
-      if(entries.length < 8) throw new Error("paleta má jen "+entries.length+" položek");
-      var vs = entries.map(function(e){ return e.v; });
-      var mn = Math.min.apply(null, vs), mx = Math.max.apply(null, vs);
-      /* Kontrola rozsahu: mm/h. Ne kelviny, ne dBZ — jiná veličina → nepoužít. */
-      if(mn < -0.01 || mn > 5 || mx < 5 || mx > 160)
-        throw new Error("rozsah "+mn.toFixed(1)+"–"+mx.toFixed(1)+" nesedí na mm/h");
-      var cm = {entries:entries};
+  /* Zkusí paletu pod jménem vrstvy (konvence GIBS), a až když neexistuje,
+     spadne na přejmenovanou společnou paletu IMERG. */
+  return fetchImergPaletteXml(layerId)
+    .catch(function(){ return fetchImergPaletteXml(IMERG_PALETTE); })
+    .then(parseImergPalette)
+    .then(function(cm){
       imergColormapCache[layerId] = cm;
       return cm;
     })
