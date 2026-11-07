@@ -35,8 +35,7 @@
  *   GET /analysis/page?h=YYYYMMDDHH → JSON: všech 12 dílků dané hodiny
  *   GET /analysis/status   → JSON: diagnostika sběru (kv, poslední zápisy)
  *
- * Rozpoče
-t limitů (free tier, propočteno):
+ * Rozpočet limitů (free tier, propočteno):
  *   Open-Meteo:  100 obcí × 2 dotazy × 24 h = 4 800/den (limit 10 000;
  *                zbytek drží rezervu pro provoz proxy)
  *   METAR:       12 hromadných dotazů/hod = 288/den (bez významného limitu)
@@ -86,8 +85,7 @@ function json(status, obj, extraHeaders) {
 }
 
 /* Každá položka (i v comma-seznamu více bodů u ensemble) musí být číslo
-   v rozsahu. Jinak 400 — do URL pro upstream se nic nevalidované
-ho nedostane. */
+   v rozsahu. Jinak 400 — do URL pro upstream se nic nevalidovaného nedostane. */
 function numericList(value, min, max) {
   var parts = String(value).split(",");
   for (var i = 0; i < parts.length; i++) {
@@ -136,8 +134,7 @@ var RAW_TTL = 1209600;         /* TTL surových záznamů: 14 dní */
 var RAW_PREFIX = "raw/";
 
 /* 100 obcí: primárně střední Evropa (CZ/SK/AT/DE/CH/PL/HU/SI/HR), doplněno
-   o top lokalit
-y a rozličné biomy (Alpy, pobřeží, nížiny, Vysočina,
+   o top lokality a rozličné biomy (Alpy, pobřeží, nížiny, Vysočina,
    středomoří, oceán). Každá obec má vlastní METAR stanici — ověřeno proti
    aviationweather.gov (jen stanice, které tam skutečně hlásí). Pořadí
    určuje i přiřazení do dílku (i % 12) — sousedé v seznamu se do sběru
@@ -169,8 +166,7 @@ export var MUNICIPALITIES = [
   /* DE — 20 */
   { n: "Berlín", cc: "DE", lat: 52.38, lon: 13.53, icao: "EDDB" },
   { n: "Mnichov", cc: "DE", lat: 48.35, lon: 11.81, icao: "EDDM" },
-  { n: "Frankfurt nad Mohanem", cc: "DE", lat: 
-50.05, lon: 8.60, icao: "EDDF" },
+  { n: "Frankfurt nad Mohanem", cc: "DE", lat: 50.05, lon: 8.60, icao: "EDDF" },
   { n: "Hamburk", cc: "DE", lat: 53.63, lon: 9.99, icao: "EDDH" },
   { n: "Stuttgart", cc: "DE", lat: 48.69, lon: 9.22, icao: "EDDS" },
   { n: "Kolín nad Rýnem", cc: "DE", lat: 50.87, lon: 7.16, icao: "EDDK" },
@@ -201,8 +197,7 @@ export var MUNICIPALITIES = [
   /* PL — 11 */
   { n: "Varšava", cc: "PL", lat: 52.16, lon: 20.96, icao: "EPWA" },
   { n: "Krakov", cc: "PL", lat: 50.08, lon: 19.80, icao: "EPKK" },
-  { n: "Gdaňsk", cc: "PL", lat: 54.38, lon:
- 18.47, icao: "EPGD" },
+  { n: "Gdaňsk", cc: "PL", lat: 54.38, lon: 18.47, icao: "EPGD" },
   { n: "Vratislav", cc: "PL", lat: 51.10, lon: 16.90, icao: "EPWR" },
   { n: "Poznaň", cc: "PL", lat: 52.42, lon: 16.85, icao: "EPPO" },
   { n: "Katovice", cc: "PL", lat: 50.48, lon: 19.09, icao: "EPKT" },
@@ -236,8 +231,7 @@ export var MUNICIPALITIES = [
   /* FR — 4 */
   { n: "Paříž", cc: "FR", lat: 49.02, lon: 2.54, icao: "LFPG" },
   { n: "Lyon", cc: "FR", lat: 45.73, lon: 5.08, icao: "LFLL" },
-  { n: "Štrasbur
-k", cc: "FR", lat: 48.55, lon: 7.64, icao: "LFST" },
+  { n: "Štrasburk", cc: "FR", lat: 48.55, lon: 7.64, icao: "LFST" },
   { n: "Nice", cc: "FR", lat: 43.66, lon: 7.22, icao: "LFMN" },
   /* GB — 2 */
   { n: "Londýn", cc: "GB", lat: 51.48, lon: -0.46, icao: "EGLL" },
@@ -278,8 +272,7 @@ export function placesForSlice(slice) {
 
 /* Zrcadlí ensembleCandidates aplikace: icon_d2 EPS (2,2 km) uvnitř boxu
    střední Evropy, jinak icon_eu EPS (7 km). */
-export funct
-ion ensModelFor(lat, lon) {
+export function ensModelFor(lat, lon) {
   return ensCandidates(lat, lon)[0];
 }
 
@@ -330,8 +323,7 @@ function metarUrl(icaos) {
 }
 
 /* ---- kvantizace (drží záznamy malé) ---- */
-function q1(v) { return (typeof v === "number" &&
- isFinite(v) && v >= 0) ? Math.round(v * 10) / 10 : null; }
+function q1(v) { return (typeof v === "number" && isFinite(v) && v >= 0) ? Math.round(v * 10) / 10 : null; }
 function q2(v) { return (typeof v === "number" && isFinite(v) && v >= 0) ? Math.round(v * 100) / 100 : null; }
 
 /* ---- METAR: přítomné počasí z tokenů ----
@@ -377,8 +369,7 @@ export function parseFc(body) {
   var c = j && j.current;
   if (c && typeof c.time === "number") {
     var mh = null;
-    if (typeof c.precipitation === "number" && typeof c.interval === "num
-ber" && c.interval > 0) {
+    if (typeof c.precipitation === "number" && typeof c.interval === "number" && c.interval > 0) {
       mh = q2(c.precipitation * 3600 / c.interval);
     }
     out.c = { t: c.time, iv: c.interval, p: q2(c.precipitation), mh: mh, cd: c.weather_code };
@@ -431,8 +422,7 @@ export function parseEns(body) {
   return out.length ? out : null;
 }
 
-/* ===============
-== RADAR RAINVIEWER (kolo 8ag) =================
+/* ================= RADAR RAINVIEWER (kolo 8ag) =================
    Aplikace čte radar přes <img>+canvas; Worker canvas nemá. PNG ale
    zvládne dekódovat sám: IDAT je zlib proud (DecompressionStream),
    unfiltr řádků je pět krátkých aritmetik. Dlaždice 256×256, 8 bitů,
@@ -469,8 +459,7 @@ export function dbzToMm(dbz, isSnow) {
   return Math.min(mm, RV_SANE_MMH);
 }
 
-/* Ze weather-maps.j
-son vybere snímek z radar.past nejbližší času now.
+/* Ze weather-maps.json vybere snímek z radar.past nejbližší času now.
    Vrací {host, path, time} nebo null (žádný čerstvý snímek / rozbitý JSON). */
 export function pickFrame(mapsJson, nowMs) {
   try {
@@ -519,8 +508,7 @@ function paeth(a, b, c) {
 export async function pngDecodePatch(bytes, px, py, r) {
   try {
     if (!bytes || bytes.length < 8) return null;
-    var sig = [137
-, 80, 78, 71, 13, 10, 26, 10];
+    var sig = [137, 80, 78, 71, 13, 10, 26, 10];
     for (var s = 0; s < 8; s++) if (bytes[s] !== sig[s]) return null;
     var pos = 8, w = 0, h = 0, idat = [], seenIhdr = false;
     while (pos + 8 <= bytes.length) {
@@ -555,8 +543,7 @@ export async function pngDecodePatch(bytes, px, py, r) {
       if (f === 1) { for (var x1 = bpp; x1 < stride; x1++) cur[x1] = (cur[x1] + cur[x1 - bpp]) & 255; }
       else if (f === 2) { for (var x2 = 0; x2 < stride; x2++) cur[x2] = (cur[x2] + prev[x2]) & 255; }
       else if (f === 3) { for (var x3 = 0; x3 < stride; x3++) { var le = x3 < bpp ? 0 : cur[x3 - bpp]; cur[x3] = (cur[x3] + ((le + prev[x3]) >> 1)) & 255; } }
-      else if (f === 4) { for (var x4 = 0; x4 < s
-tride; x4++) { cur[x4] = (cur[x4] + paeth(x4 < bpp ? 0 : cur[x4 - bpp], prev[x4], x4 < bpp ? 0 : prev[x4 - bpp])) & 255; } }
+      else if (f === 4) { for (var x4 = 0; x4 < stride; x4++) { cur[x4] = (cur[x4] + paeth(x4 < bpp ? 0 : cur[x4 - bpp], prev[x4], x4 < bpp ? 0 : prev[x4 - bpp])) & 255; } }
       else if (f > 4) return null;
       if (y >= y0 && y < y0 + n) {
         for (var p = 0; p < n; p++) {
@@ -598,8 +585,7 @@ async function rvRead(fetchImpl, frame, p) {
   if (!patch) throw new Error("tile decode");
   var vals = patch.map(function (q) { return q.m; }).filter(function (v) { return v != null; }).sort(function (a, b) { return a - b; });
   if (!vals.length) throw new Error("tile bez dat");
-  var echo = patch.filter(function (q) { return q.d != null; }).length
-;
+  var echo = patch.filter(function (q) { return q.d != null; }).length;
   return {
     t: frame.time,
     mm: q2(vals[Math.floor(vals.length / 2)]),
@@ -651,8 +637,7 @@ async function collectSlice(deps, slice, now) {
       var r = await fetchImpl(buildFcUrl(p), { headers: { "user-agent": "bude-prset-proxy/1.0" } });
       if (!r.ok) throw new Error("fc " + r.status);
       entry.fc = parseFc(await r.text());
-    } catch (e) { e
-rrs.push("fc"); }
+    } catch (e) { errs.push("fc"); }
     try {
       var parsed = null, usedModel = null;
       var cands = ensCandidates(p.lat, p.lon);
@@ -701,8 +686,7 @@ function analysisHtml() {
     + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
     + "<title>Bude pršet? — sběr předpovědí</title><style>"
     + "body{font-family:system-ui,sans-serif;margin:1rem;max-width:60rem;color:#123}"
-    + "table{border-collap
-se:collapse;font-size:.85rem;width:100%}"
+    + "table{border-collapse:collapse;font-size:.85rem;width:100%}"
     + "td,th{border-bottom:1px solid #ddd;padding:.25rem .4rem;text-align:left}"
     + "button{margin:.2rem .3rem .2rem 0;padding:.4rem .7rem}"
     + "input,select{padding:.35rem}"
@@ -714,6 +698,196 @@ se:collapse;font-size:.85rem;width:100%}"
     + " <label>Hodina (UTC) <input type=\"number\" id=\"hh\" min=\"0\" max=\"23\" value=\"" + new Date().getUTCHours() + "\"></label>"
     + "<button id=\"bPrev\">Náhled hodiny</button>"
     + "<button id=\"bHour\">Stáhnout JSON hodiny</button>"
-    + "<butto
+    + "<button id=\"bDay\">Stáhnout JSON celého dne</button></p>"
+    + "<div id=\"tbl\"></div><script>"
+    + "var S=" + esc("/analysis/status") + ",P=" + esc("/analysis/page") + ";"
+    + "function pad(n){return (n<10?'0':'')+n}"
+    + "function hkey(){var d=document.getElementById('d').value.replace(/-/g,'');return d+pad(+document.getElementById('hh').value)}"
+    + "function dl(name,obj){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(obj)],{type:'application/json'}));a.download=name;a.click()}"
+    + "fetch(S).then(r=>r.json()).then(s=>{document.getElementById('status').textContent="
+    + "'KV: '+(s.kv?'připojeno':'CHYBÍ')+' · obcí: '+s.places+' · poslední zápis: '+(s.last?s.last.key+' ('+s.last.n_ok+' obcí bez chyby)':'—')}).catch(e=>{document.getElementById('status').textContent='status nedostupný'})"
+    + "document.getElementById('bPrev').onclick=function(){var h=hkey();"
+    + "fetch(P+'?h='+h).then(r=>r.json()).then(show)}"
+    + "document.getElementById('bHour').onclick=function(){var h=hkey();"
+    + "fetch(P+'?h='+h).then(r=>r.json()).then(j=>dl('bp-'+h+'.json',j))}"
+    + "document.getElementById('bDay').onclick=async function(){"
+    + "var day=document.getElementById('d').value.replace(/-/g,'');var all={};"
+    + "for(var hh=0;hh<24;hh++){var h=day+pad(hh);"
+    + "try{var j=await (await fetch(P+'?h='+h)).json();if(j&&j.found&&j.found.length)all[h]=j}catch(e){}}"
+    + "dl('bp-'+day+'.json',all)}"
+    + "function show(j){if(!j||!j.found||!j.found.length){document.getElementById('tbl').textContent='Pro tuto hodinu zatím nejsou žádné záznamy.';return}"
+    + "var rows='';j.meta.forEach(function(m){var s=(j.slices||[]).map(function(sl){return sl.p[m.n]}).filter(Boolean)[0];"
+    + "if(!s){rows+='<tr><td>'+m.n+'</td><td colspan=6 class=muted>dosud nesebráno</td></tr>';return}"
+    + "var nc=function(v){return v==null?'—':v};"
+    + "var m15=s.fc&&s.fc.m?[2,3,4].map(function(i){return s.fc.m[i]?nc(s.fc.m[i][1]*4):'—'}):['—','—','—'];"
+    + "var pe=0,ne=0;if(s.ens&&s.ens.g&&s.ens.g[0]){s.ens.g[0].forEach(function(mem){var hit=false;for(var i=0;i<3;i++){if(mem[i]!=null&&mem[i]>=0.1){hit=true}}if(hit)pe++});ne=s.ens.g[0].length}"
+    + "rows+='<tr><td>'+m.n+' <span class=muted>'+m.cc+'</span></td>'"
+    + "+'<td>'+(s.met?(s.met.r?'<span class=bad>★ PRŠÍ</span>':'ne'):'—')+'</td>'"
+    + "+'<td>'+nc(s.fc&&s.fc.c?s.fc.c.mh:'—')+'</td>'"
+    + "+'<td>'+m15[0]+'/'+m15[1]+'/'+m15[2]+'</td>'"
+    + "+'<td>'+(ne?Math.round(100*pe/ne)+' %':'—')+'</td>'"
+    + "+'<td class=muted>'+(s.err?'chybí: '+s.err.join(','):'ok')+'</td></tr>'})"
+    + "document.getElementById('tbl').innerHTML='<table><tr><th>Obec</th><th>METAR</th><th>model nyní mm/h</th><th>nowcast +30/45/60 min mm/h</th><th>ensemble P(0–3 h)</th><th>stav</th></tr>'+rows+'</table>'}"
+    + "</script></body></html>";
+}
 
-... [Content truncated]
+/* ================= WORKER ================= */
+
+export function createWorker(deps) {
+  var fetchImpl = deps.fetchImpl;
+  var cache = deps.cache || null;
+  var kv = deps.kv || null;
+  var nowFn = deps.now || function () { return new Date(); };
+
+  async function handle(request) {
+    var u = new URL(request.url);
+
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, OPTIONS", "access-control-allow-headers": "content-type", "access-control-max-age": "86400" } });
+    if (request.method !== "GET") return json(405, { error: "pouze GET" });
+
+    if (u.pathname === "/healthz") {
+      return json(200, {
+        ok: true, service: "bude-prset-proxy", endpoints: Object.keys(UPSTREAMS),
+        collector: { places: MUNICIPALITIES.length, slices: SLICE_COUNT, kv: !!kv },
+        analysis: ["/analysis", "/analysis/page", "/analysis/status"]
+      });
+    }
+
+    if (u.pathname === "/analysis") {
+      return new Response(analysisHtml(), {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }
+      });
+    }
+
+    if (u.pathname === "/analysis/status") {
+      var now = nowFn();
+      var out = { ok: true, kv: !!kv, places: MUNICIPALITIES.length, slices: SLICE_COUNT, recent: [], last: null };
+      if (!kv) return json(200, out);
+      /* Projdeme klíče zpětně od teď (max ~13 čtení) a vrátíme souhrn. */
+      var curH = new Date(now.getTime() - 5 * 60 * 1000);
+      var candidates = [];
+      for (var back = 0; back < 3; back++) {
+        var d = new Date(curH.getTime() - back * 60 * 60 * 1000);
+        var hk = hourKey(d);
+        var maxM = back === 0 ? Math.floor(d.getUTCMinutes() / 5) : 11;
+        for (var s = maxM; s >= 0; s--) candidates.push(rawKey(hk, s * 5));
+      }
+      for (var ci = 0; ci < candidates.length && out.recent.length < 13; ci++) {
+        var val = await kv.get(candidates[ci]);
+        if (!val) continue;
+        var rec = JSON.parse(val);
+        var names = Object.keys(rec.p || {});
+        var nok = names.filter(function (n) { return !rec.p[n].err; }).length;
+        var entry = { key: candidates[ci], t: rec.t, n: names.length, n_ok: nok };
+        out.recent.push(entry);
+        if (!out.last) out.last = entry;
+      }
+      return json(200, out);
+    }
+
+    if (u.pathname === "/analysis/page") {
+      var h = u.searchParams.get("h") || "";
+      if (!/^\d{10}$/.test(h)) return json(400, { error: "parametr h musí být YYYYMMDDHH (10 číslic)" });
+      if (!kv) return json(503, { error: "KV binding HISTORY není připojen" });
+      var slices = [];
+      var found = [];
+      for (var mm = 0; mm < SLICE_COUNT; mm++) {
+        var key = RAW_PREFIX + h + ":" + pad2(mm * 5);
+        var v = await kv.get(key);
+        if (v) {
+          found.push(pad2(mm * 5));
+          slices.push(JSON.parse(v));
+        }
+      }
+      return json(200, {
+        ok: true, h: h, found: found,
+        meta: MUNICIPALITIES.map(function (m) { return { n: m.n, cc: m.cc, lat: m.lat, lon: m.lon, icao: m.icao }; }),
+        slices: slices
+      });
+    }
+
+    var up = UPSTREAMS[u.pathname];
+    if (!up) return json(404, { error: "neznámý endpoint" });
+
+    var b = buildUpstreamQs(u.searchParams);
+    if (b.err) return json(400, { error: b.err });
+
+    var upstreamUrl = up.host + up.path + "?" + b.qs;
+
+    if (cache) {
+      var hit = await cache.match(upstreamUrl);
+      if (hit) {
+        var hitBody = await hit.text();
+        var hitHeaders = {};
+        hit.headers.forEach(function (val, key) { hitHeaders[key] = val; });
+        hitHeaders["x-bp-cache"] = "HIT";
+        /* CORS není v uložené kopii — doplníme vždy (hit i miss ho musí mít). */
+        if (!hitHeaders["access-control-allow-origin"]) hitHeaders["access-control-allow-origin"] = "*";
+        return new Response(hitBody, { status: 200, headers: hitHeaders });
+      }
+    }
+
+    var upstream;
+    try {
+      upstream = await fetchImpl(upstreamUrl, { headers: { "user-agent": "bude-prset-proxy/1.0 (+https://github.com/daviscoder123/bude_prset)" } });
+    } catch (e) {
+      return json(502, { error: "upstream nedostupný", detail: String(e && e.message || e) });
+    }
+    if (!upstream.ok) {
+      return json(502, { error: "upstream vrátil " + upstream.status, upstream_status: upstream.status });
+    }
+
+    var body = await upstream.text();
+    var outHeaders = { "content-type": upstream.headers.get("content-type") || "application/json; charset=utf-8", "access-control-allow-origin": "*", "cache-control": "public, max-age=" + up.ttl, "x-bp-cache": "MISS" };
+
+    if (cache) {
+      try {
+        var storeHeaders = { "content-type": outHeaders["content-type"], "cache-control": "public, max-age=" + up.ttl };
+        await cache.put(upstreamUrl, new Response(body, { status: 200, headers: storeHeaders }));
+      } catch (e) {
+        /* Cache je doplněk — nezaznamenaný zápis nesmí shodit odpověď. */
+      }
+    }
+    return new Response(body, { status: 200, headers: outHeaders });
+  }
+
+  async function scheduled(event) {
+    if (!kv) return { ok: false, reason: "bez KV bindingu HISTORY sběrač stojí" };
+    try {
+      var now = new Date(event.scheduledTime);
+      var slice = Math.floor(now.getUTCMinutes() / 5) % SLICE_COUNT;
+      var res = await collectSlice({ fetchImpl: fetchImpl }, slice, now);
+      await kv.put(res.key, JSON.stringify(res.record), { expirationTtl: RAW_TTL });
+      return { ok: true, key: res.key, places: Object.keys(res.record.p).length };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message || e) };
+    }
+  }
+
+  return {
+    fetch: function (request) {
+      return handle(request).catch(function (e) {
+        return json(500, { error: "worker selhal", detail: String(e && e.message || e) });
+      });
+    },
+    scheduled: scheduled
+  };
+}
+
+export default {
+  fetch: function (request, env) {
+    return createWorker({
+      fetchImpl: fetch,
+      cache: (typeof caches !== "undefined" && caches.default) || null,
+      kv: (env && env.HISTORY) || null
+    }).fetch(request);
+  },
+  scheduled: function (event, env) {
+    return createWorker({
+      fetchImpl: fetch,
+      cache: (typeof caches !== "undefined" && caches.default) || null,
+      kv: (env && env.HISTORY) || null
+    }).scheduled(event);
+  }
+};
