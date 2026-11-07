@@ -10,6 +10,13 @@
  *   GET /om/v1/ensemble?<whitelisted params> → ensemble-api.open-meteo.com/v1/ensemble
  *   GET /healthz                              → {ok:true, ...}
  *
+ *   ČHMÚ passthrough (kolo 8ba): opendata.chmi.cz neposílá CORS, a jeho
+ *   radarová předpověď (+10…+60 min) se balí do TAR archivů. Worker proto
+ *   dodává dvě věci, které prohlížeč sám nezvládne:
+ *
+ *   GET /chmi/img?u=<cesta .png>              → passthrough PNG s CORS *
+ *   GET /chmi/fct?base=YYYYMMDD.HHMM&lead=NN → člen z předpovědního TARu
+ *
  * ČÁST 2 — SBĚRAČ (kolo 8af): cron každou 5. minutu projde 1/12 z 100
  * předvybraných obcí (12 dílků × ~8–9 obcí, deterministicky podle UTC
  * minuty). Pro každou obec zachytí STEJNÉ vstupy, ze kterých appka počítá
@@ -65,6 +72,58 @@ var UPSTREAMS = {
     ttl: 900
   }
 };
+
+/* ================= ČHMÚ PASSTHROUGH (kolo 8ba) =================
+   opendata.chmi.cz servíruje radarové PNG bez hlavičky
+   Access-Control-Allow-Origin, takže prohlížeč nepřečte pixely z
+   canvasu. Worker tady vrací TUTÉŽ data s CORS * — a navíc umí
+   rozbalit předpovědní TAR: od přestavby ČHMÚ (2026) už nejsou
+   +10…+60 min snímky samostatné PNG, ale jediný archiv
+   pacz2gmaps3.fct_z_cappi020.<base>.ft60s10.tar (60 min ve
+   10minutových krocích). Worker archiv vytáhne jednou, zcachuje
+   (mění se po 5 minutách) a každému dotazu vybalí jen člena
+   <base+lead>.<lead>.png. Whitelist cesty je striktní — proxy
+   nesmí být otevřená proxy. */
+var CHMI_HOST = "https://opendata.chmi.cz";
+var CHMI_PATH_RE = /^\/meteorology\/weather\/radar\/[A-Za-z0-9_.\/-]+$/;
+var CHMI_FCT_LEADS = ["10", "20", "30", "40", "50", "60"];
+var CHMI_TAR_TTL = 240;        /* archiv se rodí po 5 minutách */
+
+function chmiCacheTtl(path) {
+  if (path.indexOf("/scl/") >= 0) return 86400;   /* legenda se skoro nemění */
+  return 120;                                     /* kompozit: 5min kroky */
+}
+
+/* Vybere z TAR archivu člena končící ".<lead>.png" a vrátí jeho bajty.
+   TAR formát: hlavička 512 B (jméno od 0, velikost od 124 v oktalové
+   soustavě), pak data zarovnaná na 512 B. Bez dekomprese — PNG vevnitř
+   je uložené přímo. Exportuje se kvůli testům. */
+export function tarFindMember(bytes, lead) {
+  var suffix = "." + lead + ".png";
+  var off = 0;
+  while (off + 512 <= bytes.length) {
+    var name = "";
+    for (var i = 0; i < 100; i++) {
+      var c = bytes[off + i];
+      if (!c) break;
+      name += String.fromCharCode(c);
+    }
+    if (!name) break;                      /* prázdný blok = konec archivu */
+    var sizeOct = "";
+    for (var s = 0; s < 11; s++) {
+      var ch = bytes[off + 124 + s];
+      if (!ch || ch === 32) break;
+      sizeOct += String.fromCharCode(ch);
+    }
+    var size = parseInt(sizeOct, 8) || 0;
+    var dataOff = off + 512;
+    if (size > 0 && name.length >= suffix.length && name.slice(-suffix.length) === suffix) {
+      return bytes.slice(dataOff, dataOff + size);
+    }
+    off = dataOff + Math.ceil(size / 512) * 512;
+  }
+  return null;
+}
 
 /* Parametry, které klient skutečně posílá; vše ostatní se zahodí. */
 var ALLOWED_PARAMS = ["latitude", "longitude", "hourly", "models", "forecast_hours", "timeformat", "timezone"];
@@ -749,7 +808,8 @@ export function createWorker(deps) {
       return json(200, {
         ok: true, service: "bude-prset-proxy", endpoints: Object.keys(UPSTREAMS),
         collector: { places: MUNICIPALITIES.length, slices: SLICE_COUNT, kv: !!kv },
-        analysis: ["/analysis", "/analysis/page", "/analysis/status"]
+        analysis: ["/analysis", "/analysis/page", "/analysis/status"],
+        chmi: ["/chmi/img", "/chmi/fct"]
       });
     }
 
@@ -804,6 +864,94 @@ export function createWorker(deps) {
         ok: true, h: h, found: found,
         meta: MUNICIPALITIES.map(function (m) { return { n: m.n, cc: m.cc, lat: m.lat, lon: m.lon, icao: m.icao }; }),
         slices: slices
+      });
+    }
+
+    /* --- ČHMÚ: kompozit/legenda (passthrough PNG s CORS *) --- */
+    if (u.pathname === "/chmi/img") {
+      var cp = u.searchParams.get("u") || "";
+      if (cp.charAt(0) !== "/" || cp.slice(-4).toLowerCase() !== ".png"
+         || cp.indexOf("..") >= 0 || !CHMI_PATH_RE.test(cp))
+        return json(400, { error: "cesta musí být .png pod /meteorology/weather/radar/" });
+      var chmiUrl = CHMI_HOST + cp;
+      var chmiTtl = chmiCacheTtl(cp);
+      if (cache) {
+        var chHit = await cache.match(chmiUrl);
+        if (chHit) {
+          var chHitBody = await chHit.arrayBuffer();
+          return new Response(chHitBody, {
+            status: 200,
+            headers: {
+              "content-type": "image/png", "access-control-allow-origin": "*",
+              "cache-control": "public, max-age=" + chmiTtl, "x-bp-cache": "HIT"
+            }
+          });
+        }
+      }
+      var chUp;
+      try {
+        chUp = await fetchImpl(chmiUrl, { headers: { "user-agent": "bude-prset-proxy/1.0 (+https://github.com/daviscoder123/bude_prset)" } });
+      } catch (e) {
+        return json(502, { error: "ČHMÚ nedostupné", detail: String(e && e.message || e) });
+      }
+      if (!chUp.ok) return json(chUp.status === 404 ? 404 : 502, { error: "ČHMÚ vrátilo " + chUp.status });
+      var chBody = new Uint8Array(await chUp.arrayBuffer());
+      if (cache) {
+        try {
+          await cache.put(chmiUrl, new Response(chBody, {
+            status: 200,
+            headers: { "content-type": "image/png", "cache-control": "public, max-age=" + chmiTtl }
+          }));
+        } catch (e) { /* cache je doplněk */ }
+      }
+      return new Response(chBody, {
+        status: 200,
+        headers: {
+          "content-type": "image/png", "access-control-allow-origin": "*",
+          "cache-control": "public, max-age=" + chmiTtl, "x-bp-cache": "MISS"
+        }
+      });
+    }
+
+    /* --- ČHMÚ: předpověď z TAR archivu (jeden člen jako PNG) --- */
+    if (u.pathname === "/chmi/fct") {
+      var fBase = u.searchParams.get("base") || "";
+      var fLead = u.searchParams.get("lead") || "";
+      if (!/^\d{8}\.\d{4}$/.test(fBase)) return json(400, { error: "base musí být YYYYMMDD.HHMM" });
+      if (CHMI_FCT_LEADS.indexOf(fLead) < 0) return json(400, { error: "lead musí být 10–60 po deseti" });
+      var tarUrl = CHMI_HOST + "/meteorology/weather/radar/composite/fct_pseudocappi2km/png/"
+        + "pacz2gmaps3.fct_z_cappi020." + fBase + ".ft60s10.tar";
+      var tarBytes = null;
+      if (cache) {
+        var tarHit = await cache.match(tarUrl);
+        if (tarHit) tarBytes = new Uint8Array(await tarHit.arrayBuffer());
+      }
+      if (!tarBytes) {
+        var tarUp;
+        try {
+          tarUp = await fetchImpl(tarUrl, { headers: { "user-agent": "bude-prset-proxy/1.0 (+https://github.com/daviscoder123/bude_prset)" } });
+        } catch (e) {
+          return json(502, { error: "ČHMÚ nedostupné", detail: String(e && e.message || e) });
+        }
+        if (!tarUp.ok) return json(tarUp.status === 404 ? 404 : 502, { error: "ČHMÚ vrátilo " + tarUp.status });
+        tarBytes = new Uint8Array(await tarUp.arrayBuffer());
+        if (cache) {
+          try {
+            await cache.put(tarUrl, new Response(tarBytes, {
+              status: 200,
+              headers: { "content-type": "application/x-tar", "cache-control": "public, max-age=" + CHMI_TAR_TTL }
+            }));
+          } catch (e) { /* cache je doplněk */ }
+        }
+      }
+      var member = tarFindMember(tarBytes, fLead);
+      if (!member) return json(404, { error: "v TARu není člen +" + fLead + " min" });
+      return new Response(member, {
+        status: 200,
+        headers: {
+          "content-type": "image/png", "access-control-allow-origin": "*",
+          "cache-control": "public, max-age=" + CHMI_TAR_TTL, "x-bp-cache": "MISS"
+        }
       });
     }
 

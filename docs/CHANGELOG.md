@@ -65,3 +65,38 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
     tento CHANGELOG, `scripts/accuracy_charts.py` — živé grafy přesnosti z
     dat sběrače (SVG, bez závislostí) a denní workflow **Grafy přesnosti**
     s badge aktuální naměřené úspěšnosti v README.
+  - **(kolo 8ba):** audit a oprava datových zdrojů — všechny závěry přeměřeny
+    naživo (žádost vznikla z recenze, která však mířila vedle: REST
+    `api.blitzortung.org` ani LIDAR ČHMÚ se v kódu nikdy nepoužívaly).
+    - **Blitzortung (blesky):** spojení jede přes WebSocket zrcadla; ws7
+      neodpovídá → hosté ws1/ws2/ws8 (3 údery za 20 s ověřeny živě).
+    - **ČHMÚ radar:** přímé čtení z prohlížeče blokuje chybějící CORS →
+      kompozit i legenda jdou přes edge proxy (`/chmi/img`, whitelist
+      `/meteorology/weather/radar/*.png`, CORS `*`, cache 120 s);
+      legenda přejmenována `scl-dbzmmh` → `scl-dbz-mmh` (nový extraktor
+      škály z paletového PNG, slabé→silné); předpověď +10…+60 min už
+      není PNG, ale TAR archiv — Worker ho stáhne a vybalí člena
+      (`/chmi/fct`, `tarFindMember`, cache 240 s).
+    - **EUMETSAT (IR):** staré vrstvy `meteosat:msg_rss_*` mrtvé →
+      `msg_fes:ir108` / `msg_iodc:ir108` (šedotón ověřen na 40 000
+      pixelech); `GetLegendGraphic` dnes vrací jen ikonu 20×20 →
+      syntetická 16stupňová šedá škála. Živý test 4 snímků: ordinály
+      0,40–0,67 nad Alpami, trend spočítán správně.
+    - **NASA GIBS (satelitní rgb/kelvinové vrstvy):** GIBS zrušil
+      colormap XML → kelvinové dekódování nelze poctivě provést, modul
+      vypnut se sériovým vysvětlením (`satState = "off"`).
+    - **GPM IMERG:** vrstva přejmenována na `IMERG_Precipitation_Rate_30min`
+      (+ hodinová), datová paleta na `GPM_Precipitation_Rate` — mm/h,
+      220 platných položek, rozsah 0,1–53,1; dekód živě ověřen 1:1 s
+      barvami skutečných dlaždic (ITCZ Pacifik: max 15,4 mm/h →
+      pseudodBZ 42; Evropa: suchá).
+  - **(kolo 8bb):** sníh jako občan první třídy. Detekce sněhu existovala
+    dříve (radarový bit &128, METAR SN/SG/PL/IC, snowfall modelů,
+    ensemble), ale UX mluvilo o „dešti“ i tam, kde appka slibovala sníh.
+    Verdikt, lišta i výklad nyní mluví sněhem („Sněžení do / Sníh od“),
+    intenzita se ukazuje v cm/h a úhrn „napadne ~X cm“ (1 cm ≈ 0,7 mm
+    vodního ekvivalentu), sněhová čára z `freezing_level_height`
+    (pod 1000 m po 50 m, nad ní po 100 m), pill „sníh se blíží“,
+    suchý stav ví o „pravděpodobnosti sněžení“, pokud modely hlásí sníh;
+    pozadí padají řídké tlumené vločky (`soonSnow`), na mobilu jich je
+    méně. Testů 78/78 zelených.

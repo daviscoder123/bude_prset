@@ -45,6 +45,7 @@ Tato čísla nejsou marketingový údaj. Sběrač dat (viz [Edge proxy a sběra�
 - 🇨🇿 **národní/regionální model vždy první v tabulce** s badgem **NÁRODNÍ** (pro Česko ALADIN ČHMÚ), nad ním radarové pozorování, pokud je dostupné
 - 📊 **řádek konsenzu** — mírně barevně odlišený od ostatních modelů, s celkovou pravděpodobností deště z ensemble runů
 - 🕐 **„Kdy začne pršet"** — minutový odhad začátku (i konce) deště kombinující radar, nowcasty a konsenzus modelů, včetně intervalu nejistoty
+- ❄️ **sníh jako občan první třídy** — pokud modely (nebo radar/METAR) hlásí sníh, celý verdikt se přepne na sněhový: „Sněžení do / Sníh od", intenzita v cm/h, úhrn „napadne ~X cm" i sněhová čára (z výšky nulové izotermy)
 - 📈 **pravděpodobnost s kalibrací** — procenta z ensemble (NEP přes 3×3 body ~±11 km) ohýbaná k realitě vlastními Brierovými měřeními; aplikace rozlišuje „v obci" a „někde do ~11 km"
 - 🧠 **učení z vlastních měření** — váhy zdrojů blendu, bias modelů a kalibrace procent se učí z METAR pozorování per uživatel, bez serveru
 - 🎨 **sklo design** — průsvitné panely nad živým gradientem pozadí, který mění barvu podle stavu počasí: modrofialová = prší, fialovo-oranžová = blíží se, petrolejovo-zelená = sucho
@@ -63,7 +64,7 @@ flowchart LR
     A -->|pravděpodobnost deště| E["Open-Meteo ensemble<br>3×3 body, 20–51 běhů"]
     A -->|aktuální počasí + 15min srážky| C["Open-Meteo current"]
     A -->|meteoradar + nowcasty| R["RainViewer / OPERA<br>RADVOR · met.no"]
-    A -->|satelit / ČHMÚ radar| X["EUMETSAT GIBS · IMERG<br>PseudoCAPPI 2 km"]
+    A -->|satelit / ČHMÚ radar| X["EUMETSAT IR · GPM IMERG<br>ČHMÚ PseudoCAPPI 2 km"]
     A -.->|offline shell| S["sw.js<br>network-first cache"]
 ```
 
@@ -98,7 +99,8 @@ Při každém načtení lokality se předchozí stav odstraní. Nová předpově
 - záložní geokódování: [Photon](https://photon.komoot.io) a [OpenStreetMap Nominatim](https://nominatim.org)
 - radar: [RainViewer](https://www.rainviewer.com/api.html)
 - ČHMÚ radarové snímky a národní nowcasty (DWD RADVOR, KNMI, met.no)
-- satelit: [EUMETSAT GIBS](https://worldview.earthdata.nasa.gov), srážky mimo dosah radarů: GPM IMERG
+- satelit IR: [EUMETSAT](https://view.eumetsat.int) · srážky mimo dosah radarů: [GPM IMERG (NASA GIBS)](https://worldview.earthdata.nasa.gov)
+- blesky: [Blitzortung](https://www.blitzortung.org) (WebSocket zrcadla)
 - pozorování pro měření přesnosti: METAR ([aviationweather.gov](https://www.aviationweather.gov))
 - reverzní geokódování polohy: [BigDataCloud](https://www.bigdatacloud.com)
 

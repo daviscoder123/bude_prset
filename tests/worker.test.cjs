@@ -15,7 +15,11 @@ function mockCache() {
     calls: 0,
     async match(url) {
       this.calls++;
-      return store.get(url);
+      /* skutečná CF Cache API vrací při každém matchi NEZÁVISLOU kopii
+         (tělo lze číst znovu) — mock musí dělat to samé, jinak druhé
+         čtení těla selže na "Body is disturbed" */
+      const hit = store.get(url);
+      return hit ? hit.clone() : undefined;
     },
     async put(url, resp) {
       store.set(url, resp);
@@ -722,4 +726,123 @@ test("cron: výpadek radaru shodí jen pole rv, záznam vznikne, kolo běží d�
     assert.ok(!e.rv, "radar chybí u " + n);
     assert.ok(e.err.indexOf("rv") >= 0, "rv označeno jako chyba u " + n);
   });
+});
+
+/* ===================== KOLO 8BA: ČHMÚ PASSTHROUGH ===================== */
+
+/* Pomocník: postaví syntetický TAR se dvěma členy (lead 10 a 30),
+   přesně podle formátu, který posílá ČHMÚ (hlavička 512 B, velikost
+   v oktalové soustavě, data zarovnaná na 512 B). */
+function tarWith(members) {
+  const chunks = [];
+  for (const [name, data] of members) {
+    const head = Buffer.alloc(512);
+    head.write(name, 0, "utf8");                       /* jméno (prefix/složka v pořádku) */
+    head.write(octal(data.length, 12), 124, "utf8");    /* velikost v oktalu */
+    head.write("0", 156, "utf8");                      /* typ = soubor */
+    head.write("ustar\0", 257, "utf8");
+    chunks.push(head, Buffer.from(data), Buffer.alloc(pad512(data.length)));
+  }
+  chunks.push(Buffer.alloc(1024));                     /* dva prázdné bloky = konec */
+  return Buffer.concat(chunks);
+}
+function octal(n, len) {
+  const s = (n >>> 0).toString(8);
+  return "0".repeat(Math.max(0, len - 1 - s.length)) + s + "\0";
+}
+function pad512(n) { return (512 - (n % 512)) % 512; }
+
+const PNG_STUB = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4, 5, 6, 7, 8];
+
+test("tarFindMember: najde člena podle lead, oktal velikost i zarovnání", async () => {
+  const { tarFindMember } = await import("../worker/worker.mjs");
+  const tar = tarWith([
+    ["20261107.1300/pacz2gmaps3.fct_z_cappi020.20261107.1310.10.png", PNG_STUB],
+    ["20261107.1300/pacz2gmaps3.fct_z_cappi020.20261107.1330.30.png", PNG_STUB.map((b, i) => b + 10)]
+  ]);
+  const m10 = tarFindMember(new Uint8Array(tar), "10");
+  const m30 = tarFindMember(new Uint8Array(tar), "30");
+  const m60 = tarFindMember(new Uint8Array(tar), "60");
+  assert.ok(m10, "člen +10 musí být nalezen");
+  assert.deepEqual(Array.from(m10), PNG_STUB);
+  assert.ok(m30, "člen +30 musí být nalezen (druhý, po zarovnání)");
+  assert.equal(m30[3], PNG_STUB[3] + 10, "musí to být ten SPRÁVNÝ člen");
+  assert.equal(m60, null, "člen +60 v archivu není → null");
+});
+
+test("/chmi/img: passthrough PNG s CORS, whitelist cesty, cache HIT", async () => {
+  const up = mockFetch(() => new Response(new Uint8Array(PNG_STUB), {
+    status: 200, headers: { "content-type": "image/png" }
+  }));
+  const cache = mockCache();
+  const w = await workerWith({ fetchImpl: up.impl, cache });
+  const r1 = await w.fetch(new Request("https://w.example/chmi/img?u=" +
+    encodeURIComponent("/meteorology/weather/radar/composite/pseudocappi2km/png/pacz2gmaps3.z_cappi020.20261107.1325.0.png")));
+  assert.strictEqual(r1.status, 200);
+  assert.strictEqual(r1.headers.get("access-control-allow-origin"), "*");
+  assert.strictEqual(r1.headers.get("content-type"), "image/png");
+  assert.strictEqual(r1.headers.get("x-bp-cache"), "MISS");
+  assert.deepEqual(Array.from(new Uint8Array(await r1.arrayBuffer())), PNG_STUB);
+  assert.strictEqual(up.state.urls[0].startsWith("https://opendata.chmi.cz/meteorology/weather/radar/"), true,
+    "upstream musí být ČHMÚ, ne cokoliv jiného");
+  /* druhý dotaz: cache HIT, upstream se nevolá */
+  const r2 = await w.fetch(new Request("https://w.example/chmi/img?u=" +
+    encodeURIComponent("/meteorology/weather/radar/composite/pseudocappi2km/png/pacz2gmaps3.z_cappi020.20261107.1325.0.png")));
+  assert.strictEqual(r2.headers.get("x-bp-cache"), "HIT");
+  assert.strictEqual(up.state.calls, 1);
+});
+
+test("/chmi/img: mimo whitelist → 400 a upstream se nevolá", async () => {
+  const up = mockFetch(() => { throw new Error("nesmi se volat"); });
+  const w = await workerWith({ fetchImpl: up.impl });
+  for (const bad of [
+    "/meteorology/weather/radar/../secret.png",   /* cesta ven */
+    "/other/path/file.png",                        /* jiný strom */
+    "https://evil.example/x.png",                  /* absolutní URL cizího hosta */
+    "/meteorology/weather/radar/composite.tar",    /* není .png */
+    ""                                             /* prázdná */
+  ]) {
+    const r = await w.fetch(new Request("https://w.example/chmi/img?u=" + encodeURIComponent(bad)));
+    assert.strictEqual(r.status, 400, "cesta musí být odmítnuta: " + bad);
+  }
+  assert.strictEqual(up.state.calls, 0);
+});
+
+test("/chmi/fct: vybalí člena z TARu, cache tar drží, špatné parametry → 400", async () => {
+  const tar = tarWith([
+    ["20261107.1300/pacz2gmaps3.fct_z_cappi020.20261107.1330.30.png", PNG_STUB],
+    ["20261107.1300/pacz2gmaps3.fct_z_cappi020.20261107.1340.40.png", PNG_STUB]
+  ]);
+  const up = mockFetch(() => new Response(new Uint8Array(tar), {
+    status: 200, headers: { "content-type": "application/x-tar" }
+  }));
+  const cache = mockCache();
+  const w = await workerWith({ fetchImpl: up.impl, cache });
+  const r = await w.fetch(new Request("https://w.example/chmi/fct?base=20261107.1300&lead=30"));
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.headers.get("access-control-allow-origin"), "*");
+  assert.strictEqual(r.headers.get("content-type"), "image/png");
+  assert.deepEqual(Array.from(new Uint8Array(await r.arrayBuffer())), PNG_STUB);
+  assert.strictEqual(up.state.urls[0].includes("pacz2gmaps3.fct_z_cappi020.20261107.1300.ft60s10.tar"), true,
+    "Worker stahuje TAR pojmenovaný podle BASE času");
+  /* druhý dotaz na jiný lead: tar už je v cache → upstream 1× */
+  const r2 = await w.fetch(new Request("https://w.example/chmi/fct?base=20261107.1300&lead=40"));
+  assert.strictEqual(r2.status, 200);
+  assert.strictEqual(up.state.calls, 1, "tar se stahuje jednou pro celý archiv");
+  /* chybějící lead → 404 s vysvětlením */
+  const r3 = await w.fetch(new Request("https://w.example/chmi/fct?base=20261107.1300&lead=60"));
+  assert.strictEqual(r3.status, 404);
+  /* špatné parametry → 400 */
+  for (const qs of ["base=20261107&lead=30", "base=abcd.efgh&lead=30",
+                    "base=20261107.1300&lead=35", "base=20261107.1300&lead=90"]) {
+    const rr = await w.fetch(new Request("https://w.example/chmi/fct?" + qs));
+    assert.strictEqual(rr.status, 400, "parametry musí projít validací: " + qs);
+  }
+});
+
+test("healthz: hlásí CHMU endpointy (kolo 8ba)", async () => {
+  const w = await workerWith({ fetchImpl: async () => { throw new Error("nesmi se volat"); } });
+  const r = await w.fetch(new Request("https://w.example/healthz"));
+  const j = await r.json();
+  assert.ok(Array.isArray(j.chmi) && j.chmi.includes("/chmi/img") && j.chmi.includes("/chmi/fct"));
 });

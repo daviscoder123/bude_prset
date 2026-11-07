@@ -543,3 +543,157 @@ test('SVG flagy pokryvaji vsechny zeme modelu (kolo 8ae)',()=>{
     assert.ok(/fill=|stroke=/.test(frag),'vlajka bez vyplne: '+frag.slice(0,12));
   }
 });
+
+/* ===================== KOLO 8ba/8bb: zdroje a sníh ===================== */
+
+/* Kolo 8ba: zrcadla Blitzortungu — ws7 je mrtvé (nevedle žádné spojení),
+   ws1/ws2/ws8 žijí (ověřeno živě). invariant: mrtvý host v seznamu nesmí
+   být, živá alespoň tři. */
+test('Blitzortung: živá zrcadla ws1/ws2/ws8, mrtvé ws7 v seznamu není (kolo 8ba)',()=>{
+  const m=script.match(/var BLITZ_HOSTS = \[([^\]]*)\]/);
+  assert.ok(m,'BLITZ_HOSTS nenalezen');
+  const hosts=m[1];
+  assert.ok(hosts.includes('ws1.blitzortung.org'),'chybi ws1');
+  assert.ok(hosts.includes('ws2.blitzortung.org'),'chybi ws2');
+  assert.ok(hosts.includes('ws8.blitzortung.org'),'chybi ws8');
+  assert.ok(!hosts.includes('ws7.blitzortung.org'),'mrtve ws7 nesmi byt v seznamu');
+});
+
+/* Kolo 8ba: vrstvy EUMETSAT/GIBS/IMERG dnes existují (staré názvy jsou
+   mrtvé — LayerNotDefined/404). invariant: nové názvy v kódu, staré ne. */
+test('vrstvy EUMETSAT a IMERG odpovidaji dnesnimu API (kolo 8ba)',()=>{
+  assert.ok(script.includes('"msg_fes:ir108"'),'chybi ziva vrstva msg_fes:ir108');
+  assert.ok(script.includes('"msg_iodc:ir108"'),'chybi zaloha msg_iodc:ir108');
+  assert.ok(!script.includes('meteosat:msg_ir108"'),'mrtva meteosat:* vrstva nesmi zustat');
+  assert.ok(script.includes('"IMERG_Precipitation_Rate_30min"'),'chybi ziva vrstva IMERG');
+  assert.ok(!script.includes('"GPM_3IMERGHH"'),'mrtva vrstva GPM_3IMERGHH nesmi zustat');
+  assert.ok(script.includes('GPM_Precipitation_Rate'),'chybi oficialni paleta IMERG');
+  assert.ok(script.includes('"GoogleMapsCompatible_Level6"'),'GIBS dnes ma jen Level6');
+  assert.ok(!script.includes('"GoogleMapsCompatible_Level7"'),'Level7 vraci 400');
+});
+
+/* Kolo 8ba: syntetická šedá škála pro šedotónové IR vrstvy EUMETSATu —
+   GetLegendGraphic k nim vrací jen ikonu, ale ordinálová logika potřebuje
+   jen POŘADÍ, a to 16 odstínů 0–255 dodá. */
+test('eumetGrayScale: 16 odstínu pres cely rozsah, ordinaly na krajích (kolo 8ba)',()=>{
+  const c=context(['eumetGrayScale','wmsncOrdinal']);
+  const s=c.eumetGrayScale();
+  assert.equal(s.length,16);
+  assert.equal(s[0].r,0);assert.equal(s[0].g,0);assert.equal(s[0].b,0);
+  assert.equal(s[15].r,255);assert.equal(s[15].g,255);assert.equal(s[15].b,255);
+  /* realny pixel z msg_fes:ir108 (ověřeno živě: hodnoty 44–189, R=G=B) */
+  assert.equal(c.wmsncOrdinal(s,[44,44,44,255]),3/15);
+  assert.equal(c.wmsncOrdinal(s,[255,255,255,255]),1);
+  assert.equal(c.wmsncOrdinal(s,[0,0,0,255]),0);
+  /* barva daleko od škály nemá ordinál — vrací null, ne odhad */
+  assert.equal(c.wmsncOrdinal(s,[0,120,252,255]),null);
+});
+
+/* Kolo 8bb: přepočet mm vody → cm sněhu; 1 cm ≈ 0,7 mm vody. */
+test('snowCmFromMm + fmtCm: vodni ekvivalent na cm, ceska desetina carka (kolo 8bb)',()=>{
+  const c=context(['snowCmFromMm','fmtCm'],{SNOW_CM_TO_MM:0.7});
+  assert.equal(c.snowCmFromMm(null),null);
+  assert.equal(c.snowCmFromMm(0),null);
+  assert.equal(c.snowCmFromMm(-1),null);
+  assert.equal(c.snowCmFromMm(0.03),null);            /* pod 0,1 cm → nic */
+  assert.equal(c.snowCmFromMm(0.07),0.1);            /* 0,07 mm → ~0,1 cm */
+  assert.equal(c.snowCmFromMm(0.7),1);               /* 1 cm sněhu */
+  assert.equal(c.snowCmFromMm(1.4),2);               /* zaokrouhleno na 0,5 */
+  assert.equal(c.snowCmFromMm(2.8),4);               /* 4 cm */
+  assert.equal(c.snowCmFromMm(4.9),7);               /* nad 5 cm po celých */
+  assert.equal(c.fmtCm(0.5),'0,5');
+  assert.equal(c.fmtCm(2.5),'2,5');
+  assert.equal(c.fmtCm(7),'7');
+  assert.equal(c.fmtCm(null),'–');
+});
+
+/* Kolo 8bb: pomocníci sněhového verdiktu čtou globální stav — přes vm
+   kontext se jim vstříkne modelState/verdictState/atmoState jako v appce. */
+test('snowShareAtPeak/snowLineAt/isSnowWindow: verdikt sníhu z modelu (kolo 8bb)',()=>{
+  const mk=(globals)=>context(['snowShareAtPeak','snowLineAt','snowLineTxt','isSnowWindow'],globals);
+  /* modely ve vrcholu (index 3): 4 mokré, 3 sněhové → 0,75 → sníh */
+  const snow=mk({modelState:{snowFrac:[null,0,0.25,0.75,1]},
+                 verdictState:{pkIdx:3},
+                 whenState:null,atmoState:null});
+  assert.equal(snow.snowShareAtPeak(),0.75);
+  assert.ok(snow.isSnowWindow());
+  /* déšť: podíl sněhových 0,3 */
+  const rain=mk({modelState:{snowFrac:[0,0,0.3]},
+                 verdictState:{pkIdx:2},
+                 whenState:null,atmoState:null});
+  assert.equal(rain.snowShareAtPeak(),0.3);
+  assert.ok(!rain.isSnowWindow());
+  /* pozorování (whenState.type) přebije i mlčící modely */
+  const seen=mk({modelState:null,verdictState:null,
+                 whenState:{type:{t:'sněžení'}},atmoState:null});
+  assert.ok(seen.isSnowWindow());
+  /* sněhová čára: hourly pole indexované od nowIdx; peak v 5. hodině */
+  const line=mk({atmoState:{flh:[0,200,400,600,800,1200,1400],nowIdx:3},
+                 whenState:null,modelState:null,verdictState:null});
+  assert.equal(line.snowLineAt(5),1400);   /* nowIdx 3 + 5 = 8, pole má 7 hodnot → poslední (1400) */
+  assert.equal(line.snowLineAt(0),600);   /* současnost */
+  assert.equal(line.snowLineAt(null),600);
+  /* bez pole vrací null, ne odhad */
+  const none=mk({atmoState:null,whenState:null,modelState:null,verdictState:null});
+  assert.equal(none.snowLineAt(0),null);
+  assert.equal(none.snowShareAtPeak(),null);
+  assert.ok(!none.isSnowWindow());
+  /* formát: pod 1000 m na 50 m, nad na stovky */
+  assert.equal(snow.snowLineTxt(1234),'1200');
+  assert.equal(snow.snowLineTxt(672),'650');
+  assert.equal(snow.snowLineTxt(null),'–');
+});
+
+/* Kolo 8ba: nová legenda ČHMÚ (scl-dbz-mmh.png) má barevnou škálu vlevo
+   a šedý panel vpravo — střední sloupec by trefil jen šedou. Nová
+   extrakce projede všechny sloupce, zahodí 1px tiky i tmavý text a
+   výsledek OBRÁTÍ (silné dBZ má být nejvyšší ordinál, jako u DWD). */
+test('chmiScaleFromImageData: nalezne rampu mimo stred, tiky i text zahodi, obrati poradi (kolo 8ba)',()=>{
+  const c=context(['chmiScaleFromImageData']);
+  /* syntetická legenda 8×72: rampa ve sloupcích 0–5, panel 6–7.
+     Shora: 3px tmavý text (28,28,28) → padá, pak 14 barev po 4px
+     s 1px šedým tikem (64,64,64) mezi segmenty. Silné nahoře. */
+  const RAMP=[[160,0,0],[252,0,0],[252,88,0],[252,132,0],[252,176,0],[224,220,0],
+              [156,220,0],[52,216,0],[0,188,0],[0,160,0],[0,108,192],[0,0,252],
+              [48,0,168],[56,0,112]];
+  const W=8,H=3+RAMP.length*4+(RAMP.length-1);
+  const d=new Array(W*H*4).fill(255);
+  const put=(x,y,rgb)=>{const o=(y*W+x)*4;d[o]=rgb[0];d[o+1]=rgb[1];d[o+2]=rgb[2];d[o+3]=255;};
+  for(let x=0;x<W;x++)for(let y=0;y<H;y++)put(x,y,[64,64,64]);   /* panel/tiky */
+  for(let x=0;x<6;x++){
+    put(x,0,[28,28,28]);put(x,1,[28,28,28]);put(x,2,[28,28,28]); /* text hlavičky */
+    let y=3;
+    RAMP.forEach((col,i)=>{
+      for(let k=0;k<4;k++)put(x,y+k,col);
+      y+=4;
+      if(i<RAMP.length-1){put(x,y,[64,64,64]);y+=1;}             /* tik */
+    });
+  }
+  const s=c.chmiScaleFromImageData(d,W,H);
+  assert.ok(s,'extrakce nesmi selhat');
+  assert.equal(s.length,14,'oczekavam 14 barev, ne '+s.length);
+  assert.ok(s[0].r===56&&s[0].g===0&&s[0].b===112,'nejslabší (tmavě fialová) má být PRVNÍ po otočení');
+  assert.ok(s[13].r===160&&s[13].g===0&&s[13].b===0,'poslední musí být nejsilnější barva rampy');
+  assert.ok(!s.some(e=>e.r===64&&e.g===64&&e.b===64),'tiky/panel se musí zahodit');
+  assert.ok(!s.some(e=>e.r===28&&e.g===28&&e.b===28),'text hlavičky se musí zahodit');
+  /* samý panel → null, ne prázdná škála */
+  assert.equal(c.chmiScaleFromImageData(new Array(64*4).fill(255),8,64),null);
+});
+
+/* Kolo 8ba: URL ČHMÚ jedou přes proxy, predpovedi pres TAR endpoint. */
+test('chmiUrlNow/chmiUrlFct: pres BP_PROXY, base cas v TARu, nova legenda (kolo 8ba)',()=>{
+  const mk=(proxy)=>context(['chmiUrlNow','chmiUrlFct','chmiProxyImg','chmiStamp'],
+    {BP_PROXY:proxy,CHMI_BASE:'https://opendata.chmi.cz/meteorology/weather/radar'});
+  const t=Date.UTC(2026,10,7,13,25,0);
+  const px=mk('https://w.example');
+  assert.ok(px.chmiUrlNow(t).startsWith('https://w.example/chmi/img?u='),'kompozit ma jit pres /chmi/img');
+  assert.equal(decodeURIComponent(px.chmiUrlNow(t)).includes('/composite/pseudocappi2km/png/pacz2gmaps3.z_cappi020.20261107.1325.0.png'),true);
+  const f=px.chmiUrlFct(t,30);
+  assert.ok(f.startsWith('https://w.example/chmi/fct?base=20261107.1325&lead=30'),'fct: base cas VYPOCTU + lead, ne cas platnosti: '+f);
+  const direct=mk('');
+  assert.equal(direct.chmiUrlNow(t),'https://opendata.chmi.cz/meteorology/weather/radar/composite/pseudocappi2km/png/pacz2gmaps3.z_cappi020.20261107.1325.0.png');
+  assert.equal(direct.chmiUrlFct(t,10),'https://opendata.chmi.cz/meteorology/weather/radar/composite/fct_pseudocappi2km/png/pacz2gmaps3.fct_z_cappi020.20261107.1325.10.png');
+  /* invarianty zdrojů v index.html */
+  assert.ok(script.includes('scl-dbz-mmh.png'),'nova legenda scl-dbz-mmh.png');
+  assert.ok(!script.includes('scl-dbzmmh.png"'),'stara legenda scl-dbzmmh.png uz neexistuje (404)');
+});

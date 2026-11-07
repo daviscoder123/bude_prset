@@ -31,7 +31,9 @@ Záznamy se ukládají do KV pod `raw/{YYYYMMDDHH}:{mm}`, TTL 14 dní.
 |---|---|
 | `GET /om/v1/forecast?<params>` | proxy na api.open-meteo (TTL 10 min) |
 | `GET /om/v1/ensemble?<params>` | proxy na ensemble-api (TTL 15 min) |
-| `GET /healthz` | diagnostika (proxy + kolektor) |
+| `GET /chmi/img?u=<path>` | ČHMÚ radarový PNG přes proxy (CORS `*`, whitelist) |
+| `GET /chmi/fct?base=YYYYMMDD.HHMM&lead=10..60` | ČHMÚ předpověď z TAR archivu |
+| `GET /healthz` | diagnostika (proxy + kolektor + chmi) |
 | `GET /analysis` | HTML dashboard: náhled + download JSON |
 | `GET /analysis/page?h=YYYYMMDDHH` | JSON: všech 12 dílků dané hodiny |
 | `GET /analysis/status` | JSON: poslední zápisy, kv připojeno |
@@ -46,6 +48,27 @@ Záznamy se ukládají do KV pod `raw/{YYYYMMDDHH}:{mm}`, TTL 14 dní.
 | Subrequesty / probuzení | ~21–29 (nejhorší případ ~38) | 50 |
 | METAR dotazy | 288/den (dávkově) | bez významného limitu |
 | RainViewer dotazy | 12 maps.json + 288 dlažnic/den | veřejné API bez klíče a limitu |
+
+## Část 3: ČHMÚ radar přes proxy (kolo 8ba)
+
+ČHMÚ publikuje radarové snímky bez CORS hlaviček — prohlížeč je nemůže
+přečíst do canvasu. Worker je proto protahuje:
+
+- **`GET /chmi/img?u=<path>`** — passthrough PNG z
+  `https://www.chmi.cz/files/portal/images/meteorology/radar/` (přísný
+  whitelist `/meteorology/weather/radar/*.png`, `..` se odmítá, vrací
+  `Access-Control-Allow-Origin: *`). Cache: kompozit 120 s, legenda
+  86 400 s.
+- **`GET /chmi/fct?base=YYYYMMDD.HHMM&lead=10..60`** — ČHMÚ už
+  nepublikuje předpověďní snímky jako PNG, ale jako TAR archiv
+  `pacz2gmaps3.fct_z_cappi020.<base>.ft60s10.tar`. Worker TAR stáhne,
+  vybalí člena pro daný `lead` (`tarFindMember`: hlavička 512 B, oktalová
+  velikost od offsetu 124) a vrátí samotné PNG. Cache 240 s. Platí, že
+  `base` je čas výpočtu (ne validita), takže appka posílá poslední
+  známý slot a při chybě zkouší o krok starší.
+
+Bez nasazeného Workera (`BP_PROXY`) se ČHMÚ modul v appce vypíná —
+přímé čtení z prohlížeče CORS nepustí.
 
 Whelista parametrů: `latitude`, `longitude`, `hourly`, `models`,
 `forecast_hours`, `timeformat`, `timezone`. Vše ostatní se zahodí;
