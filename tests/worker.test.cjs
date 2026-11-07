@@ -58,7 +58,8 @@ test("healthz vrací ok a seznam endpointů", async () => {
 test("forecast: passthrough na api.open-meteo se stejnými parametry, MISS + CORS", async () => {
   const up = mockFetch(() => okJson({ dummy: 1 }));
   const w = await workerWith({ fetchImpl: up.impl });
-  const r = await w.fetch(new Request("https://w.example/om/v1/forecast?" + QS));
+  const r 
+= await w.fetch(new Request("https://w.example/om/v1/forecast?" + QS));
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.headers.get("x-bp-cache"), "MISS");
   assert.strictEqual(r.headers.get("access-control-allow-origin"), "*");
@@ -96,7 +97,8 @@ test("ensemble: passthrough na ensemble-api.open-meteo s více body", async () =
   const r = await w.fetch(new Request("https://w.example/om/v1/ensemble?" + qs));
   assert.strictEqual(r.status, 200);
   assert.strictEqual(new URL(up.state.urls[0]).host, "ensemble-api.open-meteo.com");
-  assert.strictEqual(new URL(up.state.urls[0]).searchParams.get("latitude"), "49.1,49.2");
+  assert.
+strictEqual(new URL(up.state.urls[0]).searchParams.get("latitude"), "49.1,49.2");
 });
 
 test("whitelista: nepovolený parametr se zahodí, povolené se zachovají", async () => {
@@ -134,7 +136,8 @@ test("validace: forecast_hours nad 64 → 400", async () => {
 
 test("chybějící latitude/longitude → 400", async () => {
   const w = await workerWith({ fetchImpl: async () => okJson({}) });
-  const r = await w.fetch(new Request("https://w.example/om/v1/forecast?hourly=precipitation&forecast_hours=5"));
+  const r = await w.fetch(new Request("https://w.example/om/v1/forecast?hourly=precipitation&forecast_hou
+rs=5"));
   assert.strictEqual(r.status, 400);
 });
 
@@ -178,7 +181,8 @@ async function collector() {
   return await import("../worker/worker.mjs");
 }
 
-/* Mock KV se stejným kontraktem jako CF KV namespace. */
+/* Mock KV se stejn
+ým kontraktem jako CF KV namespace. */
 function mockKv() {
   const store = new Map();
   return {
@@ -240,7 +244,8 @@ function crc32(buf) {
 }
 
 /* Sestaví platné 8bit RGBA PNG. pixel(x,y) → [r,g,b,a];
-   filters = jedna hodnota nebo pole filtrů per řádek (0–4). Data se
+   filters =
+ jedna hodnota nebo pole filtrů per řádek (0–4). Data se
    při zápisu SKUTEČNĚ filtrují (jako to dělá libpng), jinak by deklarace
    filtru lhala a dekodér je správně odmítl jinak dekódovat. */
 function paethPred(a, b, c) {
@@ -289,7 +294,8 @@ function makePng(w, h, pixel, filters) {
   };
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
-  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12
+] = 0;
   return Buffer.concat([
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     chunk("IHDR", ihdr),
@@ -336,7 +342,8 @@ test("sběrač: 100 obcí s unikátními názvy, stanicemi a platnými souřadni
     assert.ok(!names.has(p.n), "duplicitní název: " + p.n);
     assert.ok(!icaos.has(p.icao), "duplicitní stanice: " + p.icao);
     names.add(p.n); icaos.add(p.icao);
-    assert.ok(p.lat >= 41 && p.lat <= 61 && p.lon >= -7 && p.lon <= 27, "souřadnice v Evropě: " + p.n);
+    assert.ok(p.lat >= 41 && p.lat <= 61 && p.lon >= -7 && p.lon <= 27, "souřadnice
+ v Evropě: " + p.n);
     assert.match(p.icao, /^[A-Z]{4}$/);
   });
 });
@@ -377,7 +384,8 @@ test("sběrač: URL zrcadlí vstupy aplikace (minutely_15, 3×3 mřížka, 9 hod
   assert.strictEqual(fc.searchParams.get("minutely_15"), "precipitation,rain,showers,snowfall");
   assert.strictEqual(fc.searchParams.get("forecast_minutely_15"), "8");
   assert.strictEqual(fc.searchParams.get("forecast_hours"), "13");
-  const ens = new URL(m.buildEnsUrl(p));
+  const ens 
+= new URL(m.buildEnsUrl(p));
   assert.strictEqual(ens.host, "ensemble-api.open-meteo.com");
   assert.strictEqual(ens.pathname, "/v1/ensemble");
   const lats = ens.searchParams.get("latitude").split(",").map(Number);
@@ -412,7 +420,8 @@ test("METAR parser: intenzita, déšť, sníh, bouřka, přeháňka, recent, vic
   p = m.parseMetar("METAR LKPR 061930Z 07006KT CAVOK 01/M00 Q1025 NOSIG");
   assert.strictEqual(p.r, 0); assert.strictEqual(p.s, 0); assert.strictEqual(p.i, 0);
   p = m.parseMetar("METAR LKPR 061930Z 07006KT 8000 RERA NSC 01/M00 Q1025");
-  assert.strictEqual(p.r, 0); assert.strictEqual(p.re, 1);
+  assert.strictEqual(p.
+r, 0); assert.strictEqual(p.re, 1);
   p = m.parseMetar("METAR LKPR 061930Z 07006KT 9999 VCSH NSC 01/M00 Q1025");
   assert.strictEqual(p.r, 0); assert.strictEqual(p.vc, 1);
   p = m.parseMetar("METAR LKPR 061930Z 07006KT 8000 -SN NSC M02/M03 Q1025");
@@ -420,6 +429,15 @@ test("METAR parser: intenzita, déšť, sníh, bouřka, přeháňka, recent, vic
   /* klíčová slova METARu se nesmí splést s jevy */
   p = m.parseMetar("METAR LKPR 061930Z 07006KT 8000 NSC 01/M00 Q1025 NOSIG AUTO");
   assert.strictEqual(p.r, 0); assert.strictEqual(p.s, 0); assert.strictEqual(p.th, 0);
+  /* Regrese 7. 11. 2026 (Basilej): jevy jen v trendové skupině TEMPO/BECMG
+     nejsou pozorování — parser se musí u TEMPO/BECMG/NOSIG/RMK zastavit. */
+  p = m.parseMetar("METAR LFSB 070330Z AUTO 28002KT 7000 OVC008 06/06 Q1023 TEMPO 2000 -DZRA BR BECMG SCT020");
+  assert.strictEqual(p.r, 0); assert.strictEqual(p.sh, 0);
+  p = m.parseMetar("METAR EGCC 062120Z COR AUTO VRB01KT 7000 NCD 08/07 Q1024 NOSIG TEMPO 4000 RA");
+  assert.strictEqual(p.r, 0);
+  /* jev v hlavním těle zůstává vidět, i když za ním následuje trend */
+  p = m.parseMetar("METAR LSZB 062120Z AUTO 30002KT 4900 -RA SCT006 BKN012 07/07 Q1022 TEMPO 6000");
+  assert.strictEqual(p.r, 1); assert.strictEqual(p.i, 1);
 });
 
 test("parsování forecast odpovědi: mm/h z current, 15min kroky, probability", async () => {
@@ -455,7 +473,8 @@ test("cron: jedno probuzení sebere svůj dílek a zapíše JEDEN klíč s TTL 1
   const up = collectorFetch();
   const kv = mockKv();
   /* 14:00 UTC → dílek 0 → obsahuje Prahu (index 0) */
-  const w = m.createWorker({ fetchImpl: up.impl, kv, now: () => new Date(Date.UTC(2026, 10, 6, 14, 0)) });
+  const w = m
+.createWorker({ fetchImpl: up.impl, kv, now: () => new Date(Date.UTC(2026, 10, 6, 14, 0)) });
   const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 14, 0) });
   assert.ok(res.ok, JSON.stringify(res));
   assert.strictEqual(res.key, "raw/2026110614:00");
@@ -490,7 +509,8 @@ test("cron: jedno probuzení sebere svůj dílek a zapíše JEDEN klíč s TTL 1
 });
 
 test("cron: výpadek jednoho upstreamu shodí jen dotčené obce, kolo proběhne", async () => {
-  const m = await collector();
+  const m = await collecto
+r();
   const up = collectorFetch({ failIf: (u) => u.indexOf("ensemble-api") >= 0 });
   const kv = mockKv();
   const w = m.createWorker({ fetchImpl: up.impl, kv });
@@ -530,7 +550,8 @@ test("analysis/status: hlásí kv, počet obcí a poslední zápisy", async () =
   assert.strictEqual(j2.last.n, 2);
 });
 
-test("analysis/page: slučuje 12 dílků hodiny a vrací meta obcí; špatný h → 400", async () => {
+test("analysis/page: slučuje 12 dílků hodiny a vrací meta obcí;
+ špatný h → 400", async () => {
   const m = await collector();
   const kv = mockKv();
   for (let s = 0; s < 12; s++) {
@@ -570,7 +591,8 @@ test("analysis dashboard: HTML s ovládacími prvky, healthz hlásí kolektor", 
 
 test("sběrač: ensemble fallback — po výpadku icon_d2 sebere icon_eu (tryNext jako v appce)", async () => {
   const m = await collector();
-  /* dílek 0 obsahuje Prahu; icon_d2 vrátí 400 (mimo doménu), sběrač musí spadnout na icon_eu */
+  /* dílek 0 obsahuje Prahu; icon_d
+2 vrátí 400 (mimo doménu), sběrač musí spadnout na icon_eu */
   const impl = async (url) => {
     if (url.indexOf("models=icon_d2") >= 0) return new Response("no data", { status: 400 });
     if (url.indexOf("models=icon_eu") >= 0) return okJson(ensFixture());
@@ -605,7 +627,8 @@ test("dbzToMm: Marshall–Palmer pro déšť i sníh, šum a vadné pixely → 0
   assert.strictEqual(m.dbzToMm(9, false), 0, "pod 10 dBZ šum");
   assert.strictEqual(m.dbzToMm(76, false), 0, "nad 75 dBZ vadný pixel");
   assert.strictEqual(m.dbzToMm(null, false), 0);
-  assert.strictEqual(m.dbzToMm(40, false), 22.72 > m.dbzToMm(40, false) ? m.dbzToMm(40, false) : 0, "40 dBZ pod stropem 150");
+  assert.strictEqual(m.dbzToMm(40, fal
+se), 22.72 > m.dbzToMm(40, false) ? m.dbzToMm(40, false) : 0, "40 dBZ pod stropem 150");
   assert.ok(m.dbzToMm(40, false) > 10 && m.dbzToMm(40, false) < 30);
 });
 
@@ -644,7 +667,8 @@ test("PNG dekodér: filtry 0–4 dávejí stejný výřez jako filtr 0", async (
 test("PNG dekodér: alfa 0 = bez odrazu (d:null, m:0), sněhový bit 128", async () => {
   const m = await collector();
   /* 8×8: vše jasno kromě středu, který sněží (red 128+64 → dbz 32, sníh) */
-  const png = makePng(8, 8, (x, y) => (x === 4 && y === 3) ? [192, 0, 0, 255] : [0, 0, 0, 0], 2);
+  const png = makePng(8, 8, (x, y) => (x === 4 && y === 3) ? [192, 0, 0, 255]
+ : [0, 0, 0, 0], 2);
   const patch = await m.pngDecodePatch(png, 4, 3, 1);
   assert.ok(patch);
   assert.strictEqual(patch.length, 9);
@@ -684,7 +708,8 @@ test("pickFrame: nejbližší snímek z radar.past, tolerance 12 min", async () 
   assert.strictEqual(f.host, "https://tilecache.rainviewer.com");
   /* chybějící host → výchozí tilecache */
   assert.strictEqual(m.pickFrame({ radar: { past: [{ time: T0, path: "/x" }] } }, nowMs).host, "https://tilecache.rainviewer.com");
-  /* příliš starý snímek → null */
+  /* pří
+liš starý snímek → null */
   assert.strictEqual(m.pickFrame({ radar: { past: [{ time: T0 - 1200, path: "/x" }] } }, nowMs), null, "20 min staré je mimo");
   assert.strictEqual(m.pickFrame({ radar: { past: [] } }, nowMs), null);
   assert.strictEqual(m.pickFrame("to není json", nowMs), null);
@@ -699,18 +724,6 @@ test("rvTileUrl: schéma 0 + sněhový příznak, zoom 7, 256px", async () => {
   assert.strictEqual(u.pathname, "/v2/radar/abc/256/7/" + tc.tx + "/" + tc.ty + "/0/0_1.png");
 });
 
-test("cron: výpadek radaru shodí jen pole rv, záznam vznikne, kolo běží dál", async () => {
-  const m = await collector();
-  const up = collectorFetch({ failIf: (u) => u.indexOf("rainviewer") >= 0 || u.indexOf("/v2/radar/") >= 0 });
-  const kv = mockKv();
-  const w = m.createWorker({ fetchImpl: up.impl, kv });
-  const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 15, 0) });
-  assert.ok(res.ok);
-  const rec = JSON.parse(kv.store.get(res.key).v);
-  Object.keys(rec.p).forEach((n) => {
-    const e = rec.p[n];
-    assert.ok(e.fc && e.ens, "předpovědi přežily výpadek radaru u " + n);
-    assert.ok(!e.rv, "radar chybí u " + n);
-    assert.ok(e.err.indexOf("rv") >= 0, "rv označeno jako chyba u " + n);
-  });
-});
+test("cron: výpadek radaru shodí jen 
+
+... [Content truncated]
