@@ -336,6 +336,11 @@ export function parseMetar(rawOb) {
   var out = { raw: String(rawOb), r: 0, i: 0, s: 0, th: 0, sh: 0, re: 0, vc: 0 };
   var toks = String(rawOb).replace(/^METAR |^SPECI /, "").split(/\s+/);
   for (var i = 0; i < toks.length; i++) {
+    /* Konec hlavního těla zprávy: trendové skupiny (TEMPO/BECMG — předpověď
+       vývoje, nikoli pozorování), NOSIG a RMK nesmí do hodnocení aktuálního
+       počasí. Jinak by např. „TEMPO 2000 -DZRA BR“ z Basileje (11× za noc,
+       aktuálně jen zataženo s mlhou) počítalo jako reálný déšť. */
+    if (toks[i] === "TEMPO" || toks[i] === "BECMG" || toks[i] === "NOSIG" || toks[i] === "RMK") break;
     var m = WX_TOKEN_RE.exec(toks[i]);
     if (!m) continue;
     var pre = m[1] || "", desc = m[2] || "";

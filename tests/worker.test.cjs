@@ -420,6 +420,15 @@ test("METAR parser: intenzita, déšť, sníh, bouřka, přeháňka, recent, vic
   /* klíčová slova METARu se nesmí splést s jevy */
   p = m.parseMetar("METAR LKPR 061930Z 07006KT 8000 NSC 01/M00 Q1025 NOSIG AUTO");
   assert.strictEqual(p.r, 0); assert.strictEqual(p.s, 0); assert.strictEqual(p.th, 0);
+  /* Regrese 7. 11. 2026 (Basilej): jevy jen v trendové skupině TEMPO/BECMG
+     nejsou pozorování — parser se musí u TEMPO/BECMG/NOSIG/RMK zastavit. */
+  p = m.parseMetar("METAR LFSB 070330Z AUTO 28002KT 7000 OVC008 06/06 Q1023 TEMPO 2000 -DZRA BR BECMG SCT020");
+  assert.strictEqual(p.r, 0); assert.strictEqual(p.sh, 0);
+  p = m.parseMetar("METAR EGCC 062120Z COR AUTO VRB01KT 7000 NCD 08/07 Q1024 NOSIG TEMPO 4000 RA");
+  assert.strictEqual(p.r, 0);
+  /* jev v hlavním těle zůstává vidět, i když za ním následuje trend */
+  p = m.parseMetar("METAR LSZB 062120Z AUTO 30002KT 4900 -RA SCT006 BKN012 07/07 Q1022 TEMPO 6000");
+  assert.strictEqual(p.r, 1); assert.strictEqual(p.i, 1);
 });
 
 test("parsování forecast odpovědi: mm/h z current, 15min kroky, probability", async () => {
