@@ -31,6 +31,9 @@ jobs:
           git add docs/screenshots
           if ! git diff --cached --quiet; then
             git commit -m "Auto: aktualizace screenshotů pro README [skip ci]"
+            # Pojistka proti závodu dvou botů o main (např. s Grafy přesnosti):
+            # rebasuj na čerstvý main před pushem (7. 11. 2026).
+            git pull --rebase origin main
             git push
           else
             echo "Zadne zmeny snimku."

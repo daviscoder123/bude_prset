@@ -9,6 +9,7 @@ on:
     paths: ['scripts/accuracy_charts.py', '.github/workflows/graphics.yml']
 permissions:
   contents: write
+  issues: write
 jobs:
   graphics:
     runs-on: ubuntu-24.04
@@ -24,6 +25,10 @@ jobs:
           git add docs/graphics
           if ! git diff --cached --quiet; then
             git commit -m "Auto: aktualizace grafů přesnosti pro README [skip ci]"
+            # Jiný workflow (Screenshots) mohl mezitím pushnout commit do main —
+            # závodu dvou botů o main vznikl non-fast-forward (7. 11. 2026).
+            # Rebase na čerstvý main; grafy se s nikým nekříží, konflikt nenastane.
+            git pull --rebase origin main
             git push
           else
             echo "Grafy beze změn."
