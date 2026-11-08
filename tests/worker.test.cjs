@@ -846,3 +846,158 @@ test("healthz: hlásí CHMU endpointy (kolo 8ba)", async () => {
   const j = await r.json();
   assert.ok(Array.isArray(j.chmi) && j.chmi.includes("/chmi/img") && j.chmi.includes("/chmi/fct"));
 });
+
+/* ============ KOLO 8BB: ODOLNOST SBĚRU (kvóta 429, retry, budget) ============ */
+
+/* METAR fixture pro cely dilek: dynamicky podle ids= v URL, at maji
+   vsechny obce slice ground truth (testy 8bb pracuji s ruznymi dílky). */
+function metarFixtureFor(url) {
+  const ids = decodeURIComponent(String(url).split("ids=")[1].split("&")[0]).split(",").filter(Boolean);
+  return okJson(ids.map((id) => ({
+    icaoId: id, obsTime: 1794000300, temp: 2,
+    rawOb: "METAR " + id + " 061930Z 07006KT 8000 -RA NSC 01/M00 Q1025 NOSIG"
+  })));
+}
+
+test("kolo 8bb: 429 na ensemble -> cooldown kola (1 subrequest), zadna kaskada, record.cd", async () => {
+  const m = await collector();
+  const urls = [];
+  const impl = async (url) => {
+    urls.push(url);
+    if (url.indexOf("ensemble-api") >= 0) return new Response("quota exceeded", { status: 429 });
+    if (url.indexOf("api.open-meteo.com") >= 0) return okJson(fcFixture());
+    if (url.indexOf("weather-maps.json") >= 0) return okJson(mapsFixture());
+    if (url.indexOf("/v2/radar/") >= 0) return new Response(tileFixture(), { status: 200 });
+    if (url.indexOf("aviationweather.gov") >= 0) return metarFixtureFor(url);
+    return okJson([]);
+  };
+  const kv = mockKv();
+  const w = m.createWorker({ fetchImpl: impl, kv });
+  const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 14, 30) });
+  assert.ok(res.ok, JSON.stringify(res));
+  assert.strictEqual(urls.filter((u) => u.indexOf("ensemble-api") >= 0).length, 1,
+    "ensemble po 429 musí stát jediný subrequest na celé kolo");
+  assert.strictEqual(urls.filter((u) => u.indexOf("models=icon_eu") >= 0).length, 0,
+    "429 se NESMÍ kaskádovat na další model");
+  assert.ok(urls.length <= 50, "rozpočet subrequestů: " + urls.length);
+  const rec = JSON.parse(kv.store.get(res.key).v);
+  assert.strictEqual(rec.cd, "ens429", "důvod cooldownu v záznamu pro diagnostiku");
+  Object.keys(rec.p).forEach((n) => {
+    assert.ok(rec.p[n].fc, "fc u " + n);
+    assert.ok(rec.p[n].rv, "rv u " + n + " nesmí trpět kvótou ensemble");
+    assert.ok(rec.p[n].met, "met u " + n);
+    assert.deepStrictEqual(rec.p[n].err, ["ens"], "jediná chyba je ens u " + n);
+  });
+});
+
+test("kolo 8bb: zdravé kolo načte ens až po rv (ground truth první), per-worker cooldown nekvete dál", async () => {
+  const m = await collector();
+  const urls2 = [];
+  const impl2 = async (url) => {
+    urls2.push(url);
+    if (url.indexOf("ensemble-api") >= 0) return okJson(ensFixture());
+    if (url.indexOf("api.open-meteo.com") >= 0) return okJson(fcFixture());
+    if (url.indexOf("weather-maps.json") >= 0) return okJson(mapsFixture());
+    if (url.indexOf("/v2/radar/") >= 0) return new Response(tileFixture(), { status: 200 });
+    if (url.indexOf("aviationweather.gov") >= 0) return metarFixtureFor(url);
+    return okJson([]);
+  };
+  /* nová instance = nové probuzení cronu; cooldown je per-worker */
+  const kv2 = mockKv();
+  const w2 = m.createWorker({ fetchImpl: impl2, kv: kv2 });
+  const res2 = await w2.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 14, 30) });
+  assert.ok(res2.ok, JSON.stringify(res2));
+  const rec2 = JSON.parse(kv2.store.get(res2.key).v);
+  assert.ok(!rec2.cd, "zdravé kolo bez cooldownu");
+  const ensIdx = urls2.findIndex((u) => u.indexOf("ensemble-api") >= 0);
+  const lastRv = urls2.map((u) => u.indexOf("/v2/radar/") >= 0).lastIndexOf(true);
+  assert.ok(ensIdx > lastRv, "ensemble se načítá až po všech radarových dlaždicích");
+  Object.keys(rec2.p).forEach((n) => {
+    assert.ok(rec2.p[n].ens, "ens u " + n);
+    assert.strictEqual(rec2.p[n].ens.m, "icon_d2");
+    assert.ok(!rec2.p[n].err, "bez chyb u " + n + ": " + JSON.stringify(rec2.p[n].err));
+  });
+});
+
+test("kolo 8bb: maps.json i radarová dlaždice dostanou jedno opakování po 5xx", async () => {
+  const m = await collector();
+  let mapsCalls = 0, tileCalls = 0;
+  const impl = async (url) => {
+    if (url.indexOf("weather-maps.json") >= 0) {
+      mapsCalls++;
+      if (mapsCalls === 1) return new Response("boom", { status: 503 });
+      return okJson(mapsFixture());
+    }
+    if (url.indexOf("/v2/radar/") >= 0) {
+      tileCalls++;
+      if (tileCalls === 1) return new Response("boom", { status: 503 });
+      return new Response(tileFixture(), { status: 200 });
+    }
+    if (url.indexOf("ensemble-api") >= 0) return okJson(ensFixture());
+    if (url.indexOf("api.open-meteo.com") >= 0) return okJson(fcFixture());
+    if (url.indexOf("aviationweather.gov") >= 0) return metarFixtureFor(url);
+    return okJson([]);
+  };
+  const kv = mockKv();
+  const w = m.createWorker({ fetchImpl: impl, kv });
+  /* 14:35 UTC -> dílek 7 (nový čas kvůli izolátu maps.json z předešlých testů) */
+  const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 14, 35) });
+  assert.ok(res.ok, JSON.stringify(res));
+  assert.strictEqual(mapsCalls, 2, "maps.json: první 503, retry uspěl");
+  const nPlaces = m.placesForSlice(7).length;
+  assert.strictEqual(tileCalls, nPlaces + 1, "jedna dlaždice dostala retry, ostatní OK napoprvé");
+  const rec = JSON.parse(kv.store.get(res.key).v);
+  Object.keys(rec.p).forEach((n) => {
+    assert.ok(rec.p[n].rv, "rv s retry u " + n);
+    assert.strictEqual(rec.p[n].rv.mm, 2.73);
+    assert.ok(!rec.p[n].err, "bez chyb u " + n + ": " + JSON.stringify(rec.p[n].err));
+  });
+});
+
+test("kolo 8bb: analysis/status počítá chyby per zdroj a hlásí degraded nad 30 %", async () => {
+  const m = await collector();
+  const kv = mockKv();
+  const mk = (mm, p, cd) => kv.put("raw/2026110614:" + mm,
+    JSON.stringify({ t: 1794000000, slice: 0, cd: cd || undefined, p }));
+  await mk("00", { Praha: { n: "Praha", err: ["ens", "rv"] } });
+  await mk("05", { Brno: { n: "Brno", err: ["ens", "rv"] }, Ostrava: { n: "Ostrava", err: ["ens", "met"] } });
+  await mk("10", { "Plzen": { n: "Plzen" } }, "ens429");
+  const w = m.createWorker({
+    fetchImpl: async () => { throw new Error("nesmi"); }, kv,
+    now: () => new Date(Date.UTC(2026, 10, 6, 14, 26))
+  });
+  const r = await w.fetch(new Request("https://w.example/analysis/status"));
+  const j = await r.json();
+  assert.strictEqual(j.counts.slices, 3);
+  assert.strictEqual(j.counts.places, 4);
+  assert.strictEqual(j.counts.fc, 0);
+  assert.strictEqual(j.counts.ens, 3);
+  assert.strictEqual(j.counts.rv, 2);
+  assert.strictEqual(j.counts.met, 1);
+  assert.strictEqual(j.counts.ensCd, 1, "jeden záznam s cd známkou");
+  assert.ok(j.degraded.indexOf("ens") >= 0, "ens 3/4 = degraded");
+  assert.ok(j.degraded.indexOf("rv") >= 0, "rv 2/4 = degraded");
+  assert.ok(j.degraded.indexOf("met") < 0, "met 1/4 = 25 % pod prahem 30 %");
+  assert.ok(j.degraded.indexOf("fc") < 0);
+});
+
+test("kolo 8bb: analysis/page?mm= vrací jediný dílek hodiny; validace mm", async () => {
+  const m = await collector();
+  const kv = mockKv();
+  for (let s = 0; s < 12; s++) {
+    const rec = { t: 1794000000 + s * 300, slice: s, p: { ["Obec" + s]: { n: "Obec" + s } } };
+    await kv.put("raw/2026110614:" + (s < 2 ? "0" + s * 5 : "" + s * 5), JSON.stringify(rec));
+  }
+  const w = m.createWorker({ fetchImpl: async () => { throw new Error("nesmi"); }, kv });
+  const r = await w.fetch(new Request("https://w.example/analysis/page?h=2026110614&mm=10"));
+  assert.strictEqual(r.status, 200);
+  const j = await r.json();
+  assert.deepStrictEqual(j.found, ["10"]);
+  assert.strictEqual(j.slices.length, 1);
+  assert.strictEqual(j.slices[0].slice, 2);
+  assert.strictEqual(j.meta.length, 100);
+  for (const bad of ["3", "60", "abc", "-5", ""]) {
+    const rr = await w.fetch(new Request("https://w.example/analysis/page?h=2026110614&mm=" + encodeURIComponent(bad)));
+    assert.strictEqual(rr.status, 400, "mm musí být odmítnuto: '" + bad + "'");
+  }
+});
