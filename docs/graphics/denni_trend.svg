@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="940" height="400" viewBox="0 0 940 400" role="img" aria-label="Denní trend úspěšnosti">
 <rect x="0" y="0" width="940" height="400" rx="0" fill="#0A1017"/>
 <text x="28" y="40" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="18" fill="#E6EDF3" text-anchor="start" font-weight="600">Úspěšnost po dnech</text>
-<text x="28" y="62" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#8CA0B3" text-anchor="start">práh 50 % · 11 795 párů za okno · 07. 11. 2026 12:56 UTC</text>
+<text x="28" y="62" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#8CA0B3" text-anchor="start">práh 50 % · 40 317 párů za okno · 08. 11. 2026 10:41 UTC</text>
 <line x1="78" y1="322.0" x2="900" y2="322.0" stroke="#1D2A38" stroke-width="1" stroke-linecap="round"/>
 <text x="66" y="326.0" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#8CA0B3" text-anchor="end">40</text>
 <line x1="78" y1="246.66666666666669" x2="900" y2="246.66666666666669" stroke="#1D2A38" stroke-width="1" stroke-linecap="round"/>
@@ -10,16 +10,21 @@
 <text x="66" y="175.33333333333334" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#8CA0B3" text-anchor="end">80</text>
 <line x1="78" y1="96.0" x2="900" y2="96.0" stroke="#1D2A38" stroke-width="1" stroke-linecap="round"/>
 <text x="66" y="100.0" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#8CA0B3" text-anchor="end">100</text>
-<rect x="92.8" y="217.46738544474394" width="44.4" height="104.53261455525606" rx="3" fill="#223349"/>
+<rect x="92.8" y="295.57773091522563" width="44.4" height="26.422269084774356" rx="3" fill="#223349"/>
 <circle cx="115.0" cy="125.53879453879455" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
 <text x="115.0" y="113.53879453879455" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">92</text>
 <text x="115.0" y="346" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#8CA0B3" text-anchor="middle">6. 11.</text>
 <text x="115.0" y="364" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">4 004</text>
 <rect x="166.8" y="118.6" width="44.4" height="203.4" rx="3" fill="#223349"/>
-<circle cx="189.0" cy="125.24956145980406" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="189.0" y="113.24956145980406" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">92</text>
+<circle cx="189.0" cy="115.84578615536017" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="189.0" y="103.84578615536017" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">95</text>
 <text x="189.0" y="346" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#8CA0B3" text-anchor="middle">7. 11.</text>
-<text x="189.0" y="364" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">7 791</text>
-<polyline points="115.0,125.53879453879455 189.0,125.24956145980406" fill="none" stroke="#A8E4FF" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="189.0" y="364" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">30 823</text>
+<rect x="240.8" y="285.7716640171301" width="44.4" height="36.228335982869936" rx="3" fill="#223349"/>
+<circle cx="263.0" cy="111.29993928354585" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="263.0" y="99.29993928354585" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">96</text>
+<text x="263.0" y="346" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#8CA0B3" text-anchor="middle">8. 11.</text>
+<text x="263.0" y="364" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">5 490</text>
+<polyline points="115.0,125.53879453879455 189.0,115.84578615536017 263.0,111.29993928354585" fill="none" stroke="#A8E4FF" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
 <text x="28" y="376" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" fill="#8CA0B3" text-anchor="start">jedna hodnota = všechny páry daného dne UTC (základna předpovědi) · sloupce = počet párů · křivka = úspěšnost na prahu 50 %</text>
 </svg>
