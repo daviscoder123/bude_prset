@@ -48,8 +48,30 @@
  *   METAR:       12 hromadných dotazů/hod = 288/den (bez významného limitu)
  *   KV zápisy:   12/hod = 288/den (limit 1 000)
  *   RainViewer:  12 maps.json + 288 dlažnic/den (veřejné API bez klíče)
- *   Subrequesty: ~21–29 na jedno probuzení (limit 50; nejhorší případ
- *                s ensemble fallbacky ~38)
+ *   Subrequesty: <= 49 na jedno probuzeni (limit 50, propocteno):
+ *                metar <=2 + maps <=2 (1 opakovani) + na obec fc 1 +
+ *                rv <=2 (1 opakovani) + ens <=2 (kaskada max 2 kandidati).
+ *
+ * Odolnost sběru (kolo 8bb, oprava po analýze 2026-11-08):
+ *   - Pořadí na obec: fc -> rv -> ensemble. Ground truth (radar) se
+ *     načítá PŘED ensemble, takže ji žádný výpadek/kvóta ensemble
+ *     nemůže odepřít subrequesty (dříve rv trpělo kolaterálně ~24 %).
+ *   - Ensemble se načítá AŽ po fc+rv celého dílku a SEKVENČNĚ.
+ *     HTTP 429 (vyčerpaná denní kvóta Open-Meteo) nebo 5xx NEkaskádují
+ *     přes další kandidáty modelů - dřívější kaskáda 4 kandidátů spálila
+ *     až 4 subrequesty na obec a sama kvótu vyčerpávala (~9 600 volání
+ *     za den). Místo toho se nastaví cooldown 30 min (err "ens",
+ *     record.cd="ens429" pro diagnostiku) a zbytek kola ens přeskočí.
+ *     Kaskáda zůstává jen pro doménové chyby (400/404 -> další model),
+ *     max 2 kandidáti. Objevení 429 tak stojí 1 subrequest na kolo.
+ *   - maps.json, radarová dlaždice i METAR dostanou jedno opakování
+ *     po přechodném selhání (5xx/síť).
+ *   - /analysis/status navíc vrací counts (počty chyb per zdroj za
+ *     posledních ~13 kol) a degraded (zdroje nad 30 % chybovosti)
+ *     - podklad pro alerting (UptimeRobot keyword check).
+ *   - /analysis/page?h=...&mm=MM vrací jediný dílek hodiny (menší
+ *     odpovědi pro stahování).
+
  *
  * Chyby jedné obce (výpadek API) se tolerují — záznam dostane err značku,
  * ale kolo pokračuje. Bez KV bindingu sběrač tiše stojí (status hlásí
@@ -191,6 +213,7 @@ function buildUpstreamQs(searchParams) {
 export var SLICE_COUNT = 12;          /* 12 průchodů za hodinu (cron po 5 minutách) */
 var RAW_TTL = 1209600;         /* TTL surových záznamů: 14 dní */
 var RAW_PREFIX = "raw/";
+var ENS_CD_MS = 30 * 60 * 1000;  /* cooldown ensemble po 429/5xx: 30 minut */
 
 /* 100 obcí: primárně střední Evropa (CZ/SK/AT/DE/CH/PL/HU/SI/HR), doplněno
    o top lokality a rozličné biomy (Alpy, pobřeží, nížiny, Vysočina,
@@ -627,8 +650,7 @@ export async function pngDecodePatch(bytes, px, py, r) {
    v collectSlice ji toleruje (radar jen chybí v záznamu). */
 async function radarFrame(fetchImpl, nowMs) {
   if (MAPS_MEM.v && nowMs - MAPS_MEM.t < RV_MAPS_TTL) return MAPS_MEM.v;
-  var res = await fetchImpl(RV_MAPS_URL, { headers: { "user-agent": "bude-prset-proxy/1.0" } });
-  if (!res.ok) throw new Error("maps " + res.status);
+  var res = await fetchRetry(fetchImpl, RV_MAPS_URL, { headers: { "user-agent": "bude-prset-proxy/1.0" } }, 2);
   var frame = pickFrame(await res.text(), nowMs);
   MAPS_MEM = { t: nowMs, v: frame };
   return frame;
@@ -638,8 +660,7 @@ async function radarFrame(fetchImpl, nowMs) {
    obce + sněhový příznak většiny odrazů. Vrací {t, mm, ec, sn}. */
 async function rvRead(fetchImpl, frame, p) {
   var tc = tileCoords(p.lat, p.lon, RV_Z);
-  var res = await fetchImpl(rvTileUrl(frame.host, frame.path, tc), { headers: { "user-agent": "bude-prset-proxy/1.0" } });
-  if (!res.ok) throw new Error("tile " + res.status);
+  var res = await fetchRetry(fetchImpl, rvTileUrl(frame.host, frame.path, tc), { headers: { "user-agent": "bude-prset-proxy/1.0" } }, 2);
   var patch = await pngDecodePatch(new Uint8Array(await res.arrayBuffer()), tc.px, tc.py, 1);
   if (!patch) throw new Error("tile decode");
   var vals = patch.map(function (q) { return q.m; }).filter(function (v) { return v != null; }).sort(function (a, b) { return a - b; });
@@ -653,6 +674,21 @@ async function rvRead(fetchImpl, frame, p) {
   };
 }
 
+/* Jedno opakovani prechodneho selhani (5xx/sit) - ground truth
+   (radar, METAR) si zada druhy pokus, nez se pole vzdá. Vrati prvni
+   ok odpoved; po vycerpani pokusu vyhodi posledni chybu. */
+async function fetchRetry(fetchImpl, url, opts, tries) {
+  var last = null;
+  for (var i = 0; i < tries; i++) {
+    try {
+      var res = await fetchImpl(url, opts);
+      if (res.ok) return res;
+      last = new Error("http " + res.status);
+    } catch (e) { last = e; }
+  }
+  throw last || new Error("fetch selhal");
+}
+
 /* ---- klíč raw záznamu ---- */
 function pad2(n) { return (n < 10 ? "0" : "") + n; }
 function hourKey(d) {
@@ -663,6 +699,7 @@ function rawKey(h, minute) { return RAW_PREFIX + h + ":" + pad2(minute); }
 /* ---- jedno probuzení cronu: sebere svůj dílek obcí ---- */
 async function collectSlice(deps, slice, now) {
   var fetchImpl = deps.fetchImpl;
+  var ensCd = deps.ensCd || { until: 0, reason: null };
   var places = placesForSlice(slice);
   var h = hourKey(now);
   var minute = now.getUTCMinutes();
@@ -672,8 +709,7 @@ async function collectSlice(deps, slice, now) {
   var metP = (async function () {
     try {
       var ids = places.map(function (p) { return p.icao; });
-      var res = await fetchImpl(metarUrl(ids), { headers: { "user-agent": "bude-prset-proxy/1.0" } });
-      if (!res.ok) return;
+      var res = await fetchRetry(fetchImpl, metarUrl(ids), { headers: { "user-agent": "bude-prset-proxy/1.0" } }, 2);
       var arr = await res.json();
       if (!Array.isArray(arr)) return;
       arr.forEach(function (m) {
@@ -689,34 +725,60 @@ async function collectSlice(deps, slice, now) {
   var rvFrame = null;
   try { rvFrame = await radarFrame(fetchImpl, now.getTime()); } catch (e) { rvFrame = null; }
 
+  /* Faze 1 (kolo 8bb): fc + rv (nowcast a ground truth) SOUBEZNE po
+     obcich - ensemble az po nich, aby kvota/vypadek ens nemohl odeprit
+     radaru subrequesty (drive rv trpelo kolateralne ~24 %). Chyby jen
+     zanechaji pole prazdna; err doplni zaver. */
   await Promise.all(places.map(async function (p) {
     var entry = { n: p.n, cc: p.cc, lat: p.lat, lon: p.lon, icao: p.icao };
-    var errs = [];
     try {
       var r = await fetchImpl(buildFcUrl(p), { headers: { "user-agent": "bude-prset-proxy/1.0" } });
       if (!r.ok) throw new Error("fc " + r.status);
       entry.fc = parseFc(await r.text());
-    } catch (e) { errs.push("fc"); }
-    try {
-      var parsed = null, usedModel = null;
-      var cands = ensCandidates(p.lat, p.lon);
-      for (var ci = 0; ci < cands.length && !parsed; ci++) {
-        try {
-          var r2 = await fetchImpl(buildEnsUrl(p, cands[ci]), { headers: { "user-agent": "bude-prset-proxy/1.0" } });
-          if (!r2.ok) continue;                    /* doména modelu — zkusíme další */
-          parsed = parseEns(await r2.text());
-          if (parsed) usedModel = cands[ci];
-        } catch (e2) { /* další kandidát */ }
-      }
-      if (!parsed) throw new Error("ens bez clenu");
-      entry.ens = { m: usedModel, t0: parsed[0] && parsed[0].t0, g: parsed.map(function (pt) { return pt.v; }) };
-    } catch (e) { errs.push("ens"); }
+    } catch (e) { /* fc chybi -> err v zaveru */ }
     if (rvFrame) {
       try { entry.rv = await rvRead(fetchImpl, rvFrame, p); }
-      catch (e) { /* radar chybí → err níže */ }
+      catch (e) { /* radar chybi -> err v zaveru */ }
     }
     record.p[p.n] = entry;
   }));
+
+  /* Faze 2 (kolo 8bb): ensemble SEKVENCNE, az po ground truth, max 2
+     kandidati. 429/5xx = kvota nebo vypadek upstreamu -> cooldown 30 min,
+     ZADNA kaskada (kaskada by pálila az 4 subrequesty na obec a rv by
+     trpelo limitem 50); domenova chyba 400/404 kaskaduje na dalsi model
+     jako v appce. Objeveni 429 stoji jedinou obec; zbytek kola ens
+     preskoci (err "ens" doplni zaver, duvod jde do record.cd). */
+  for (var pi = 0; pi < places.length; pi++) {
+    var p = places[pi];
+    var entry = record.p[p.n];
+    if (ensCd.until && now.getTime() < ensCd.until) continue;
+    try {
+      var parsed = null, usedModel = null;
+      var cands = ensCandidates(p.lat, p.lon).slice(0, 2);
+      for (var ci = 0; ci < cands.length && !parsed; ci++) {
+        var r2;
+        try {
+          r2 = await fetchImpl(buildEnsUrl(p, cands[ci]), { headers: { "user-agent": "bude-prset-proxy/1.0" } });
+        } catch (e2) {
+          ensCd.until = now.getTime() + ENS_CD_MS;
+          ensCd.reason = "ensnet";
+          break;
+        }
+        if (r2.status === 429 || r2.status >= 500) {
+          ensCd.until = now.getTime() + ENS_CD_MS;
+          ensCd.reason = "ens" + r2.status;
+          break;
+        }
+        if (!r2.ok) continue;                    /* domena modelu -> dalsi kandidat */
+        parsed = parseEns(await r2.text());
+        if (parsed) usedModel = cands[ci];
+      }
+      if (!parsed) continue;
+      entry.ens = { m: usedModel, t0: parsed[0] && parsed[0].t0, g: parsed.map(function (pt) { return pt.v; }) };
+    } catch (e) { /* ens chybi -> err v zaveru */ }
+  }
+  if (ensCd.reason && now.getTime() < ensCd.until) record.cd = ensCd.reason;
 
   await metP;
   Object.keys(record.p).forEach(function (name) {
@@ -797,6 +859,7 @@ export function createWorker(deps) {
   var cache = deps.cache || null;
   var kv = deps.kv || null;
   var nowFn = deps.now || function () { return new Date(); };
+  var ensCd = { until: 0, reason: null };  /* cooldown ensemble pro tento worker (kolo 8bb) */
 
   async function handle(request) {
     var u = new URL(request.url);
@@ -822,7 +885,12 @@ export function createWorker(deps) {
 
     if (u.pathname === "/analysis/status") {
       var now = nowFn();
-      var out = { ok: true, kv: !!kv, places: MUNICIPALITIES.length, slices: SLICE_COUNT, recent: [], last: null };
+      var out = {
+        ok: true, kv: !!kv, places: MUNICIPALITIES.length, slices: SLICE_COUNT,
+        recent: [], last: null,
+        counts: { slices: 0, places: 0, fc: 0, ens: 0, met: 0, rv: 0, ensCd: 0 },
+        degraded: []
+      };
       if (!kv) return json(200, out);
       /* Projdeme klíče zpětně od teď (max ~13 čtení) a vrátíme souhrn. */
       var curH = new Date(now.getTime() - 5 * 60 * 1000);
@@ -842,7 +910,21 @@ export function createWorker(deps) {
         var entry = { key: candidates[ci], t: rec.t, n: names.length, n_ok: nok };
         out.recent.push(entry);
         if (!out.last) out.last = entry;
+        out.counts.slices++;
+        out.counts.places += names.length;
+        names.forEach(function (n) {
+          var er = (rec.p[n] && Array.isArray(rec.p[n].err)) ? rec.p[n].err : [];
+          for (var ek = 0; ek < er.length; ek++) {
+            if (out.counts[er[ek]] != null) out.counts[er[ek]]++;
+          }
+        });
+        if (rec.cd) out.counts.ensCd++;
       }
+      /* Zdroj nad 30 % chybovosti za poslednich ~13 kol = degraded -
+         podklad pro alerting (UptimeRobot keyword check na "degraded":["ens"...]). */
+      ["fc", "ens", "met", "rv"].forEach(function (src) {
+        if (out.counts.places > 0 && out.counts[src] / out.counts.places > 0.3) out.degraded.push(src);
+      });
       return json(200, out);
     }
 
@@ -850,6 +932,20 @@ export function createWorker(deps) {
       var h = u.searchParams.get("h") || "";
       if (!/^\d{10}$/.test(h)) return json(400, { error: "parametr h musí být YYYYMMDDHH (10 číslic)" });
       if (!kv) return json(503, { error: "KV binding HISTORY není připojen" });
+      /* Jediny dilek hodiny (mm=0..55 po 5) - mensi odpovedi pro stahovani. */
+      var mmq = u.searchParams.get("mm");
+      if (mmq !== null) {
+        var mm = Number(mmq);
+        if (mmq === "" || !isFinite(mm) || Math.floor(mm) !== mm || mm < 0 || mm > 55 || mm % 5 !== 0) {
+          return json(400, { error: "mm musí být minuta 0-55 dělitelná 5" });
+        }
+        var one = await kv.get(RAW_PREFIX + h + ":" + pad2(mm));
+        return json(200, {
+          ok: true, h: h, mm: pad2(mm), found: one ? [pad2(mm)] : [],
+          meta: MUNICIPALITIES.map(function (m) { return { n: m.n, cc: m.cc, lat: m.lat, lon: m.lon, icao: m.icao }; }),
+          slices: one ? [JSON.parse(one)] : []
+        });
+      }
       var slices = [];
       var found = [];
       for (var mm = 0; mm < SLICE_COUNT; mm++) {
@@ -1005,7 +1101,7 @@ export function createWorker(deps) {
     try {
       var now = new Date(event.scheduledTime);
       var slice = Math.floor(now.getUTCMinutes() / 5) % SLICE_COUNT;
-      var res = await collectSlice({ fetchImpl: fetchImpl }, slice, now);
+      var res = await collectSlice({ fetchImpl: fetchImpl, ensCd: ensCd }, slice, now);
       await kv.put(res.key, JSON.stringify(res.record), { expirationTtl: RAW_TTL });
       return { ok: true, key: res.key, places: Object.keys(res.record.p).length };
     } catch (e) {
