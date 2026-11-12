@@ -1,0 +1,40 @@
+name: BP apply 8bc (one-shot)
+on:
+  push:
+    branches: [fix/chmi-img-prefix]
+permissions:
+  contents: write
+concurrency:
+  group: bp-apply-8bc
+  cancel-in-progress: true
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: fix/chmi-img-prefix
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+      - name: Restore clean base (previous push was truncated in transport)
+        run: git checkout 09e792679641beb50beca39da6b7826b75d0555a -- src/main.js index.html
+      - name: Apply patch (asserts md5 anchor of src/main.js)
+        run: python3 .github/bp-apply-8bc.py
+      - name: Rebuild index.html
+        run: node tools/build.cjs
+      - name: md5 kotvy (druhe mereni)
+        run: |
+          echo "17efc59b7199c5af7ea36b565bb7a1b7  src/main.js" | md5sum -c -
+          echo "de222e4557e60279a740a5b7510b475d  index.html" | md5sum -c -
+      - name: Testy
+        run: node --test tests/regression.test.cjs tests/worker.test.cjs
+      - name: Commit fix and remove one-shot workflow
+        run: |
+          git config user.name "bp-bot"
+          git config user.email "bp-bot@users.noreply.github.com"
+          git add src/main.js index.html
+          git rm -q .github/workflows/bp-apply-8bc.yml .github/bp-apply-8bc.py
+          git commit -m "kolo 8bc: oprava cest CHMU obrazku pres proxy (main.js + index.html), CI apply"
+          git push
