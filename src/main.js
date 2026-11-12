@@ -4859,7 +4859,9 @@ function chmiStamp(ms){
    Bez BP_PROXY zůstávají přímé URL — canvas je pak prohlížeč zablokuje
    a modul se sám vypne, přesně jako dřív. */
 function chmiProxyImg(path){
-  return BP_PROXY ? BP_PROXY + "/chmi/img?u=" + encodeURIComponent(path)
+  /* Worker vyžaduje celou host-relativní cestu pod /meteorology/weather/radar/
+     (kolo 8bc: bez prefixu worker vrátil 400 a ČHMÚ modul se mlčky vypnul). */
+  return BP_PROXY ? BP_PROXY + "/chmi/img?u=" + encodeURIComponent("/meteorology/weather/radar" + path)
                   : CHMI_BASE + path;
 }
 function chmiUrlNow(ms){
