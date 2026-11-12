@@ -687,12 +687,21 @@ test('chmiUrlNow/chmiUrlFct: pres BP_PROXY, base cas v TARu, nova legenda (kolo 
   const t=Date.UTC(2026,10,7,13,25,0);
   const px=mk('https://w.example');
   assert.ok(px.chmiUrlNow(t).startsWith('https://w.example/chmi/img?u='),'kompozit ma jit pres /chmi/img');
-  assert.equal(decodeURIComponent(px.chmiUrlNow(t)).includes('/composite/pseudocappi2km/png/pacz2gmaps3.z_cappi020.20261107.1325.0.png'),true);
+  /* kolo 8bc: cesta přes proxy musí být CELÁ, včetně /meteorology/weather/radar/
+     — worker whitelist ji validuje jako host-relativní URL ČHMÚ */
+  assert.equal(decodeURIComponent(px.chmiUrlNow(t)).includes('/meteorology/weather/radar/composite/pseudocappi2km/png/pacz2gmaps3.z_cappi020.20261107.1325.0.png'),true,
+    'cesta pres proxy musi obsahovat cely prefix /meteorology/weather/radar/');
+  assert.equal(decodeURIComponent(px.chmiProxyImg('/scl/scl-dbz-mmh.png')),
+    'https://w.example/chmi/img?u=/meteorology/weather/radar/scl/scl-dbz-mmh.png');
   const f=px.chmiUrlFct(t,30);
   assert.ok(f.startsWith('https://w.example/chmi/fct?base=20261107.1325&lead=30'),'fct: base cas VYPOCTU + lead, ne cas platnosti: '+f);
   const direct=mk('');
   assert.equal(direct.chmiUrlNow(t),'https://opendata.chmi.cz/meteorology/weather/radar/composite/pseudocappi2km/png/pacz2gmaps3.z_cappi020.20261107.1325.0.png');
   assert.equal(direct.chmiUrlFct(t,10),'https://opendata.chmi.cz/meteorology/weather/radar/composite/fct_pseudocappi2km/png/pacz2gmaps3.fct_z_cappi020.20261107.1325.10.png');
+  /* invariant kola 8bc: skrz proxy jde totožná cesta jako přímo, jen bez hostu */
+  assert.equal(decodeURIComponent(px.chmiUrlNow(t)).replace('https://w.example/chmi/img?u=',''),
+    direct.chmiUrlNow(t).replace('https://opendata.chmi.cz',''),
+    'invariant: proxy cesta == prima cesta bez hostu');
   /* invarianty zdrojů v index.html */
   assert.ok(script.includes('scl-dbz-mmh.png'),'nova legenda scl-dbz-mmh.png');
   assert.ok(!script.includes('scl-dbzmmh.png"'),'stara legenda scl-dbzmmh.png uz neexistuje (404)');
