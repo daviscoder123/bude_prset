@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="640" height="560" viewBox="0 0 640 560" role="img" aria-label="Diagram spolehlivosti: hlášená × reálná pravděpodobnost deště">
 <rect x="0" y="0" width="640" height="560" rx="0" fill="#0A1017"/>
 <text x="28" y="40" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="18" fill="#E6EDF3" text-anchor="start" font-weight="600">Spolehlivost kalibrace</text>
-<text x="28" y="62" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#8CA0B3" text-anchor="start">hlášená × reálná pravděpodobnost · 208 315 párů · 15. 11. 2026 11:24 UTC</text>
+<text x="28" y="62" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#8CA0B3" text-anchor="start">hlášená × reálná pravděpodobnost · 208 060 párů · 16. 11. 2026 11:56 UTC</text>
 <line x1="74" y1="468.0" x2="600" y2="468.0" stroke="#1D2A38" stroke-width="1" stroke-linecap="round"/>
 <line x1="74.0" y1="100" x2="74.0" y2="468" stroke="#1D2A38" stroke-width="1" stroke-linecap="round"/>
 <text x="62" y="472.0" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#8CA0B3" text-anchor="end">0</text>
@@ -24,27 +24,27 @@
 <text x="600.0" y="490" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#8CA0B3" text-anchor="middle">100</text>
 <polyline points="74.0,468.0 600.0,100.0" fill="none" stroke="#8CA0B3" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 6"/>
 <text x="584.22" y="108.40000000000002" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" fill="#8CA0B3" text-anchor="end">dokonalá kalibrace</text>
-<circle cx="100.3" cy="113.93671000048482" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="100.3" y="135.93671000048482" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">144383</text>
-<circle cx="152.9" cy="165.52089464390815" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="152.9" y="187.52089464390815" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">10194</text>
-<circle cx="205.5" cy="189.83101478986674" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="205.5" y="211.83101478986674" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">6829</text>
-<circle cx="258.1" cy="209.06955404661403" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="258.1" y="231.06955404661403" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">5449</text>
-<circle cx="310.7" cy="234.07471490365708" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="310.7" y="256.0747149036571" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">5086</text>
-<circle cx="363.3" cy="299.37316017316016" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="363.3" y="321.37316017316016" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">4620</text>
-<circle cx="415.9" cy="292.003362050851" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="415.9" y="314.003362050851" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">4759</text>
-<circle cx="468.5" cy="253.5302752293578" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="468.5" y="275.5302752293578" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">4360</text>
-<circle cx="521.1" cy="246.59646094087185" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="521.1" y="268.59646094087185" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">4634</text>
-<circle cx="573.7" cy="191.26784083496412" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="573.7" y="213.26784083496412" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">7665</text>
-<polyline points="100.3,113.93671000048482 152.9,165.52089464390815 205.5,189.83101478986674 258.1,209.06955404661403 310.7,234.07471490365708 363.3,299.37316017316016 415.9,292.003362050851 468.5,253.5302752293578 521.1,246.59646094087185 573.7,191.26784083496412" fill="none" stroke="#A8E4FF" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="100.3" cy="114.28287555453855" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="100.3" y="136.28287555453855" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">135473</text>
+<circle cx="152.9" cy="163.72308227517829" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="152.9" y="185.72308227517829" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">11498</text>
+<circle cx="205.5" cy="184.7861042183623" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="205.5" y="206.7861042183623" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">8060</text>
+<circle cx="258.1" cy="210.00495458298928" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="258.1" y="232.00495458298928" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">6055</text>
+<circle cx="310.7" cy="228.03924316748424" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="310.7" y="250.03924316748424" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">5708</text>
+<circle cx="363.3" cy="305.2536631779258" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="363.3" y="327.2536631779258" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">5255</text>
+<circle cx="415.9" cy="295.2748368382886" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="415.9" y="317.2748368382886" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">5516</text>
+<circle cx="468.5" cy="262.7148220990524" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="468.5" y="284.7148220990524" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">5593</text>
+<circle cx="521.1" cy="250.15427574171028" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="521.1" y="272.1542757417103" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">5730</text>
+<circle cx="573.7" cy="199.69548872180448" r="4.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="573.7" y="221.69548872180448" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#8CA0B3" text-anchor="middle">8512</text>
+<polyline points="100.3,114.28287555453855 152.9,163.72308227517829 205.5,184.7861042183623 258.1,210.00495458298928 310.7,228.03924316748424 363.3,305.2536631779258 415.9,295.2748368382886 468.5,262.7148220990524 521.1,250.15427574171028 573.7,199.69548872180448" fill="none" stroke="#A8E4FF" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
 <text x="28" y="74" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#A8E4FF" text-anchor="start" font-weight="600">reálně pršelo (%)</text>
 <text x="598" y="74" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#8CA0B3" text-anchor="end">hlášená pravděpodobnost (%)</text>
 <text x="28" y="534" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" fill="#8CA0B3" text-anchor="start">každý bod = desetina hlášené pravděpodobnosti (25–35 %, …), výška = podíl párů, kde skutečně pršelo, číslo pod bodem = počet párů</text>
