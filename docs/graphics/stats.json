@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "label": "přesnost",
-  "message": "85,6 % · 207 653 párů",
+  "message": "84,3 % · 207 316 párů",
   "color": "#A8E4FF",
-  "generated": "2026-11-17T12:20:37Z",
-  "acc50": 85.64,
-  "brier": 0.1067,
-  "pairs": 207653,
-  "wetShare": 0.192,
+  "generated": "2026-11-18T12:07:43Z",
+  "acc50": 84.29,
+  "brier": 0.116,
+  "pairs": 207316,
+  "wetShare": 0.2011,
   "windowDays": 7,
   "groundTruth": "METAR (bez trendových skupin), jinak radar > 0.05 mm/h"
 }
