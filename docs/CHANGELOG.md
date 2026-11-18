@@ -231,3 +231,26 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
       smíchání; naučená křivka je postupně přepíše).
     - CALIB_TABLE je identita a vypnutá, statickou kalibrací tedy
       změna nehrozí; brierCalib se učí per zařízení jako dřív.
+  - **(kolo 11) Radar se nesmí ztratit beze slova.** Dave (18. 11. 16:47,
+    mobil): kompas i radarová větev blendu na prvotním načtení tiše
+    zmizely. Backend přitom byl zdravý (změřeno: metadata, maska pokrytí
+    i dlaždice RainViewer odpovídaly HTTP 200, snímek 4 min stár).
+    Dvě příčiny v kódu:
+    - **Visící dlaždice bez časovače:** `<img>` na radarové PNG nemá
+      vlastní timeout; jeden zaseknutý požadavek na CDN znamenal
+      Promise, který nikdy neresolvoval — celý řetězec (osm snímků,
+      pohyb, intenzita, kompas) se zastavil a nikdo to nevěděl.
+      Nově `RV_TILE_TIMEOUT_MS` (12 s) dlaždici vzdá, počítá ji
+      za chybějící a řetězec jede dál (maska pokrytí stejně).
+    - **Chyba = ticho až do příštího ručního načtení:** jednorázová
+      výjimka (síť, CORS, CDN edge) nastavila `radarState = "error"`
+      a kompas prostě zmizel; zpráva „radar nedostupný · jen modely“
+      existovala jen ve výjimečném modelovém pádu. Nově se selhání
+      říká nahlas: na místě kompasu stojí „Radar se nepodařilo
+      načíst. … Zkusím to znovu sám.“ a u zdrojů se objeví
+      „radar nedostupný (zkusím znovu)“.
+    - **Automatický dotah:** každá chybová cesta (catch, chybějící
+      intenzitní dlaždice) naplánuje dotah +20 s a +60 s
+      (scheduleRadarRetry, strop dvou, přerušeno při úspěchu
+      nebo změně lokality). Přechodné selhání se tedy spraví
+      samo do minuty, bez zásahu uživatele.

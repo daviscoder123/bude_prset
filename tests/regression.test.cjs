@@ -859,3 +859,49 @@ test('kolo 10: druhá vlna deště porovnává modely s modely (V.Nm)',()=>{
   assert.ok(script.includes('Nm: N,'),'verdictState nese počet zobrazených modelů');
   assert.ok(script.includes('V.Nm*0.35'),'druhá vlna: práh podle modelů, ne agentur');
 });
+
+/* Kolo 11: radar nesmí zmizet beze slova ani se zaseknout napořád.
+   Dave 18. 11. 16:47: kompas i radarová větev blendu na prvotním
+   načtení tiše zmizely, zatímco backend (měřeno: metadata, maska,
+   dlaždice — vše 200) byl zdravý. Fix = timeout dlaždic + automatický
+   dotah + viditelný stav místo zmizení. */
+test('kolo 11: radarová dlaždice má timeout, visící request nezasekne řetězec',()=>{
+  const i=script.indexOf('function readTilePatchBase');
+  assert.notEqual(i,-1,'chybí readTilePatchBase');
+  const seg=script.slice(i,i+2200);
+  assert.ok(seg.includes('RV_TILE_TIMEOUT_MS'),'časovač dlaždice');
+  assert.ok(seg.includes('clearTimeout'),'vyčištění časovače po úspěchu');
+  assert.ok(/setTimeout\(function\(\)\{[\s\S]{0,600}resolve\(null\);[\s\S]{0,200}\}, RV_TILE_TIMEOUT_MS\);/.test(seg),
+    'timeout resolvoval null (snímek se vynechá), nikdy reject');
+  const icov=script.indexOf('function readCoverage');
+  assert.ok(script.slice(icov,icov+2200).includes('RV_TILE_TIMEOUT_MS'),
+    'maska pokrytí má tentýž časovač (resolve „error“)');
+});
+test('kolo 11: selhání radaru se samovolně dotáhne (retry max 2)',()=>{
+  assert.ok(script.includes('function scheduleRadarRetry'),'retry plánovač');
+  const i=script.indexOf('var RV_RETRY_DELAYS');
+  assert.notEqual(i,-1);
+  const seg=script.slice(i,i+400);
+  assert.ok(seg.includes('20000') && seg.includes('60000'),'dotahy: +20 s a +60 s');
+  const g=seg.slice(i,seg.length);
+  const isch=script.indexOf('function loadRadar');
+  const rseg=script.slice(isch,isch+60000);
+  assert.ok(rseg.includes('scheduleRadarRetry(lat, lon, myId, attempt)'),
+    'každá chybová cesta radaru plánuje dotah');
+  const catchIdx=rseg.indexOf('.catch(function(){ if(isStale(myId)) return; radarState = "error"');
+  assert.ok(catchIdx>-1 && rseg.slice(catchIdx,catchIdx+220).includes('scheduleRadarRetry'),
+    'catch také dotahuje');
+  const isch2=script.indexOf('function scheduleRadarRetry');
+  assert.ok(script.slice(isch2,isch2+320).includes('attempt >= RV_RETRY_DELAYS.length'),
+    'strop dvou dotahů');
+});
+test('kolo 11: výpadek radaru je vidět, nezmizí tiše',()=>{
+  const ic=script.indexOf('function sourceCaveat');
+  assert.ok(ic>-1);
+  assert.ok(script.slice(ic,ic+600).includes('radar nedostupný (zkusím znovu)'),
+    'poznámka u zdrojů řekne, že radar spadl a že se to zkusí znovu');
+  const ir=script.indexOf('function renderCompassBase');
+  const seg=script.slice(ir,ir+2200);
+  assert.ok(seg.includes('Radar se nepodařilo načíst'),'výplň kompasu místo tichého zmizení');
+  assert.ok(seg.includes('radarState === "error" && !C'),'jen když není co kreslit (satelit může dodat)');
+});
