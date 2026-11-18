@@ -381,31 +381,73 @@ function isSnowWindow(){
    Laborka umí tenhle parametr nafitovat, až bude dost dat. */
 function leadWeight(h){ return 1 - Math.min(0.20, h*0.025); }
 
-/* Nejsilnější shoda modelů v čase.
-   Vrací {prob, idx, count} — pravděpodobnost 0–1, hodina špičky
-   a kolik modelů v ní (s tolerancí) hlásí déšť. */
-function peakConsensus(active, nHours){
+/* ================= KOLO 10: RODINNÝ HLAS A PEVNÝ VOLEBNÍ SBOR =================
+   „Jedna agentura = jeden hlas.“ Dřív verdikt počítal ŘÁDKY tabulky:
+   ICON-D2 + AICON daly DWD dva hlasy, IFS + AIFS daly ECMWF dva hlasy
+   — 8 hlasů, ale jen 6 nezávislých agentur. Přitom prognóza DWD ICON a
+   prognóza DWD AICON sdílejí asimilaci pozorování i operační divizi;
+   druhý hlas není nezávislé potvrzení, jen hlasitější rodina.
+   Násobení hlasy rodiny tím zveličuje vydaj shody.
+
+   fam → agentura: výjimky jsou jen AI odnože, které mají úmyslně vlastní
+   fam (AIFS, AICON), aby se ve VÝBĚRU do tabulky nededuply — ale do
+   hlasování patří zpátky ke své mateřské agentuře. */
+function agencyOf(m){
+  if(!m) return "";
+  if(m.fam === "AIFS") return "ECMWF";
+  if(m.fam === "AICON") return "DWD";
+  return m.fam || m.id || "";
+}
+
+/* Stálý sbor: verdikt má hlasovat každý, kdo pro místo má data a patří
+   do srovnatelné kvalitativní třídy — ne jen prvních 8 řádků tabulky
+   (dřív UKMO, NOAA GFS a ECCC GEM jako 9.–11. kandidáti hlas NIKDY
+   nedostali, i když odpovídali daty). Výjimka: zámořské globální
+   modely (JMA/KMA/CMA/BOM) nehlasují. Aktualizují se řidčeji a nad
+   Evropou jsou výrazně hrubší; bez vlastních měření umíme jen
+   konzervativní odhad — Daveova podmínka zněla „pouze pokud to
+   zpřesní percentage a dává to exaktní smysl“, a hlas s prokazatelně
+   horší informační hodnotou by shodu naopak ředil. NÁRODNÍ model se
+   zakázaným id v sadě NENÍ postižen: pro Austrálii je bom_access_global
+   národním modelem a národní řada vždy hlasuje (pro svou zemi je to
+   nejlepší dostupný zdroj). */
+var VERDICT_NO_VOTE = { jma_seamless:1, kma_seamless:1, cma_grapes_global:1, bom_access_global:1 };
+
+/* Nejsilnější shoda v čase.
+   Vrací {prob, idx, count, nAg} — pravděpodobnost 0–1, hodina špičky,
+   kolik hlasů v ní mokvne a kolik hlasů celkem je (u byAgency
+   = počet AGENTUR; jinak počet řádků, třeba členů ensemblu, kde
+   každý člen je opravdu nezávislý tichý běh). */
+function peakConsensus(active, nHours, byAgency){
   var N = active.length;
-  if(!N) return {prob:0, idx:-1, count:0, perHour:[]};
+  if(!N) return {prob:0, idx:-1, count:0, perHour:[], strict:[], nAg:0};
+  var nAg = N;
+  if(byAgency){
+    var seen = {};
+    active.forEach(function(p){ seen[agencyOf(p.m)] = 1; });
+    nAg = Object.keys(seen).length;
+  }
   var perHour = [], strict = [];
   for(var i=0;i<nHours;i++){
     var lo = Math.max(0, i-CONSENSUS_TOL_H), hi = Math.min(nHours-1, i+CONSENSUS_TOL_H);
-    var c = 0, cs = 0;
+    var c = 0, cs = 0, wetF = {}, wetS = {};
     for(var m=0;m<N;m++){
+      var ag = byAgency ? agencyOf(active[m].m) : m;
       var wet = false;
       for(var k=lo;k<=hi;k++){
         var v = active[m].cvals[k];
         if(v != null && v >= THRESH){ wet = true; break; }
       }
-      if(wet) c++;
+      if(wet){ if(byAgency) wetF[ag] = 1; else c++; }
       var sv = active[m].cvals[i];
-      if(sv != null && sv >= THRESH) cs++;
+      if(sv != null && sv >= THRESH){ if(byAgency) wetS[ag] = 1; else cs++; }
     }
-    perHour.push(c); strict.push(cs);
+    perHour.push(byAgency ? Object.keys(wetF).length : c);
+    strict.push(byAgency ? Object.keys(wetS).length : cs);
   }
   var best = 0, bestIdx = -1, bestCount = 0;
   for(var i2=0;i2<perHour.length;i2++){
-    var s = (perHour[i2]/N) * leadWeight(i2);
+    var s = (perHour[i2]/nAg) * leadWeight(i2);
     if(s > best){ best = s; bestIdx = i2; bestCount = perHour[i2]; }
   }
   /* Hlášená HODINA se bere ze striktního počtu uvnitř tolerančního okna.
@@ -421,7 +463,7 @@ function peakConsensus(active, nHours){
     }
     if(sBest > 0) bestIdx = sIdx;
   }
-  return {prob:best, idx:bestIdx, count:bestCount, perHour:perHour, strict:strict};
+  return {prob:best, idx:bestIdx, count:bestCount, perHour:perHour, strict:strict, nAg:nAg};
 }
 
 /* Práh pro MODELY — mění se podle lokality, nastavuje se v load(). */
@@ -483,10 +525,11 @@ function calibrateProb(raw){
 
    Tohle je oprava nejhlubší vady celého verdiktu.
 
-   "Shoda modelů" NENÍ pravděpodobnost. Osm modelů není osm nezávislých
-   vzorků z rozdělení možných budoucností — je to osm implementací, které
-   sdílejí pozorovací síť, asimilační schéma i část fyziky. Když se sedm
-   z osmi shodne, neznamená to 88 %. Znamená to, že se shodly modely,
+   \"Shoda agentur\" NENÍ pravděpodobnost. Kolo 10 sice hlasují AGENTURY
+   (DWD ICON a DWD AICON už nepočítají dvakrát, IFS a AIFS taky ne),
+   ale i tak jde o implementace, které sdílejí pozorovací síť,
+   asimilační schéma i část fyziky. Když se sedm z devíti agentur
+   shodne, neznamená to 78 %. Znamená to, že se shodly agentury,
    které se shodovat mají tendenci.
 
    Ensemble řeší přesně tohle a řeší to správně. Vezme JEDEN model a pustí
@@ -2501,6 +2544,18 @@ function render(j, allModels, generation){
     var db = (b.m.hl!=null) ? distKm(cur.lat,cur.lon,b.m.hl,b.m.hg) : 0;
     return da-db;
   });
+  /* KOLO 10: VOLEBNÍ SBOR se staví POŘADÍM, NE daty dostupnosti.
+     Dřív hlasovala jen zobrazená osmička — když open-meteo někomu
+     vrátil 503 a místo něj se do 8 řádky vpotáhl devátý, verdikt
+     tiše vyměnil voliče a % skočilo, aniž by se změnilo počasí.
+     Sbor = všechny dostupné řady, národní model vždy, zámořské
+     globály (VERDICT_NO_VOTE) nikdy; kdo neodpoví, zdrží se
+     (abstain), nikdo se za něj nedosadí. Tabulka vedle dál ukazuje
+     jen osm nejbližších modelů — zobrazení a hlasování jsou teď
+     dvě různé otázky a vextra/ensrow to říká nahlas. */
+  var votersAll = perModel.filter(function(p){
+    return p.avail && (p.m.national || !VERDICT_NO_VOTE[p.m.id]);
+  });
   perModel = perModel.slice(0, 8);
 
   /* Kolik z osmi nejbližších modelů nedorazilo? Když open-meteo
@@ -2604,9 +2659,15 @@ if(mh && NARROW.matches){
     + "<td class=\"sumcell\"></td>";
   body.appendChild(trc);
 
-  /* verdikt — nejsilnější shoda v čase, ne "kterákoli hodina kdekoli" */
-  var pk = peakConsensus(active, times.length);
-  var rainModels = pk.count;
+  /* verdikt — nejsilnější shoda v čase, ne "kterákoli hodina kdekoli".
+     KOLO 10: shoda se počítá PO AGENTURÁCH (jedna agentura = jeden hlas,
+     viz agencyOf) a z PEVNÉHO SBORU votersAll, ne z osmi zobrazených
+     řádků. Pro Česko typicky 9 agentur: DWD, DMI, KNMI, ECMWF, METNO,
+     Météo-France, UKMO, NOAA a ECCC — i ti, co do tabulky nevešli. */
+  var pk = peakConsensus(votersAll, times.length, true);
+  var rainModels = pk.count;   /* počet AGENTUR na špičce (název pole
+                                  zůstává kvůli minimu zásahů) */
+  var nAg = pk.nAg;           /* kolik agentur celkem hlasuje */
   var rawProb = Math.round(pk.prob*100);
   var agreeProb = Math.max(0, Math.min(100, Math.round(calibrateProb(rawProb))));
   /* pro srovnání se starým chováním — vypisuje bpDiag() */
@@ -2614,8 +2675,8 @@ if(mh && NARROW.matches){
 
   /* ---- CO SE UKÁŽE JAKO HLAVNÍ ČÍSLO ----
      Když je k dispozici ensemble, je to skutečná pravděpodobnost a má
-     přednost. Když není, ukáže se shoda modelů — ale POPISEK to řekne.
-     Nikdy se netvrdí "pravděpodobnost" o něčem, co je podíl modelů. */
+     přednost. Když není, ukáže se shoda agentur — ale POPISEK to řekne.
+     Nikdy se netvrdí "pravděpodobnost" o něčem, co je podíl agentur. */
   var ens = (ensState && ensState !== "off" && ensState !== "error") ? ensState : null;
   /* Automatická kalibrace z vlastních Brierových měření, per zdroj:
      bez vzorků identita, takže dnes se nic nezmění — ale jakmile appka
@@ -2641,7 +2702,7 @@ if(mh && NARROW.matches){
 
   $("pctLabel").textContent = jePravdepodobnost
     ? (snihVerdict ? "Pravděpodobnost sněžení do " : "Pravděpodobnost deště do ") + HOURS + " h"
-    : (snihVerdict ? "Shoda modelů na sněhu do " : "Shoda modelů na dešti do ") + HOURS + " h";
+    : (snihVerdict ? "Shoda agentur na sněhu do " : "Shoda agentur na dešti do ") + HOURS + " h";
   $("pct").textContent = prob+"%";
   $("pct").style.color = prob>=60 ? "var(--rain)" : prob>=30 ? "var(--warn)" : "var(--text)";
   $("gaugeFill").style.width = prob+"%";
@@ -2653,21 +2714,26 @@ if(mh && NARROW.matches){
         : prob>=30 ? "Sníh je možný" : prob>0 ? "Spíš nezapadne" : "Sucho");
   } else {
     /* Bez ensemblu je to jen shoda — slovní hodnocení proto opatrnější,
-       ať velké číslo nesvádí ke čtení, které data neunesou. */
+       ať velké číslo nesvádí ke čtení, které data neunesou. Kolo 10:
+       hlasují agentury, takže i text mluví agenturami. */
     $("word").textContent = !snihVerdict
-      ? (prob>=85 ? "Modely se shodují na dešti" : prob>=60 ? "Většina modelů čeká déšť"
-        : prob>=30 ? "Modely se neshodnou" : prob>0 ? "Déšť čeká menšina" : "Sucho")
-      : (prob>=85 ? "Modely se shodují na sněhu" : prob>=60 ? "Většina modelů čeká sníh"
-        : prob>=30 ? "Modely se neshodnou" : prob>0 ? "Sníh čeká menšina" : "Sucho");
+      ? (prob>=85 ? "Agentury se shodují na dešti" : prob>=60 ? "Většina agentur čeká déšť"
+        : prob>=30 ? "Agentury se neshodnou" : prob>0 ? "Déšť čeká menšina" : "Sucho")
+      : (prob>=85 ? "Agentury se shodují na sněhu" : prob>=60 ? "Většina agentur čeká sníh"
+        : prob>=30 ? "Agentury se neshodnou" : prob>0 ? "Sníh čeká menšina" : "Sucho");
   }
+  /* Kolo 10: hlasují agentury (ne řádky tabulky). Věta proto mluví
+     agenturami — u číslic funguje genitivní tvar „n agentur“ pro
+     jednotné i množné číslo, takže gramatika neutrpí (dřív
+     „5 z 8 modelů se shoduje“ × „2 z 8 modelů se shodují“). */
   $("expl").textContent = pk.idx < 0
-    ? "Žádný z "+N+" modelů nehlásí srážky v příštích "+HOURS+" hodinách pro lokalitu "+cur.name+"."
-    : rainModels+" z "+N+" modelů se shoduje na srážkách ≥ "+fmtThresh(THRESH)
-      + " mm/h kolem "+fmtHr(times[pk.idx])+" pro lokalitu "+cur.name+"."
+    ? "Žádná z " + nAg + " agentur nehlásí srážky v příštích " + HOURS + " hodinách pro lokalitu " + cur.name + "."
+    : "Srážky ≥ " + fmtThresh(THRESH) + " mm/h kolem " + fmtHr(times[pk.idx]) + " hlásí "
+      + rainModels + " z " + nAg + " agentur (" + rawProb + " %) pro lokalitu " + cur.name + "."
       + (THRESH > THRESH_BASE ? " Práh je zvýšený — konvektivní déšť je skvrnitý." : "");
-  $("agree").innerHTML = rainModels+"/"+N+" <small>"+(snihVerdict ? "sníh" : "déšť")+"</small>";
+  $("agree").innerHTML = rainModels+"/"+nAg+" <small>agentur "+(snihVerdict ? "sníh" : "déšť")+"</small>";
 
-  renderEnsembleRow(ens, agreeProb, pk);
+  renderEnsembleRow(ens, agreeProb, pk, active);
 
   /* ---- podklad pro sloučený mobilní panel ----
      Kolik modelů hlásí déšť v každé hodině zvlášť. Tabulka to sice
@@ -2747,10 +2813,14 @@ if(mh && NARROW.matches){
     var sd = Math.sqrt(vs.reduce(function(a,b){ return a+(b-mean)*(b-mean); },0)/vs.length);
     return {cv: mean > 0.02 ? sd/mean : null, med:med, iqr:(q3-q1), mokrych: vs.length};
   });
+  /* KOLO 10: rainModels = počet agentur na špičce, N = počet hlasujících
+     agentur (výklad i podpisy mluví agenturami). Nm = zobrazených modelů
+     v tabulce — potřebuje ho jen „druhá vlna“ v solo panelu, která
+     počítá řádky perHourRain, tedy modely. */
   verdictState = {
     prob: prob, jePravdepodobnost: jePravdepodobnost,
     probRaw: (ens ? ens.prob : agreeProb), probSrc: probSrc,
-    agreeProb: agreeProb, rainModels: rainModels, N: N,
+    agreeProb: agreeProb, rainModels: rainModels, N: nAg, Nm: N, nAg: nAg,
     pkIdx: pk.idx, times: times, perHourRain: perHourRain, perHourMm: perHourMm,
     spread: spread, ens: ens
   };
@@ -2771,7 +2841,7 @@ if(mh && NARROW.matches){
     return vs[Math.floor(vs.length/2)];
   });
 
-  modelState = {times:times, consensus:consensus, N:N, perHourMax:perHourMax, spread:spread, peak:pk,
+  modelState = {times:times, consensus:consensus, N:N, nAg:nAg, perHourMax:perHourMax, spread:spread, peak:pk,
                 longTimes:longTimes, longMed:longMed, snowFrac: perHourSnow};
   /* Řádek ČHMÚ se kreslí i odsud, ne jen z loadChmi().
      Ve snímku z 23. 7. v tabulce chyběl a nemuselo to být jen CORSem:
@@ -2806,16 +2876,32 @@ if(mh && NARROW.matches){
 
    Ukazují se všechny. Když se rozejdou, je to samo o sobě informace —
    a poctivější než vybrat jedno a mlčet o zbytku. */
-function renderEnsembleRow(ens, agreeProb, pk){
+function renderEnsembleRow(ens, agreeProb, pk, shownRows){
   var el = $("ensrow");
   if(!el) return;
   var parts = [];
 
   if(ens){
-    /* Hlavní číslo je z ensemblu → tady se ukáže shoda modelů jako druhý názor. */
-    parts.push("<span>shoda modelů <b>" + agreeProb + " %</b></span>");
+    /* Hlavní číslo je z ensemblu → tady se ukáže shoda agentur jako druhý názor. */
+    parts.push("<span>shoda agentur <b>" + agreeProb + " %</b></span>");
   } else if(ensState === "error"){
     parts.push("<span class=\"dis\">ensemble nedostupný</span>");
+  }
+
+  /* KOLO 10: verdikt hlasuje PEVNÝ sbor agentur, tabulka ukazuje osm
+     nejbližších modelů. Když nějací voliči do tabulky nevešli (typicky
+     UKMO/NOAA/ECCC pro Česko), je to vidět tady — bez tahle poznámky
+     by řádek „Shoda modelů“ v tabulce a procento nahoře tiše
+     počítaly dva různé sbory a čísla by si odporovala. */
+  if(pk && pk.nAg > 0){
+    var shown = {};
+    (shownRows || []).forEach(function(p){
+      if(p.m.national || !VERDICT_NO_VOTE[p.m.id]) shown[agencyOf(p.m)] = 1;
+    });
+    var nShown = Object.keys(shown).length;
+    if(pk.nAg > nShown)
+      parts.push("<span class=\"dis\">verdikt: " + pk.nAg
+               + " hlasujících agentur · tabulka ukazuje osm nejbližších modelů</span>");
   }
 
   /* Open-Meteo precipitation_probability přes okno verdiktu — maximum,
@@ -3137,8 +3223,8 @@ function bpDiag(){
       });
       return out;
     })(),
-    "verdikt: špičková shoda": (modelState && modelState.peak && modelState.peak.idx >= 0)
-      ? modelState.peak.count + "/" + modelState.N + " v " + fmtHr(modelState.times[modelState.peak.idx])
+    "verdikt: špičková shoda agentur": (modelState && modelState.peak && modelState.peak.idx >= 0)
+      ? modelState.peak.count + "/" + modelState.nAg + " v " + fmtHr(modelState.times[modelState.peak.idx])
         + " → " + Math.round(modelState.peak.prob*100) + " %"
       : "žádné srážky",
     "verdikt: staré .some() by dalo": legacyAnyProb == null ? "—" : legacyAnyProb + " %",
@@ -5848,11 +5934,14 @@ function renderSolo(){
 
     var potom = soloRainAfter(zbyva == null ? 60 : zbyva);
     var t2;
-    if(potom && V && potom.count >= Math.max(2, Math.ceil(V.N*0.35))){
+    /* POZOR: soloRainAfter počítá perHourRain, tedy MODELY v tabulce —
+       proto se tady porovnává s V.Nm, ne s V.N (kolo 10: V.N už je
+       počet agentur verdiktu). */
+    if(potom && V && potom.count >= Math.max(2, Math.ceil(V.Nm*0.35))){
       t2 = "Tímhle to ale nekončí — <em>kolem " + fmtHr(potom.at) + "</em> čeká déšť "
-         + potom.count + " z " + V.N + " modelů. Počítej s druhou vlnou.";
+         + potom.count + " z " + V.Nm + " modelů. Počítej s druhou vlnou.";
     } else if(potom && potom.count > 0){
-      t2 = "Po konci by mělo být sucho. Menšina modelů (" + potom.count + " z " + V.N
+      t2 = "Po konci by mělo být sucho. Menšina modelů (" + potom.count + " z " + V.Nm
          + ") sice hlásí něco kolem " + fmtHr(potom.at) + ", ale na tom se neshodnou.";
     } else {
       t2 = "Až přestane, mělo by <s>zůstat sucho</s> po zbytek osmi hodin.";
@@ -5902,7 +5991,7 @@ function renderSolo(){
         : "Slabé srážky")
                   + rozp + ".";
     var fx = [];
-    if(V) fx.push("<span>shoda <b>" + V.rainModels + "/" + V.N + "</b> modelů</span>");
+    if(V) fx.push("<span>shoda <b>" + V.rainModels + "/" + V.nAg + "</b> agentur</span>");
     /* Šance do hi minuty: procento k tomu, co věta slibuje — že déšť
        začne právě v tomhle rozpětí. Když není z čeho (žádný ensemble,
        žádné Open-Meteo), zůstane staré procento přes 8h okno. */
@@ -5956,12 +6045,12 @@ function renderSolo(){
   var snihDry = isSnowWindow();
   sub.textContent = V.jePravdepodobnost
     ? ((snihDry ? "pravděpodobnost sněžení během " : "pravděpodobnost deště během ") + HOURS + " hodin")
-    : ((snihDry ? "shoda modelů na sněhu během " : "shoda modelů na dešti během ") + HOURS + " hodin");
+    : ((snihDry ? "shoda agentur na sněhu během " : "shoda agentur na dešti během ") + HOURS + " hodin");
   if(word) word.textContent = V.rainModels === 0
     ? (snihDry ? "Nemělo by sněžit" : "Nemělo by pršet")
     : "Spíš sucho";
-  var fx2 = ["<span>shoda <b>" + V.rainModels + "/" + V.N + "</b> modelů</span>"];
-  if(V.jePravdepodobnost) fx2.push("<span>shoda modelů <b>" + V.agreeProb + " %</b></span>");
+  var fx2 = ["<span>shoda <b>" + V.rainModels + "/" + V.nAg + "</b> agentur</span>"];
+  if(V.jePravdepodobnost) fx2.push("<span>shoda agentur <b>" + V.agreeProb + " %</b></span>");
   if(V.pkIdx >= 0 && V.times[V.pkIdx]) fx2.push("<span>nejblíž <b>" + fmtHr(V.times[V.pkIdx]) + "</b></span>");
   if(snihDry){
     var slDry = snowLineAt(V.pkIdx >= 0 ? V.pkIdx : 0);
@@ -5972,49 +6061,51 @@ function renderSolo(){
   /* --- SLOVNÍ VÝKLAD ---
      Číslo samo o sobě uživateli neřekne, jestli si má vzít deštník.
      Věta ano. */
-  var pomer = V.N ? V.rainModels/V.N : 0;
+  var pomer = V.nAg ? V.rainModels/V.nAg : 0;
   var vyklad;
   /* Kolo 8bb: když jde o sníh, výklad mluví sněhem — „deštník doma“
-     by nad zapadávající krajinou působil zvláštně. */
+     by nad zapadávající krajinou působil zvláštně.
+     Kolo 10: hlasují agentury, takže výklad mluví agenturami
+     („4 z 9 agentur“, žádné počítání řádků tabulky). */
   if(V.rainModels === 0){
     vyklad = snihDry
-      ? "Žádný z " + V.N + " modelů sníh nečeká. <s>Sucho</s>."
-      : "Žádný z " + V.N + " modelů déšť nečeká. <s>Sucho</s> — deštník doma.";
+      ? "Žádná z " + V.nAg + " agentur sníh nečeká. <s>Sucho</s>."
+      : "Žádná z " + V.nAg + " agentur déšť nečeká. <s>Sucho</s> — deštník doma.";
   } else if(pomer >= 0.75){
     vyklad = snihDry
-      ? "Modely se <s>shodují</s> — " + V.rainModels + " z " + V.N
+      ? "Agentury se <s>shodují</s> — " + V.rainModels + " z " + V.nAg
            + " čeká sníh. Silná shoda; teplé boty bych vzal."
-      : "Modely se <s>shodují</s> — " + V.rainModels + " z " + V.N
+      : "Agentury se <s>shodují</s> — " + V.rainModels + " z " + V.nAg
            + " čeká srážky. Tohle je silná shoda, deštník bych vzal.";
   } else if(pomer >= 0.45){
     vyklad = snihDry
-      ? "Většina modelů (" + V.rainModels + " z " + V.N + ") sníh čeká, ale ne všechny. "
+      ? "Většina agentur (" + V.rainModels + " z " + V.nAg + ") sníh čeká, ale ne všechny. "
            + "Sníh je citlivý na teplotu — můžou z toho být i plískanice."
-      : "Většina modelů (" + V.rainModels + " z " + V.N + ") déšť čeká, ale ne všechny. "
+      : "Většina agentur (" + V.rainModels + " z " + V.nAg + ") déšť čeká, ale ne všechny. "
            + "Deštník do batohu, i když nemusí přijít.";
   } else if(pomer >= 0.2){
     vyklad = snihDry
-      ? "Modely se <em>neshodnou</em> — jen " + V.rainModels + " z " + V.N
+      ? "Agentury se <em>neshodnou</em> — jen " + V.rainModels + " z " + V.nAg
            + " čeká sníh, zbytek sucho. Na takové shodě se nedá stavět; "
            + "ber to jako \u201emůže, ale spíš ne\u201c."
-      : "Modely se <em>neshodnou</em> — jen " + V.rainModels + " z " + V.N
+      : "Agentury se <em>neshodnou</em> — jen " + V.rainModels + " z " + V.nAg
            + " čeká déšť, zbytek sucho. Na takové shodě se nedá stavět; "
            + "ber to jako \u201emůže, ale spíš ne\u201c.";
   } else {
     vyklad = snihDry
-      ? "Sníh čeká jen <em>menšina</em> modelů (" + V.rainModels + " z " + V.N
+      ? "Sníh čeká jen <em>menšina</em> agentur (" + V.rainModels + " z " + V.nAg
            + "). To bývá spíš šum než signál."
-      : "Déšť čeká jen <em>menšina</em> modelů (" + V.rainModels + " z " + V.N
+      : "Déšť čeká jen <em>menšina</em> agentur (" + V.rainModels + " z " + V.nAg
            + "). To bývá spíš šum než signál.";
   }
   if(V.jePravdepodobnost && Math.abs(V.prob - V.agreeProb) >= 30){
-    vyklad += " Ensemble a shoda modelů se ale <em>výrazně rozcházejí</em> ("
+    vyklad += " Ensemble a shoda agentur se ale <em>výrazně rozcházejí</em> ("
             + V.prob + " % proti " + V.agreeProb + " %) — situace je nejistá.";
   }
   if(V.spread && V.pkIdx >= 0 && V.spread[V.pkIdx] && V.spread[V.pkIdx].cv > 1.1)
     vyklad += " I na množství se modely rozcházejí.";
   talk.innerHTML = vyklad;
-  src.textContent = V.ens ? (V.ens.members + " členů · " + V.ens.model) : (V.N + " modelů");
+  src.textContent = V.ens ? (V.ens.members + " členů · " + V.ens.model) : (V.nAg + " agentur");
 }
 
 /* ==================== NÁRODNÍ RADAROVÝ NOWCAST PŘES WMS ====================
@@ -8085,8 +8176,8 @@ function recomputeWhen(){
      modely nechá verdiktu. Výjimka: když radar i minutecast leží
      (obojí error/off), zůstává stará modelová větev jako vypomáhající
      pád s explicitním „radar nedostupný · jen modely".
-     Vzorek do Brierovy fronty (src "agree", shoda maxC/N na špičce)
-     se v obou případech ukládá dál — verdikt sám žádný agree-vzorek
+     Vzorek do Brierovy fronty (src "agree"; kolo 10: shoda agentur
+     na špičce, viz níž) se v obou případech ukládá dál — verdikt sám žádný agree-vzorek
      ne enqueueuje a kalibrace by se jinak odnaučila. */
   var maxC = 0;
   ms.consensus.forEach(function(c){ if(c>maxC) maxC=c; });
@@ -8140,9 +8231,18 @@ function recomputeWhen(){
     whenState = {mode:"model", etaMin: minM, now: now, idx: idx,
                  agree: maxC, N: ms.N, mmh: ms.perHourMax[idx], at: ms.times[idx]};
   }
-  /* Modelový verdikt taky patří do kalibrace — je hlášena shoda maxC/N
-     modelů, což je sám o sobě pravděpodobnostní soud. */
-  if(cur) enqueueVerdict(locKeyOf(cur.lat, cur.lon), cur.lat, cur.lon, cur.cc,
-                         t, Math.max(0.05, Math.min(0.98, maxC/ms.N)), "agree");
+  /* Modelový verdikt taky patří do kalibrace. KOLO 10: vzorek teď říká
+     přesně to, co procento nahoře — shoda AGENCUR na špičce (peak.prob,
+     včetně předstihové váhy) a cíl je hodina špičky ms.peak.idx. Dřív
+     šel do fronty modelový podíl maxC/ms.N z tabulky, což už od kola 9
+     říkal něco jiného než UI. Padací varianta: když žádná agentura
+     nehlásí srážky (peak.idx<0), ale tabulkové modely ano, zůstává
+     starý prediktor, ať sběr dat neuměle nevymizí. */
+  if(cur){
+    var agT = (ms.peak && ms.peak.idx >= 0) ? ms.times[ms.peak.idx].getTime() : t;
+    var agP = (ms.peak && ms.peak.idx >= 0) ? ms.peak.prob : maxC/ms.N;
+    enqueueVerdict(locKeyOf(cur.lat, cur.lon), cur.lat, cur.lon, cur.cc,
+                   agT, Math.max(0.05, Math.min(0.98, agP)), "agree");
+  }
   renderSolo();
 }

@@ -789,3 +789,73 @@ test('kolo 9c: rozchod shody a kalibrovaného Open-Meteo se pojmenuje i bez ense
   assert.ok(script.slice(i,i+1500).includes('odhady se rozcházejí'),
     'poznámka o rozcházejících se odhadech bez ensemblu');
 });
+
+/* Kolo 10: rodinný hlas (jedna agentura = jeden hlas) a pevný volební
+   sbor. Verdikt počítá AGENTURY, ne řádky tabulky; sbor nezávisí na
+   tom, kdo zrovna odpověděl; ensemble nadále počítá členy (řádky). */
+test('kolo 10: agencyOf — AI odnože hlasují za mateřskou agenturu',()=>{
+  const c=context(['agencyOf']);
+  assert.equal(c.agencyOf({fam:'AIFS'}),'ECMWF','AIFS → ECMWF');
+  assert.equal(c.agencyOf({fam:'AICON'}),'DWD','AICON → DWD');
+  assert.equal(c.agencyOf({fam:'METNO'}),'METNO');
+  assert.equal(c.agencyOf({fam:null,id:'icon_d2'}),'icon_d2','pádová hodnota id');
+  assert.equal(c.agencyOf(null),'');
+});
+test('kolo 10: peakConsensus(byAgency) — jedna agentura, jeden hlas',()=>{
+  const c=context(['leadWeight','agencyOf','peakConsensus'],{THRESH:0.2,CONSENSUS_TOL_H:1});
+  const mk=(fam,h)=>({m:{fam},cvals:Array.from({length:8},(_,i)=>(i===h?0.5:null))});
+  /* 6 řádků, ale jen 4 agentury: DWD (ICON + AICON), ECMWF (IFS + AIFS),
+     DMI, METNO. DWD i ECMWF by dřív hlasovaly dvakrát. */
+  const rows=[mk('DWD',3),mk('AICON',3),mk('ECMWF',3),mk('AIFS',3),mk('DMI',-1),mk('METNO',3)];
+  const pk=c.peakConsensus(rows,8,true);
+  assert.equal(pk.nAg,4,'agentury se deduplí: DWD, ECMWF, DMI, METNO');
+  assert.equal(pk.count,3,'druhý hlas rodiny se nepočítá: DWD + ECMWF + METNO');
+  assert.ok(Math.abs(pk.prob-(0.75*c.leadWeight(2)))<1e-9,'podíl agentur × předstihová váha');
+  assert.equal(pk.idx,3,'hlášená hodina ze striktního maxima (3), tolerance neposouvá dopředu');
+  /* Režim bez byAgency (ensemble, věci nad jednoím modelem): beze změny. */
+  const pkRows=c.peakConsensus(rows,8);
+  assert.equal(pkRows.nAg,6,'bez byAgency norma = řádky (členové ensemblu)');
+  assert.equal(pkRows.count,5,'mokré řádky: DWD, AICON, ECMWF, AIFS, METNO — bez deduplikace');
+  assert.ok(Math.abs(pkRows.prob-(5/6*c.leadWeight(2)))<1e-9,'starý výpočet pro ensemble nedotknut');
+});
+test('kolo 10: verdikt hlasuje pevný sbor agentur, národní model vždy',()=>{
+  assert.ok(script.includes('var VERDICT_NO_VOTE'),'sbor s vyloučenými zámořskými globály');
+  ['jma_seamless','kma_seamless','cma_grapes_global','bom_access_global']
+    .forEach(id=>assert.ok(script.includes(id+':1'),'nehlasující id v sadě: '+id));
+  assert.ok(script.includes('p.m.national || !VERDICT_NO_VOTE[p.m.id]'),
+    'sbor = dostupné řady, národní vždy (bom_access_global je národní pro AU)');
+  assert.ok(script.includes('votersAll, times.length, true'),
+    'verdikt počítán ze sboru PO AGENTURÁCH, ne z osmi zobrazených řádků');
+  assert.ok(script.includes('peakConsensus(parsed.members, HOURS)'),
+    'ensemble nadále počítá členy (řádky), ne agentury');
+});
+test('kolo 10: UI mluví agenturami — label, expl, stat, výklad, šablona',()=>{
+  assert.ok(script.includes('Shoda agentur na dešti do'),'label verdiktu pro déšť');
+  assert.ok(script.includes('Shoda agentur na sněhu do'),'label verdiktu pro sníh');
+  assert.ok(script.includes('+ rainModels + " z " + nAg + " agentur'),
+    'expl: „n z n agentur“, bez shoduje/shodují gramatiky');
+  assert.ok(script.includes('rainModels+"/"+nAg'),'stat Shoda = agentury');
+  assert.ok(script.includes('Agentury se <s>shodují</s>'),'výklad: silná shoda agentur');
+  assert.ok(script.includes('menšina</em> agentur'),'výklad: menšina agentur');
+  assert.ok(!script.includes('V.rainModels + "/" + V.N'),'staré dělení podle řádků pryč');
+  assert.ok(!script.includes('z " + V.N + " modelů'),'výklad už neumlahuje agentury modely');
+  assert.ok(html.includes('Shoda agentur na dešti do 8 h'),'šablona: výchozí label');
+  assert.ok(html.includes('data-full="Shoda agentur"'),'šablona: stat panel');
+});
+test('kolo 10: vzorek agree do Brierovy fronty říká totéž co procento nahoře',()=>{
+  assert.ok(script.includes('ms.peak.idx >= 0) ? ms.times[ms.peak.idx].getTime()'),
+    'cíl vzorku = hodina špičky agenturní shody verdiktu');
+  assert.ok(script.includes('ms.peak.prob : maxC/ms.N'),
+    'prediktor = rodinná shoda s váhou; starý modelový jen jako pád');
+});
+test('kolo 10: transparence — agentury mimo tabulku se pojmenují',()=>{
+  const i=script.indexOf('function renderEnsembleRow');
+  assert.notEqual(i,-1,'chybí renderEnsembleRow');
+  const seg=script.slice(i,i+2600);
+  assert.ok(seg.includes('hlasujících agentur'),'poznámka: verdikt počítá i mimo tabulku');
+  assert.ok(seg.includes('shoda agentur'),'druhý názor mluví agenturami');
+});
+test('kolo 10: druhá vlna deště porovnává modely s modely (V.Nm)',()=>{
+  assert.ok(script.includes('Nm: N,'),'verdictState nese počet zobrazených modelů');
+  assert.ok(script.includes('V.Nm*0.35'),'druhá vlna: práh podle modelů, ne agentur');
+});
