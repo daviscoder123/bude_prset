@@ -748,3 +748,39 @@ test('beamNote explains drizzle specifically when the station reports -DZ',()=>{
   assert.ok(seg.includes('hlásí právě mrholení'),'konkrétní text pro mrholení');
   assert.ok(seg.includes('stanice ho ale naměřila'),'obecná větev zůstává bez DZ');
 });
+
+/* Kolo 9c: panel „Kdy začne pršet“ je minutecast — modely nevyhlašují
+   začánek; okraj dat se neukazuje po minutách; rozchod odhadů pojmenován. */
+test('kolo 9c: approxClock zaokrouhluje vzdálený horizont na hodiny („zítra kolem 13:00“)',()=>{
+  const c=context(timeFunctions.concat(['approxClock']),
+    {placeTimeZone:null,placeUtcOffset:null,NARROW:{matches:false}});
+  c.setPlaceTimeZone({timezone:'Europe/Prague',utc_offset_seconds:3600});
+  const now=Date.UTC(2026,10,18,12,0,0);   /* 13:00 v Praze */
+  assert.equal(c.approxClock(now,30),'13:30');          /* do 6 h přesně */
+  assert.equal(c.approxClock(now,90),'14:30');
+  assert.equal(c.approxClock(now,361),'kolem 19:00');   /* za prahem 6 h „kolem“ */
+  assert.equal(c.approxClock(now,1439),'zítra kolem 13:00'); /* Daveův „zítra 12:59“ */
+});
+test('kolo 9c: minutecastový panel nevyhlašuje začátek deště z menšiny modelů',()=>{
+  const seg0=script.indexOf('var maxC = 0');
+  assert.notEqual(seg0,-1);
+  const seg=script.slice(seg0,seg0+6000);
+  assert.ok(seg.includes('"Nic do hodiny"'),'čestné mlčení 60minutových zdrojů');
+  assert.ok(seg.includes('enqueueVerdict'),'kalibrační vzorek src agree se dál ukládá');
+  /* Afirmativní „do hodiny“ z modelů zůstává POUZE ve výjimečném pádu
+     (radar error + minutecast bez dat), nikdy v klidném stavu panelu. */
+  const iFall=seg.indexOf('Výjimečný pád');   /* značka komentáře výjimečného pádu */
+  assert.ok(iFall>-1,'chybí výjimečný pád bez radaru i minutaycastu');
+  const iDoHodiny=seg.indexOf('big.innerHTML = "do hodiny"');
+  assert.ok(iDoHodiny>iFall,'„do hodiny“ jen ve výjimečném pádu bez dat');
+});
+test('kolo 9c: konec za horizontem dat mluví o datech, ne o minutě zítřku',()=>{
+  assert.ok(script.includes('approxClock(now, end.horizon)'),'horizont zaokrouhlen přes approxClock');
+  assert.ok(!script.includes('déšť má trvat i po'),'stará zavádějící konstrukce pryč');
+});
+test('kolo 9c: rozchod shody a kalibrovaného Open-Meteo se pojmenuje i bez ensemblu',()=>{
+  const i=script.indexOf('var omCal');
+  assert.notEqual(i,-1,'chybí výpočet kalibrovaného OM');
+  assert.ok(script.slice(i,i+1500).includes('odhady se rozcházejí'),
+    'poznámka o rozcházejících se odhadech bez ensemblu');
+});

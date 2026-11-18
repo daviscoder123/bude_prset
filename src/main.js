@@ -2829,9 +2829,20 @@ function renderEnsembleRow(ens, agreeProb, pk){
     for(var i=0;i<probSeries.length && i<HOURS;i++){
       if(probSeries[i] != null && probSeries[i] > mx){ mx = probSeries[i]; kdy = i; }
     }
-    if(kdy >= 0) parts.push("<span title=\"kalibrováno proti METAR pozorováním\">Open-Meteo <b>"
-      + Math.round(100*brierCalib(mx/100, "om"))
-      + " %</b> <small>(kalibrováno)</small></span>");
+    if(kdy >= 0){
+      var omCal = Math.round(100*brierCalib(mx/100, "om"));
+      parts.push("<span title=\"kalibrováno proti METAR pozorováním\">Open-Meteo <b>"
+        + omCal + " %</b> <small>(kalibrováno)</small></span>");
+      /* KOLO 9c (screenshot Josefov: shoda 12 % × Open-Meteo 49 %): bez
+         ensemblu se právě tyhle dva odhady rozcházejí nejvíc — shoda je
+         podíl implementací nad 0,2 mm/h, Open-Meteo jejich vlastní
+         pravděpodobnostní ensemble. Rozdíl ≥ 30 % musí být pojmenovaný,
+         jinak deset minut po sloučení panely vzájemně protiřečí a
+         uživatel hádá, který lže. S ensembly tohle hlídá věta dole;
+         tady je totéž pro stav bez něj. */
+      if(!ens && Math.abs(omCal - agreeProb) >= 30)
+        parts.push("<span class=\"dis\">odhady se rozcházejí — ber to jako nejisté</span>");
+    }
   }
 
   /* ⑨ KŘIVKA PRAVDĚPODOBNOSTI PO HODINÁCH — jedno číslo neřekne, KDE
@@ -7489,6 +7500,21 @@ function clockWithDay(now, mins){
   if(days === 1) return "zítra " + hhmm;
   return "pozítří " + hhmm;
 }
+/* Kolo 9c: okraj dat leží většinou za den a sám o sobě je jen přibližný.
+   Ukazovat ho po minutách („zítra 12:59“) je falešná přesnost, která
+   navíc zaváněla větou „zítra bude pršet ve 12:59“ (screenshot Josefov).
+   Vzdálený horizont se proto zaokrouhlí na celou hodinu a přidá „kolem“:
+   vrací „zítra kolem 13:00“ místo „zítra 12:59“. Do 6 h zůstává čas přesný,
+   tam mez zaokrouhlením ztratila víc, než vydělala. */
+function approxClock(now, mins){
+  var approx = mins > 360;
+  var m = approx ? Math.round(mins/60)*60 : mins;
+  var out = clockWithDay(now, m);
+  if(approx){
+    out = out.indexOf(" ") >= 0 ? out.replace(" ", " kolem ") : "kolem " + out;
+  }
+  return out;
+}
 /* ===== ČESKÉ SKLOŇOVÁNÍ ČÍSLOVEK =====
    Čeština má tři tvary podle počtu: 1 minuta, 2–4 minuty, 5+ minut.
    Bez toho vznikají věty jako "asi 1 h" nebo "za 5 minuty". */
@@ -7531,8 +7557,8 @@ function renderRainEnd(now, startMin, timeline){
   if(!end){ el.innerHTML = ""; return; }
 
   if(end.beyond){
-    el.innerHTML = "Konec zatím není v dohledu — déšť má trvat i po <b>"
-                 + clockWithDay(now, end.horizon) + "</b>, dál appka nevidí.";
+    el.innerHTML = "Konec zatím není v dohledu — v datech až po <b>"
+                 + approxClock(now, end.horizon) + "</b> žádná souvislá přestávka.";
     return;
   }
   var dur = Math.max(5, end.min - end.wetStart);
@@ -8043,8 +8069,21 @@ function recomputeWhen(){
     return;
   }
 
-  /* nowcast, radar i modely mlčí do 60. minuty → pod prahem 1 h nic netvrdit */
-  /* modelová větev: první výskyt maxima konsenzu */
+  /* ---- KOLO 9c: PANEL „KDY ZAČNE PRŠET" JE MINUTACAST, NE MODELY ----
+     Dave (screenshot Josefov): „Kdy začne pršet" odpovídá radar, minutecast,
+     stanice a satelit; procenta a „nejpravděpodobnější hodinu" modelů mluví
+     verdikt nahoře (na mobilu oba příběhy spojuje solo panel). Dřív tady
+     běžela modelová větev, která stačila k afirimativnímu „do hodiny" či
+     „za X min" JEDENU osamocenému modelu z osmi — tím panel sliboval
+     začátek deště, který verdikt („12 %, Déšť čeká menšina") i radar
+     („Tě mine") popíraly: tři panely, tři různé předpovědi.
+     Nové pravidlo: když 60minutové zdroje mlčí, panel řekne právě to a
+     modely nechá verdiktu. Výjimka: když radar i minutecast leží
+     (obojí error/off), zůstává stará modelová větev jako vypomáhající
+     pád s explicitním „radar nedostupný · jen modely".
+     Vzorek do Brierovy fronty (src "agree", shoda maxC/N na špičce)
+     se v obou případech ukládá dál — verdikt sám žádný agree-vzorek
+     ne enqueueuje a kalibrace by se jinak odnaučila. */
   var maxC = 0;
   ms.consensus.forEach(function(c){ if(c>maxC) maxC=c; });
   if(maxC === 0){
@@ -8062,20 +8101,41 @@ function recomputeWhen(){
   var t = ms.times[idx].getTime();
   var minM = Math.round((t - now)/60000);
   var pct = Math.round(maxC/ms.N*100);
-  big.className = "big";
-  if(minM <= 0){
-    big.innerHTML = "do hodiny";           /* pozorování déšť nepotvrdila → netvrdit "teď" */
-  } else if(minM < 60){
-    big.innerHTML = "za "+minM+" <small>min</small>";
+  var radOk = !!(radarState && radarState !== "error") && radarCoverage !== "none";
+  var mcOk = Array.isArray(altSeries);
+  if(radOk || mcOk){
+    /* Minutecast i radar mají data a přesto mlčí — řekne se to rovnou,
+       bez cizí pomoci modelů. O tom, co procenta říkají, mluví verdikt. */
+    var vidici = [];
+    if(radOk) vidici.push("radar");
+    if(mcOk) vidici.push("minutecast");
+    big.className = "big none";
+    big.textContent = "Nic do hodiny";
+    sub.innerHTML = cap(vidici.join(" ani ")) + " v příští hodině nic nevidí."
+      + (chmiSaysDry() ? " Český radar také nevidí žádné echo." : "");
+    if($("whenLabel")) $("whenLabel").textContent = "Kdy začne pršet v horizontu 60 min";
+    srcEl.textContent = "zdroj: " + vidici.join(" + ")
+      + " · horizont 60 min · modely mluví v verdiktu" + sourceCaveat();
+    if($("whenUntil")) $("whenUntil").innerHTML = "";
+    whenState = {mode:"hour-dry", now: now};
   } else {
-    var h = Math.floor(minM/60), m = minM%60;
-    big.innerHTML = "za "+h+"<small>h</small> "+(m>0? m+"<small>min</small>":"");
+    /* Výjimečný pád: radar nedostupný a minutecast bez dat. Panel nemá
+       své zdroje — zbyde starý modelový odhad, jasně nahlášený. */
+    big.className = "big";
+    if(minM <= 0){
+      big.innerHTML = "do hodiny";           /* pozorování déšť nepotvrdila → netvrdit "teď" */
+    } else if(minM < 60){
+      big.innerHTML = "za "+minM+" <small>min</small>";
+    } else {
+      var h = Math.floor(minM/60), m = minM%60;
+      big.innerHTML = "za "+h+"<small>h</small> "+(m>0? m+"<small>min</small>":"");
+    }
+    sub.innerHTML = "Nejvyšší pravděpodobnost: <b>"+fmtHr(ms.times[idx])+"</b> · shoda <b>"+maxC+"/"+ms.N+"</b> modelů ("+pct+" %), ~"+fmtMM(ms.perHourMax[idx])+" mm/h.";
+    srcEl.textContent = "radar nedostupný · jen modely" + sourceCaveat();
+    renderRainEnd(now, Math.max(0, minM), blendTimeline);
+    whenState = {mode:"model", etaMin: minM, now: now, idx: idx,
+                 agree: maxC, N: ms.N, mmh: ms.perHourMax[idx], at: ms.times[idx]};
   }
-  sub.innerHTML = "Nejvyšší pravděpodobnost: <b>"+fmtHr(ms.times[idx])+"</b> · shoda <b>"+maxC+"/"+ms.N+"</b> modelů ("+pct+" %), ~"+fmtMM(ms.perHourMax[idx])+" mm/h.";
-  srcEl.textContent = (radarState==="error" ? "radar nedostupný · jen modely" : "zdroj: "+ms.N+" modelů + radar na pozadí") + sourceCaveat();
-  renderRainEnd(now, Math.max(0, minM), blendTimeline);
-  whenState = {mode:"model", etaMin: minM, now: now, idx: idx,
-               agree: maxC, N: ms.N, mmh: ms.perHourMax[idx], at: ms.times[idx]};
   /* Modelový verdikt taky patří do kalibrace — je hlášena shoda maxC/N
      modelů, což je sám o sobě pravděpodobnostní soud. */
   if(cur) enqueueVerdict(locKeyOf(cur.lat, cur.lon), cur.lat, cur.lon, cur.cc,

@@ -165,3 +165,26 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
       Testů 92/92 zelených (4 nové: fallback křivka om a přednost
       učení, Shoda surové vals, OM zobrazení přes kalibraci, beamNote DZ);
       aktualizován 1 stávající test (om už není identita bez dat).
+  - **(kolo 9c):** UX náprava ze screenshotu Josefov (Praha), kde tři
+    panely vpravo vyprávěly tři různé předpovědi.
+    - **Panel „Kdy začne pršet“ je zase minutacast:** modelová větev
+      stačila k afirmativnímu „do hodiny“ jednomu osamocenému modelu
+      z osmi (IFS 0,2 mm/h), ačkoliv verdiktem hlásil „12 %, Déšť
+      čeká menšina“ a radar „Tě mine“. Když teď 60minutové zdroje
+      (radar, minutecast) mlčí, panel řekne právě to — „Nic do
+      hodiny“ — a modelová procenta nechá verdiktu (na mobilu oba
+      příběhy spojuje solo panel). Vzorek do Brierovy kalibrace
+      (zdroj agree) se ukládá dál; výjimečný pád bez radaru i
+      minutecastu zůstává s vyznačeným „radar nedostupný · jen
+      modely“.
+    - **„Zítra 12:59“ je pryč:** větu „Konec zatím není v dohledu —
+      déšť má trvat i po zítra 12:59, dál appka nevidí“ nahradilo
+      „Konec zatím není v dohledu — v datech až po zítra kolem
+      13:00 žádná souvislá přestávka“; vzdálený okraj dat (nad 6 h)
+      se novou funkcí approxClock zaokrouhluje na hodiny s „kolem“,
+      takže zítřejší déšť je jen okrajová zmínka bez falešné
+      minutové přesnosti.
+    - **Rozchod odhadů bez ensemblu:** když se kalibrované Open-Meteo
+      a shoda modelů liší o 30 % a víc (screenshot: 12 % × 49 %),
+      řádek ensemblu přidá „odhady se rozcházejí — ber to jako
+      nejisté“, dosud to hlídal jen stav s ensembly. Testů 96/96.
