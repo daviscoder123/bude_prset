@@ -1391,6 +1391,23 @@ function brierCurve(src){
 }
 function brierCalib(p01, src){
   var pts = brierCurve(src);
+  /* KOLO 9b — studený start zdroje "om": Open-Meteo precipitation_probability
+     (maximum přes 8hodinové okno) je ve středním pásmu výrazně PODCEŇNÉ —
+     zpětný test sběrače na přesně této sémantice (max pp 0–7 h proti dešti
+     kdykoli v okně, jednotná truth, n = 20 189, base rate 34,7 %) dal:
+     hlášené 10–20 % → reálně 39,4 %, 30–40 % → 59,8 %, 50–60 % → 72,4 %.
+     Vlastní naučená křivka má VŽDY přednost (fallback platí jen dokud
+     brierCurve "om" vrací null); po opravě kvóty (kolo 9) ensemble
+     zřídka selhává, takže vzorky om by jinak kalibraci om napořád
+     nenaplnily a uživatel by viděl syrová, podhodnocená procenta.
+     Tabulka je už monotonní (PAV nebyl potřeba); aditivní vložením zde
+     se nemíchá s učením ani s žádným jiným zdrojem (ens/mix/agree
+     zůstávají identitou, dokud je nenaučí vlastní data). */
+  if(!pts && src === "om"){
+    pts = [[0.05,0.089],[0.15,0.394],[0.25,0.446],[0.35,0.598],
+           [0.45,0.675],[0.55,0.724],[0.65,0.771],[0.75,0.892],
+           [0.85,0.902],[0.95,0.953]];
+  }
   if(!pts) return p01;
   if(p01 <= pts[0][0]) return pts[0][1];
   for(var i=1; i<pts.length; i++){
@@ -2565,8 +2582,15 @@ if(mh && NARROW.matches){
 
   var active = perModel.filter(function(p){ return p.avail; });
   var N = active.length;
+  /* KOLO 9b — Shoda počítá SUROVÉ hodnoty (vals), ne korigované (cvals).
+     Buňky nad ní ukazují přesně to, co model doslova řekl, a hodnota
+     přesně na prahu 0,2 mm/h (nejčastější kvant Open-Meteo „slabý
+     déšť“) po korekci (bias ÷1,3, orografie) spadne pod práh: tabulka by
+     ukazovala dva modely mokré, zatímco Shoda hlásila 0/N. Řádek
+     musí odpovídat tomu, co uživatel vidí. Korekce zůstávají v
+     peakConsensus a verdiktu — tam jsou záměrem (naučené škály). */
   var consensus = times.map(function(_,i){
-    return active.filter(function(p){ return p.cvals[i]!=null && p.cvals[i]>=THRESH; }).length;
+    return active.filter(function(p){ return p.vals[i]!=null && p.vals[i]>=THRESH; }).length;
   });
   var trc = document.createElement("tr");
   trc.className = "consensus";
@@ -2795,13 +2819,19 @@ function renderEnsembleRow(ens, agreeProb, pk){
   }
 
   /* Open-Meteo precipitation_probability přes okno verdiktu — maximum,
-     protože verdikt je "zaprší někdy v příštích 8 h", ne "v konkrétní hodinu". */
+     protože verdikt je "zaprší někdy v příštích 8 h", ne "v konkrétní hodinu".
+     KOLO 9b: zobrazené procento jde přes brierCalib("om") — buď vlastní
+     naučenou křivku, nebo statickou fallback (studený start, viz tam),
+     takže „Open-Meteo 30 %“ nenamlouvá nízkou šanci, když realita je
+     ~60 %. Mini graf dál kreslí syrové pp (tvar křivky, ne šance). */
   if(probSeries && probSeries.length){
     var mx = 0, kdy = -1;
     for(var i=0;i<probSeries.length && i<HOURS;i++){
       if(probSeries[i] != null && probSeries[i] > mx){ mx = probSeries[i]; kdy = i; }
     }
-    if(kdy >= 0) parts.push("<span>Open-Meteo <b>" + Math.round(mx) + " %</b></span>");
+    if(kdy >= 0) parts.push("<span title=\"kalibrováno proti METAR pozorováním\">Open-Meteo <b>"
+      + Math.round(100*brierCalib(mx/100, "om"))
+      + " %</b> <small>(kalibrováno)</small></span>");
   }
 
   /* ⑨ KŘIVKA PRAVDĚPODOBNOSTI PO HODINÁCH — jedno číslo neřekne, KDE
@@ -7640,8 +7670,20 @@ function recomputeWhen(){
   if(radarCoverage !== "none" && radarState && radarState !== "error"
      && (radarNow == null || radarNow < 0.05)
      && obsMetar && obsMetar !== "error" && metarHasPrecip(obsMetar.wx)){
-    beamNote = " Radar přitom vidí sucho: paprsek sleduje mete i stovky metrů"
-             + " nad zemí, takže slabé mrholení pod ním uniká — stanice ho ale naměřila.";
+    /* KOLO 9b: analýza sběrače ukázala, že nejčastějším případem
+       „mokrá stanice, suchý radar“ je mrholení (−DZ) — radar ho pod
+       paprskem nevidí a minutecast je neměří (kvantizace 0 → 0,1 mm/h).
+       Kód stanice je k dispozici, ať poznámka řekne konkrétní příčinu,
+       ne jen obecný princip. (RADZ obsahuje DZ také, takže podmínka
+       platí pro všechno mrholení.) */
+    if(obsMetar.wx.toUpperCase().indexOf("DZ") >= 0){
+      beamNote = " Radar přitom vidí sucho: stanice hlásí právě mrholení,"
+               + " které paprsek nad ní sleduje mete nad zemí a běžně mine"
+               + " — na zemi ale padá, stanice ho naměřila.";
+    } else {
+      beamNote = " Radar přitom vidí sucho: paprsek sleduje mete i stovky metrů"
+               + " nad zemí, takže slabé mrholení pod ním uniká — stanice ho ale naměřila.";
+    }
   }
 
   /* zdroj F: národní radar ČHMÚ.

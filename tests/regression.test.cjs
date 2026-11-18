@@ -473,8 +473,10 @@ test('Brier calibration is per-source and stays identity until data suffices',()
   assert.ok(Math.abs(pts[0][0]-0.35)<1e-9&&Math.abs(pts[0][1]-0.2)<1e-9);
   assert.ok(Math.abs(pts[2][0]-0.75)<1e-9&&Math.abs(pts[2][1]-0.8)<1e-9);
   assert.ok(Math.abs(c.brierCalib(0.7,'ens')-0.725)<1e-9);  /* 70 % → reálně 72,5 % */
-  /* Jiný zdroj zůstává identitou — křivky se NEmíchají. */
-  assert.equal(c.brierCalib(0.7,'om'),0.7);
+  /* Jiný zdroj se NEmíchá s ens — křivky zůstávají striktně oddělené.
+     Zdroj "om" je od kola 9b výjimka: bez vlastních dat nese statickou
+     fallback křivku ze sběrače (70 % → ~83 %, místo dřívější identity). */
+  assert.ok(Math.abs(c.brierCalib(0.7,'om')-0.8315)<1e-9,'om: fallback 0,8315, ne ens-učená 0,725');
   const raw=JSON.parse(store['b']);
   assert.deepEqual(Object.keys(raw.srcs),['ens']);
   c.recordBrier(0.5,true);                    /* bez uvedení zdroje → "agree" */
@@ -696,4 +698,53 @@ test('chmiUrlNow/chmiUrlFct: pres BP_PROXY, base cas v TARu, nova legenda (kolo 
   /* invarianty zdrojů v index.html */
   assert.ok(script.includes('scl-dbz-mmh.png'),'nova legenda scl-dbz-mmh.png');
   assert.ok(!script.includes('scl-dbzmmh.png"'),'stara legenda scl-dbzmmh.png uz neexistuje (404)');
+});
+
+/* Kolo 9b: fallback kalibrace Open-Meteo (studený start zdroje "om"),
+   Shoda podle surových hodnot modelů, beamNote rozlišuje mrholení. */
+test('Open-Meteo fallback curve calibrates the om cold start and yields to learned data',()=>{
+  const store={};
+  const ls={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v;},removeItem:()=>{}};
+  const c=context(['recordBrier','brierStore','brierCurve','brierCalib','lsGet','lsSet'],
+    {localStorage:ls,BRIER_KEY:'b',BRIER_MIN_BIN:25,BRIER_MIN_TOTAL:100});
+  /* Bez vzorků om: statická fallback křivka ze sběrače (oknová sémantika
+     max pp přes 8 h, jednotná truth, n = 20 189): 30–40 % → ~60 %. */
+  assert.ok(Math.abs(c.brierCalib(0.35,'om')-0.598)<1e-9,'35 % na hranici binu → 0,598');
+  assert.ok(Math.abs(c.brierCalib(0.5,'om')-0.6995)<1e-9,'interpolace mezi 45 a 55 %');
+  assert.ok(Math.abs(c.brierCalib(0.05,'om')-0.089)<1e-9,'první bin → 0,089');
+  assert.ok(Math.abs(c.brierCalib(0.95,'om')-0.953)<1e-9,'poslední bin → 0,953');
+  assert.ok(Math.abs(c.brierCalib(0.2,'om')-0.42)<1e-9,'20 % → interpolace 0,394–0,446');
+  /* Fallback platí JEN pro om — ens/mix/agree zůstávají identitou. */
+  assert.equal(c.brierCalib(0.35,'ens'),0.35);
+  assert.equal(c.brierCalib(0.35,'mix'),0.35);
+  assert.equal(c.brierCalib(0.35,'agree'),0.35);
+  /* Jakmile om nasbírá vlastní data (100 vzorků, 25+ na bin), naučená
+     křivka přebírá: fallback už se neuplatní. */
+  for(let i=0;i<25;i++) c.recordBrier(0.35,i<5,'om');
+  for(let i=0;i<25;i++) c.recordBrier(0.75,i<20,'om');
+  for(let i=0;i<50;i++) c.recordBrier(0.55,i<25,'om');
+  const pts=c.brierCurve('om');
+  assert.equal(pts.length,3,'naučená křivka om existuje');
+  assert.ok(Math.abs(c.brierCalib(0.5,'om')-0.425)<1e-9,'učení: 0,425, ne fallback 0,6995');
+});
+test('model table Shoda row counts raw model values, not bias-corrected ones',()=>{
+  const i=script.indexOf('var consensus = times.map');
+  assert.notEqual(i,-1,'chybí consensus řádek');
+  const seg=script.slice(i,i+300);
+  assert.ok(seg.includes('p.vals[i]!=null && p.vals[i]>=THRESH'),
+    'Shoda musí počítat surové vals, aby seděla na buňky tabulky');
+  assert.ok(!seg.includes('cvals'),'korigované cvals do zobrazovaného řádku nepatří');
+});
+test('ensemble row shows calibrated Open-Meteo percent',()=>{
+  assert.ok(script.includes('brierCalib(mx/100, "om")'),
+    'zobrazené OM procento má projít brierCalib (vlastní křivka, jinak fallback)');
+});
+test('beamNote explains drizzle specifically when the station reports -DZ',()=>{
+  const i=script.indexOf('var beamNote = ""');
+  assert.notEqual(i,-1,'chybí beamNote');
+  const end=script.indexOf('var chmiState',i);
+  const seg=script.slice(i,end>i?end:i+2400);
+  assert.ok(seg.includes('wx.toUpperCase().indexOf("DZ")'),'detekce DZ ze kódu stanice');
+  assert.ok(seg.includes('hlásí právě mrholení'),'konkrétní text pro mrholení');
+  assert.ok(seg.includes('stanice ho ale naměřila'),'obecná větev zůstává bez DZ');
 });

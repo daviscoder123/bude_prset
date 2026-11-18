@@ -142,3 +142,26 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
     - Schéma záznamů zůstává zpětně kompatibilní (px a dz jsou aditivní
       pole). Testů 88/88 zelených (6 nových: rotace hodin, ens mimo
       rotaci, px, dz, status rot/degraded, 429 v rotaci).
+  - **(kolo 9b):** tři závěry analýzy přesnosti aplikované na appku.
+    - **Oprava řádku „Shoda modelů“:** buňky tabulky ukazují SUROVÉ
+      hodnoty modelů, ale řádek Shoda počítal korigované (bias ÷1,3,
+      orografie) — hodnota přesně na prahu 0,2 mm/h (nejčastější kvant
+      Open-Meteo „slabý déšť“) tak po korekci spadla pod práh a tabulka
+      ukazovala dva mokré modely, zatímco Shoda hlásila 0/N. Shoda teď
+      počítá surové `vals`, aby seděla na to, co uživatel vidí; korekce
+      zůstávají v `peakConsensus` a verdiktu, kde jsou záměrem.
+    - **Studený start kalibrace Open-Meteo (zdroj „om“):** zobrazené
+      procento řádku ensemblu jde přes `brierCalib(…, "om")` — buď vlastní
+      naučenou křivku, nebo (dokud vzorků om není) statickou fallback
+      křivku přeměřenou na přesně této sémantice (max pp přes okno 8 h
+      proti dešti kdykoli v okně, n = 20 189): hlášené 10–20 % →
+      reálně 39,4 %, 30–40 % → 59,8 %, 50–60 % → 72,4 %. Po opravě kvóty
+      (kolo 9) ensemble zřídka selhává, takže vzorky om by kalibraci
+      jinak napořád nenaplnily; vlastní učení má vždy přednost a jiné
+      zdroje (ens/mix/agree) fallback nedostávají.
+    - **beamNote rozlišuje mrholení:** když stanice hlásí −DZ a radar
+      sucho, poznámka řekne konkrétní příčinu („stanice hlásí právě
+      mrholení, které paprsek nad ní…“) místo obecného principu.
+      Testů 92/92 zelených (4 nové: fallback křivka om a přednost
+      učení, Shoda surové vals, OM zobrazení přes kalibraci, beamNote DZ);
+      aktualizován 1 stávající test (om už není identita bez dat).
