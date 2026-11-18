@@ -751,15 +751,17 @@ test('beamNote explains drizzle specifically when the station reports -DZ',()=>{
 
 /* Kolo 9c: panel „Kdy začne pršet“ je minutecast — modely nevyhlašují
    začánek; okraj dat se neukazuje po minutách; rozchod odhadů pojmenován. */
-test('kolo 9c: approxClock zaokrouhluje vzdálený horizont na hodiny („zítra kolem 13:00“)',()=>{
-  const c=context(timeFunctions.concat(['approxClock']),
+test('kolo 9d: okraj dat Daveovou formulací („zítra po 13. hodině“)',()=>{
+  const c=context(timeFunctions.concat(['rainBeyondPhrase']),
     {placeTimeZone:null,placeUtcOffset:null,NARROW:{matches:false}});
   c.setPlaceTimeZone({timezone:'Europe/Prague',utc_offset_seconds:3600});
   const now=Date.UTC(2026,10,18,12,0,0);   /* 13:00 v Praze */
-  assert.equal(c.approxClock(now,30),'13:30');          /* do 6 h přesně */
-  assert.equal(c.approxClock(now,90),'14:30');
-  assert.equal(c.approxClock(now,361),'kolem 19:00');   /* za prahem 6 h „kolem“ */
-  assert.equal(c.approxClock(now,1439),'zítra kolem 13:00'); /* Daveův „zítra 12:59“ */
+  /* Daveův případ z praxe: okraj dat zítra 12:59 → „zítra po 13. hodině“. */
+  assert.equal(c.rainBeyondPhrase(now,1439),'zítra po 13. hodině');
+  assert.equal(c.rainBeyondPhrase(now,361),'po 19. hodině');      /* stejný den */
+  assert.equal(c.rainBeyondPhrase(now,2910),'pozítří po 14. hodině');  /* 48,5 h → 49 */
+  /* Ráno bez nuly na začátku: „po 8. hodině“, ne „po 08. hodině“. */
+  assert.equal(c.rainBeyondPhrase(now,1140),'zítra po 8. hodině');  /* 13:00 + 19 h = 8:00 */
 });
 test('kolo 9c: minutecastový panel nevyhlašuje začátek deště z menšiny modelů',()=>{
   const seg0=script.indexOf('var maxC = 0');
@@ -774,9 +776,12 @@ test('kolo 9c: minutecastový panel nevyhlašuje začátek deště z menšiny mo
   const iDoHodiny=seg.indexOf('big.innerHTML = "do hodiny"');
   assert.ok(iDoHodiny>iFall,'„do hodiny“ jen ve výjimečném pádu bez dat');
 });
-test('kolo 9c: konec za horizontem dat mluví o datech, ne o minutě zítřku',()=>{
-  assert.ok(script.includes('approxClock(now, end.horizon)'),'horizont zaokrouhlen přes approxClock');
+test('kolo 9d: konec za horizontem dat říká „Pršet má i zítra po 13. hodině“',()=>{
+  assert.ok(script.includes('rainBeyondPhrase(now, end.horizon)'),'okraj přes rainBeyondPhrase');
+  assert.ok(script.includes('Pršet má i <b>'),'Daveova formulace v renderRainEnd');
   assert.ok(!script.includes('déšť má trvat i po'),'stará zavádějící konstrukce pryč');
+  assert.ok(!script.includes('v datech až po'),'odborná zmínka o datech pryč');
+  assert.ok(!script.includes('function approxClock'),'nepoužívaný approxClock odstraněn');
 });
 test('kolo 9c: rozchod shody a kalibrovaného Open-Meteo se pojmenuje i bez ensemblu',()=>{
   const i=script.indexOf('var omCal');
