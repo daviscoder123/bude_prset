@@ -197,3 +197,37 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
     „po 8. hodině“); blízký okraj zůstává přesný po minutách.
     Nahradila approxClock z kola 9c. Testů 96/96 (náhrada 1:1,
     dvě testovací sady upraveny).
+  - **(kolo 10) Rodinný hlas a pevný volební sbor agentur.** Dave k výběru
+    osmi modelů: „Určitě tam musí být lokální, ale co zbytek? Jaká je
+    definice verdiktu?“ Odpověď měření: dřív verdikt počítal ŘÁDKY, takže
+    DWD hlasoval dvakrát (ICON-D2 + AICON) a ECMWF taky (IFS + AIFS) —
+    8 hlasů, ale jen 6 nezávislých agentur. Nová pravidla:
+    - **Jedna agentura, jeden hlas.** fam „AIFS“ hlasuje jako ECMWF,
+      „AICON“ jako DWD (v tabulce zůstávají oddělené řádky, jen hlas
+      se deduplikuje). Nová funkce agencyOf, peakConsensus dostává
+      režim byAgency a vrací nAg (počet hlasujících agentur).
+    - **Pevný sbor, ne osmička z obrazovky.** Hlasuje všech 9 dostupných
+      agentur pro Česko (DWD, DMI, KNMI, ECMWF, MET Norway, Météo-France,
+      UKMO, NOAA, ECCC) — UKMO, GFS a GEM dřív jako 9.–11. kandidáti
+      hlas nikdy nedostali, i když odpovídali daty. Kdo neodpoví,
+      zdrží se, nikdo se za něj nedosadí: % už neuschne kvůli 503
+      jednomu modelu. Zámořské globály (JMA/KMA/CMA/BOM) nehlasují
+      bez vlastního měření skillu (řidší aktualizace, hrubost nad
+      Evropou by shodu ředila); NÁRODNÍ model se zakázaným id výjimkou
+      NENÍ — bom_access_global je pro Austrálii národní a hlasuje.
+      Tabulka zobrazuje dál osm nejbližších modelů; rozdíl se
+      pojmenuje v řádku ensemblu („verdikt: N hlasujících agentur ·
+      tabulka ukazuje osm nejbližších modelů“).
+    - **UI mluví agenturami.** „Shoda agentur na dešti do 8 h“ (label,
+      šablona, stat), expl „Srážky ≥ 0,2 mm/h kolem 14:00 hlásí 6 z 9
+      agentur (67 %)“, výklad i slovní hodnocení („Agentury se
+      shodují“, „Většina agentur čeká déšť“). Řádek „Shoda modelů“
+      v tabulce zůstává PO MODELECH (srovává s buňkami).
+    - **Brierova kalibrace (agree) učí na správném prediktoru:** vzorek
+      teď říká totéž co UI — shoda agentur na špičce (ms.peak.prob
+      s předstihovou váhou) a cíl hodina špičky; starý modelový podíl
+      maxC/N zůstává jen pádem, když žádná agentura nepromokne.
+      Staré uložené vzorky mají o něco jinou sémantiku (krátkodobé
+      smíchání; naučená křivka je postupně přepíše).
+    - CALIB_TABLE je identita a vypnutá, statickou kalibrací tedy
+      změna nehrozí; brierCalib se učí per zařízení jako dřív.
