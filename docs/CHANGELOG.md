@@ -100,3 +100,45 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
     suchý stav ví o „pravděpodobnosti sněžení“, pokud modely hlásí sníh;
     pozadí padají řídké tlumené vločky (`soonSnow`), na mobilu jich je
     méně. Testů 78/78 zelených.
+  - **(kolo 9):** pravidelná analýza přesnosti na 8,5 dne sběru (205 hodin,
+    20 189 záznamů, 100 obcí; sběr běží od 6. 11.) a její závěry nasazené
+    ve sběrači — viz `docs/analyza-presnosti-2026-11.md` pro měřená čísla.
+    - **Rotace ensemble (největší přínos):** sběrač páral celou denní
+      kvótu Open-Meteo (9 bodů mřížky × 100 obcí × 24 h = 21 600 volání/den
+      nad limit 10 000 → 100 % ens429), a hladověl tak i appku: ta bere
+      ensemble přes proxy `/om/v1/ensemble`, tudíž uživatelé místo
+      „Pravděpodobnosti deště" trvale viděli „Shodu modelů" a autokalibrace
+      ens/mix neměla jediný vzorek. Ensemble se odteď sbírá jen v rotacních
+      hodinách `ENS_ROT_HOURS` = 2, 5, 8, 11, 14, 17, 20, 23 UTC (7 200
+      volání/den, ~2 800 zůstává appce; horizont ens 9 h, rotace po 3 h
+      pokrytí neprotrhne). Mimo rotaci `cd="ensrot"`, err „ens" se
+      nehlásí; `/analysis/status` počítá chyby ens jen přes rotací dílky
+      (`counts.rot`, `counts.rotPlaces`), takže degraded alerting
+      nevyhlásí kvótní selhání tam, kde sběr záměrně neprobíhá.
+    - **Surové pixely radaru (`rv.px`):** 9 surových dBZ hodnot 3×3 výřezu
+      (row-major, null = pixel bez odrazu). Medián a práh 10 dBZ v
+      dbzToMm jinak zamaskují slabá echo — radar v datech nedetekoval
+      82,6 % metarových dešťů (2 306 z 2 793); px umožní příštím kolům
+      rozlišit „radar opravdu nic" od „mrholení/virga pod prahem".
+    - **Příznak mrholení (`met.dz`):** METAR DZ se ukládá zvlášť.
+      Minutecast mrholení neměří (jeho kvantizace jde 0 → 0,1 mm/h) a
+      právě −DZ je častý případ „mokro u stanice, sucho na radaru".
+    - **Proč se verdikt appky slepě nezasahoval:** měřená kalibrace
+      Open-Meteo se zásadně liší podle sémantiky otázky (bodová per
+      hodina ±35 min: 90–100 % → reálně ~83 %, 0–10 % → ~3,5 %; oknová
+      „déšť do 8 h" s jednotnou truth: naopak podceněná uprostřed,
+      30–40 % → ~58 % skutečně). Appka má vlastní autokalibraci
+      (brierCalib per zdroj, učí se z reálných verdiktů) a blend kola
+      8z3; natvrdo zasazená tabulka by obě sémantiky spletla a mohla
+      rozvázat vyladěný blend. Naměřená čísla (včetně OR pravidla
+      pp ≥ 50 % ∨ mc ≥ 0,1 mm/h: POD 0,71, FAR 0,22, CSI 0,59 v okně
+      120 min, n = 20 189) dokumentuje analytický doc pro příští kola,
+      až budou k dispozici vlastní vzorky appky.
+    - Doporučení z analýzy, která už v appce jsou: mrholení v UX
+      („Mrholení nad obcí ≥ 0,1 mm/h má přednost") a „METAR hlásí déšť →
+      radarové jasno se přepíše" (kolo 8v, stanice ≤ 25 km, beamNote).
+      Snížení prahu minutecastu na 0,05 mm/h nemá oporu v datech —
+      mezi 0 a 0,1 žádné hodnoty nejsou (kvantizace zdroje).
+    - Schéma záznamů zůstává zpětně kompatibilní (px a dz jsou aditivní
+      pole). Testů 88/88 zelených (6 nových: rotace hodin, ens mimo
+      rotaci, px, dz, status rot/degraded, 429 v rotaci).

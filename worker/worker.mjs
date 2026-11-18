@@ -64,6 +64,13 @@
  *     record.cd="ens429" pro diagnostiku) a zbytek kola ens přeskočí.
  *     Kaskáda zůstává jen pro doménové chyby (400/404 -> další model),
  *     max 2 kandidáti. Objevení 429 tak stojí 1 subrequest na kolo.
+ *   - Kolo 9 (analyza presnosti 14 dni): ensemble se sbira jen v
+ *     rotačních hodinách ENS_ROT_HOURS = 2,5,8,11,14,17,20,23 UTC
+ *     (8 denně, 7 200 volání kvoty/den < limit 10 000; dříve 21 600/den
+ *     → 100 % ens429). Mimo tyto hodiny cd="ensrot" a err "ens" se
+ *     nehlásí. Záznam radaru nese px (9 surových dBZ pixelů, null = bez
+ *     odrazu), METAR navíc dz (příznak mrholení); v obou případech jde
+ *     o aditivní pole, starší záznamy zůstávají platné.
  *   - maps.json, radarová dlaždice i METAR dostanou jedno opakování
  *     po přechodném selhání (5xx/síť).
  *   - /analysis/status navíc vrací counts (počty chyb per zdroj za
@@ -214,6 +221,14 @@ export var SLICE_COUNT = 12;          /* 12 průchodů za hodinu (cron po 5 minu
 var RAW_TTL = 1209600;         /* TTL surových záznamů: 14 dní */
 var RAW_PREFIX = "raw/";
 var ENS_CD_MS = 30 * 60 * 1000;  /* cooldown ensemble po 429/5xx: 30 minut */
+
+/* Kolo 9: rotační hodiny sběru ensemble (UTC). 8 hodin denně, vždy 3 h
+   od sebe; jeden ens dotaz = 9 bodů mřížky a Open-Meteo ho počítá jako
+   9 volání kvóty → 100 obcí × 9 = 900 volání na rotační hodinu,
+   8 × 900 = 7 200/den < limit 10 000 (dříve každá hodina = 21 600/den
+   → 100 % ens429 a sběrač vyhladověl i appku přes proxy /om/v1/ensemble).
+   Horizont ens je 9 h, rotace po 3 h pokrytí neprotrhne. */
+export var ENS_ROT_HOURS = [2, 5, 8, 11, 14, 17, 20, 23];
 
 /* 100 obcí: primárně střední Evropa (CZ/SK/AT/DE/CH/PL/HU/SI/HR), doplněno
    o top lokality a rozličné biomy (Alpy, pobřeží, nížiny, Vysočina,
@@ -415,7 +430,7 @@ function q2(v) { return (typeof v === "number" && isFinite(v) && v >= 0) ? Math.
 var WX_TOKEN_RE = /^(-|\+|VC|RE)?(MI|BC|PR|DR|BL|SH|TS|FZ)?(DZ|RA|SN|SG|PL|IC|GR|GS|UP)?(DZ|RA|SN|SG|PL|IC|GR|GS|UP)?$/;
 
 export function parseMetar(rawOb) {
-  var out = { raw: String(rawOb), r: 0, i: 0, s: 0, th: 0, sh: 0, re: 0, vc: 0 };
+  var out = { raw: String(rawOb), r: 0, i: 0, s: 0, th: 0, sh: 0, re: 0, vc: 0, dz: 0 };
   var toks = String(rawOb).replace(/^METAR |^SPECI /, "").split(/\s+/);
   for (var i = 0; i < toks.length; i++) {
     /* Konec hlavního těla zprávy: trendové skupiny (TEMPO/BECMG — předpověď
@@ -434,6 +449,9 @@ export function parseMetar(rawOb) {
       out.r = 1;
       out.i = pre === "-" ? 1 : (pre === "+" ? 3 : 2);
     }
+    /* dz (kolo 9): mrholeni (DZ) zvlast - viz analyza presnosti 14 dni,
+       radicni "mokro" je casto prave -DZ a minutecast ho nemeri. */
+    if (jevy.indexOf("DZ") >= 0) out.dz = 1;
     if (jevy.indexOf("SN") >= 0 || jevy.indexOf("SG") >= 0 || jevy.indexOf("PL") >= 0
       || jevy.indexOf("IC") >= 0 || jevy.indexOf("GR") >= 0 || jevy.indexOf("GS") >= 0) {
       out.s = 1;
@@ -657,7 +675,11 @@ async function radarFrame(fetchImpl, nowMs) {
 }
 
 /* Jedno radarové čtení pro obec: medián mm/h z 3×3 pixelů (r=1) kolem
-   obce + sněhový příznak většiny odrazů. Vrací {t, mm, ec, sn}. */
+   obce + sněhový příznak většiny odrazů. Od kola 9 navíc px: 9 surových
+   dBZ hodnot pixelů (row-major, null = alfa 0/bez odrazu). Medián i práh
+   10 dBZ v dbzToMm jinak zamaskují slabá echo (mrholení, virga) a
+   analýza přesnosti je potřebuje k rozlišení "radar nic" vs "slabé
+   echo pod prahem". */
 async function rvRead(fetchImpl, frame, p) {
   var tc = tileCoords(p.lat, p.lon, RV_Z);
   var res = await fetchRetry(fetchImpl, rvTileUrl(frame.host, frame.path, tc), { headers: { "user-agent": "bude-prset-proxy/1.0" } }, 2);
@@ -670,7 +692,8 @@ async function rvRead(fetchImpl, frame, p) {
     t: frame.time,
     mm: q2(vals[Math.floor(vals.length / 2)]),
     ec: echo,
-    sn: patch.filter(function (q) { return q.d != null && q.s; }).length * 2 > echo ? 1 : 0
+    sn: patch.filter(function (q) { return q.d != null && q.s; }).length * 2 > echo ? 1 : 0,
+    px: patch.map(function (q) { return (q.d == null) ? null : q.d; })
   };
 }
 
@@ -743,42 +766,54 @@ async function collectSlice(deps, slice, now) {
     record.p[p.n] = entry;
   }));
 
-  /* Faze 2 (kolo 8bb): ensemble SEKVENCNE, az po ground truth, max 2
-     kandidati. 429/5xx = kvota nebo vypadek upstreamu -> cooldown 30 min,
-     ZADNA kaskada (kaskada by pálila az 4 subrequesty na obec a rv by
-     trpelo limitem 50); domenova chyba 400/404 kaskaduje na dalsi model
-     jako v appce. Objeveni 429 stoji jedinou obec; zbytek kola ens
-     preskoci (err "ens" doplni zaver, duvod jde do record.cd). */
-  for (var pi = 0; pi < places.length; pi++) {
-    var p = places[pi];
-    var entry = record.p[p.n];
-    if (ensCd.until && now.getTime() < ensCd.until) continue;
-    try {
-      var parsed = null, usedModel = null;
-      var cands = ensCandidates(p.lat, p.lon).slice(0, 2);
-      for (var ci = 0; ci < cands.length && !parsed; ci++) {
-        var r2;
-        try {
-          r2 = await fetchImpl(buildEnsUrl(p, cands[ci]), { headers: { "user-agent": "bude-prset-proxy/1.0" } });
-        } catch (e2) {
-          ensCd.until = now.getTime() + ENS_CD_MS;
-          ensCd.reason = "ensnet";
-          break;
+  /* Faze 2 (kolo 9): ensemble jen v rotacnich hodinach ENS_ROT_HOURS
+     (2,5,8,11,14,17,20,23 UTC = 8 hodin denne, 7 200 volani kvoty/den
+     < limit 10 000; drive kazda hodina = 21 600/den -> 100 % ens429 a
+     sbirka vyhladovela i appku pres proxy /om/v1/ensemble, ktera tak
+     ztracela "Pravdepodobnost deste"). Horizont ens je 9 h, rotace po
+     3 h pokryti neprotrhne. Mimo rotacni hodinu se ens nesebere vubec:
+     cd "ensrot" pro diagnostiku a err "ens" se NEhlasi (nezhasl zdroj,
+     jen se v danou hodinu nesebira).
+     V rotacni houre plati puvodni pravidla kola 8bb: ensemble az po
+     fc+rv, SEKVENCNE, max 2 kandidati; 429/5xx NEkaskaduji (kaskada by
+     palila az 4 subrequesty na obec), misto toho cooldown 30 min a
+     zbytek kola ens preskoci; domenova chyba 400/404 kaskaduje na
+     dalsi model jako v appce. Objeveni 429 stoji jedinou obec. */
+  var ensHour = ENS_ROT_HOURS.indexOf(now.getUTCHours()) >= 0;
+  if (!ensHour) {
+    record.cd = "ensrot";
+  } else {
+    for (var pi = 0; pi < places.length; pi++) {
+      var p = places[pi];
+      var entry = record.p[p.n];
+      if (ensCd.until && now.getTime() < ensCd.until) continue;
+      try {
+        var parsed = null, usedModel = null;
+        var cands = ensCandidates(p.lat, p.lon).slice(0, 2);
+        for (var ci = 0; ci < cands.length && !parsed; ci++) {
+          var r2;
+          try {
+            r2 = await fetchImpl(buildEnsUrl(p, cands[ci]), { headers: { "user-agent": "bude-prset-proxy/1.0" } });
+          } catch (e2) {
+            ensCd.until = now.getTime() + ENS_CD_MS;
+            ensCd.reason = "ensnet";
+            break;
+          }
+          if (r2.status === 429 || r2.status >= 500) {
+            ensCd.until = now.getTime() + ENS_CD_MS;
+            ensCd.reason = "ens" + r2.status;
+            break;
+          }
+          if (!r2.ok) continue;                    /* domena modelu -> dalsi kandidat */
+          parsed = parseEns(await r2.text());
+          if (parsed) usedModel = cands[ci];
         }
-        if (r2.status === 429 || r2.status >= 500) {
-          ensCd.until = now.getTime() + ENS_CD_MS;
-          ensCd.reason = "ens" + r2.status;
-          break;
-        }
-        if (!r2.ok) continue;                    /* domena modelu -> dalsi kandidat */
-        parsed = parseEns(await r2.text());
-        if (parsed) usedModel = cands[ci];
-      }
-      if (!parsed) continue;
-      entry.ens = { m: usedModel, t0: parsed[0] && parsed[0].t0, g: parsed.map(function (pt) { return pt.v; }) };
-    } catch (e) { /* ens chybi -> err v zaveru */ }
+        if (!parsed) continue;
+        entry.ens = { m: usedModel, t0: parsed[0] && parsed[0].t0, g: parsed.map(function (pt) { return pt.v; }) };
+      } catch (e) { /* ens chybi -> err v zaveru */ }
+    }
+    if (ensCd.reason && now.getTime() < ensCd.until) record.cd = ensCd.reason;
   }
-  if (ensCd.reason && now.getTime() < ensCd.until) record.cd = ensCd.reason;
 
   await metP;
   Object.keys(record.p).forEach(function (name) {
@@ -786,11 +821,11 @@ async function collectSlice(deps, slice, now) {
     var m = metMap[e.icao];
     if (m) {
       var pm = parseMetar(m.rawOb || "");
-      e.met = { t: (typeof m.obsTime === "number" ? m.obsTime : null), tp: (typeof m.temp === "number" ? m.temp : null), r: pm.r, i: pm.i, s: pm.s, th: pm.th, sh: pm.sh, re: pm.re, vc: pm.vc, raw: pm.raw };
+      e.met = { t: (typeof m.obsTime === "number" ? m.obsTime : null), tp: (typeof m.temp === "number" ? m.temp : null), r: pm.r, i: pm.i, dz: pm.dz, s: pm.s, th: pm.th, sh: pm.sh, re: pm.re, vc: pm.vc, raw: pm.raw };
     }
     var errs = [];
     if (!e.fc) errs.push("fc");
-    if (!e.ens) errs.push("ens");
+    if (!e.ens && ensHour) errs.push("ens");  /* mimo rotacni hodinu ens chybi nadrizlene */
     if (!e.met) errs.push("met");
     if (!e.rv) errs.push("rv");
     if (errs.length) e.err = errs;
@@ -888,7 +923,7 @@ export function createWorker(deps) {
       var out = {
         ok: true, kv: !!kv, places: MUNICIPALITIES.length, slices: SLICE_COUNT,
         recent: [], last: null,
-        counts: { slices: 0, places: 0, fc: 0, ens: 0, met: 0, rv: 0, ensCd: 0 },
+        counts: { slices: 0, places: 0, fc: 0, ens: 0, met: 0, rv: 0, ensCd: 0, rot: 0, rotPlaces: 0 },
         degraded: []
       };
       if (!kv) return json(200, out);
@@ -912,19 +947,27 @@ export function createWorker(deps) {
         if (!out.last) out.last = entry;
         out.counts.slices++;
         out.counts.places += names.length;
+        /* Kolo 9: ens se srocnava jen nad rotacnimi dílky (ENS_ROT_HOURS);
+           mimo ne ens chybi nadrizlene (cd "ensrot") a neni to chyba. */
+        var rot = rec.h && ENS_ROT_HOURS.indexOf(Number(String(rec.h).slice(8, 10))) >= 0;
+        if (rot) out.counts.rotPlaces += names.length;
         names.forEach(function (n) {
           var er = (rec.p[n] && Array.isArray(rec.p[n].err)) ? rec.p[n].err : [];
           for (var ek = 0; ek < er.length; ek++) {
+            if (er[ek] === "ens" && !rot) continue; /* kolo 9: mimo rotaci ens nadrizlene chybi */
             if (out.counts[er[ek]] != null) out.counts[er[ek]]++;
           }
         });
-        if (rec.cd) out.counts.ensCd++;
+        if (rec.cd === "ensrot") out.counts.rot++;
+        else if (rec.cd) out.counts.ensCd++;
       }
       /* Zdroj nad 30 % chybovosti za poslednich ~13 kol = degraded -
-         podklad pro alerting (UptimeRobot keyword check na "degraded":["ens"...]). */
-      ["fc", "ens", "met", "rv"].forEach(function (src) {
+         podklad pro alerting (UptimeRobot keyword check na "degraded":["ens"...]).
+         ens se pocita jen pres rotacni dílky (kolo 9), fc/met/rv pres všechny. */
+      ["fc", "met", "rv"].forEach(function (src) {
         if (out.counts.places > 0 && out.counts[src] / out.counts.places > 0.3) out.degraded.push(src);
       });
+      if (out.counts.rotPlaces > 0 && out.counts.ens / out.counts.rotPlaces > 0.3) out.degraded.push("ens");
       return json(200, out);
     }
 

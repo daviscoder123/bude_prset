@@ -717,7 +717,8 @@ test("cron: výpadek radaru shodí jen pole rv, záznam vznikne, kolo běží d�
   const up = collectorFetch({ failIf: (u) => u.indexOf("rainviewer") >= 0 || u.indexOf("/v2/radar/") >= 0 });
   const kv = mockKv();
   const w = m.createWorker({ fetchImpl: up.impl, kv });
-  const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 15, 0) });
+  /* 14:00 UTC = rotační hodina (kolo 9), dílek 0 → Praha */
+  const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 14, 0) });
   assert.ok(res.ok);
   const rec = JSON.parse(kv.store.get(res.key).v);
   Object.keys(rec.p).forEach((n) => {
@@ -954,30 +955,36 @@ test("kolo 8bb: maps.json i radarová dlaždice dostanou jedno opakování po 5x
   });
 });
 
-test("kolo 8bb: analysis/status počítá chyby per zdroj a hlásí degraded nad 30 %", async () => {
+test("kolo 8bb/9: analysis/status počítá chyby per zdroj a hlásí degraded nad 30 %", async () => {
   const m = await collector();
   const kv = mockKv();
-  const mk = (mm, p, cd) => kv.put("raw/2026110614:" + mm,
-    JSON.stringify({ t: 1794000000, slice: 0, cd: cd || undefined, p }));
-  await mk("00", { Praha: { n: "Praha", err: ["ens", "rv"] } });
-  await mk("05", { Brno: { n: "Brno", err: ["ens", "rv"] }, Ostrava: { n: "Ostrava", err: ["ens", "met"] } });
-  await mk("10", { "Plzen": { n: "Plzen" } }, "ens429");
+  /* hodina 14 UTC = rotační (ENS_ROT_HOURS), hodina 13 = mimo rotaci */
+  const mk = (key, h, p, cd) => kv.put("raw/" + key,
+    JSON.stringify({ t: 1794000000, slice: 0, h: h, cd: cd || undefined, p }));
+  await mk("2026110614:00", "2026110614", { Praha: { n: "Praha", err: ["ens", "rv"] } });
+  await mk("2026110614:05", "2026110614", { Brno: { n: "Brno", err: ["ens", "rv"] }, Ostrava: { n: "Ostrava", err: ["ens", "met"] } });
+  await mk("2026110614:10", "2026110614", { "Plzen": { n: "Plzen" } }, "ens429");
+  /* dílek mimo rotaci: err "ens" se NESMÍ počítat jako chyba zdroje,
+     cd "ensrot" patří do counts.rot a jeho obce mimo rotPlaces */
+  await mk("2026110613:55", "2026110613", { Karviná: { n: "Karviná", err: ["ens"] } }, "ensrot");
   const w = m.createWorker({
     fetchImpl: async () => { throw new Error("nesmi"); }, kv,
     now: () => new Date(Date.UTC(2026, 10, 6, 14, 26))
   });
   const r = await w.fetch(new Request("https://w.example/analysis/status"));
   const j = await r.json();
-  assert.strictEqual(j.counts.slices, 3);
-  assert.strictEqual(j.counts.places, 4);
+  assert.strictEqual(j.counts.slices, 4);
+  assert.strictEqual(j.counts.places, 5);
   assert.strictEqual(j.counts.fc, 0);
-  assert.strictEqual(j.counts.ens, 3);
+  assert.strictEqual(j.counts.ens, 3, "ens mimo rotaci se do chyb nepočítá");
   assert.strictEqual(j.counts.rv, 2);
   assert.strictEqual(j.counts.met, 1);
-  assert.strictEqual(j.counts.ensCd, 1, "jeden záznam s cd známkou");
-  assert.ok(j.degraded.indexOf("ens") >= 0, "ens 3/4 = degraded");
-  assert.ok(j.degraded.indexOf("rv") >= 0, "rv 2/4 = degraded");
-  assert.ok(j.degraded.indexOf("met") < 0, "met 1/4 = 25 % pod prahem 30 %");
+  assert.strictEqual(j.counts.ensCd, 1, "jeden záznam s cd známkou (ens429)");
+  assert.strictEqual(j.counts.rot, 1, "jeden dílek s cd=ensrot");
+  assert.strictEqual(j.counts.rotPlaces, 4, "rotPlaces = jen obce z rotacních dílků");
+  assert.ok(j.degraded.indexOf("ens") >= 0, "ens 3/4 rotacních obcí = degraded");
+  assert.ok(j.degraded.indexOf("rv") >= 0, "rv 2/5 = degraded");
+  assert.ok(j.degraded.indexOf("met") < 0, "met 1/5 = 20 % pod prahem 30 %");
   assert.ok(j.degraded.indexOf("fc") < 0);
 });
 
@@ -1000,4 +1007,136 @@ test("kolo 8bb: analysis/page?mm= vrací jediný dílek hodiny; validace mm", as
     const rr = await w.fetch(new Request("https://w.example/analysis/page?h=2026110614&mm=" + encodeURIComponent(bad)));
     assert.strictEqual(rr.status, 400, "mm musí být odmítnuto: '" + bad + "'");
   }
+});
+
+/* ===================== KOLO 9: ROTACE ENS, PX, DZ ===================== */
+
+test("kolo 9: ENS_ROT_HOURS = 8 rovnoměrně rozložených hodin, rotace přesně po 3 h", async () => {
+  const m = await collector();
+  assert.strictEqual(m.ENS_ROT_HOURS.length, 8, "8 rotačních hodin denně");
+  const h = m.ENS_ROT_HOURS.slice().sort((a, b) => a - b);
+  h.forEach((x) => assert.ok(x >= 0 && x <= 23, "hodina v UTC rozsahu"));
+  for (let i = 0; i < h.length; i++) {
+    const next = i === h.length - 1 ? h[0] + 24 : h[i + 1];
+    assert.strictEqual(next - h[i], 3, "mezi rotacemi je přesně 3 h (horizont ens 9 h se neprotrhne)");
+  }
+});
+
+test("kolo 9: mimo rotační hodinu se ensemble nesebere vůbec (cd=ensrot, err bez ens)", async () => {
+  const m = await collector();
+  const urls = [];
+  const impl = async (url) => {
+    urls.push(url);
+    if (url.indexOf("ensemble-api") >= 0) return okJson(ensFixture());
+    if (url.indexOf("api.open-meteo.com") >= 0) return okJson(fcFixture());
+    if (url.indexOf("weather-maps.json") >= 0) return okJson(mapsFixture());
+    if (url.indexOf("/v2/radar/") >= 0) return new Response(tileFixture(), { status: 200 });
+    if (url.indexOf("aviationweather.gov") >= 0) return metarFixtureFor(url);
+    return okJson([]);
+  };
+  const kv = mockKv();
+  const w = m.createWorker({ fetchImpl: impl, kv });
+  /* 13:35 UTC = dílek 7, mimo ENS_ROT_HOURS; radarová fixture má snímek 13:30 */
+  const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 13, 35) });
+  assert.ok(res.ok, JSON.stringify(res));
+  assert.strictEqual(urls.filter((u) => u.indexOf("ensemble-api") >= 0).length, 0,
+    "mimo rotační hodinu se nesmí udělat jediný ensemble subrequest (kvóta)");
+  const rec = JSON.parse(kv.store.get(res.key).v);
+  assert.strictEqual(rec.cd, "ensrot", "důvod chybějícího ens v záznamu pro diagnostiku");
+  Object.keys(rec.p).forEach((n) => {
+    const e = rec.p[n];
+    assert.ok(e.fc, "fc u " + n);
+    assert.ok(e.rv, "rv u " + n + " nesmí trpět rotací");
+    assert.ok(e.met, "met u " + n);
+    assert.ok(!e.ens, "ens nesmí být u " + n);
+    assert.ok(!e.err, "chybějící ens mimo rotaci není selhání zdroje u " + n + ": " + JSON.stringify(e.err));
+  });
+});
+
+test("kolo 9: rv.px nese 9 surových dBZ pixelů včetně null (bez odrazu)", async () => {
+  const m = await collector();
+  /* Dlaždice: sloupce 0-14 = echo 30 dBZ, sloupec 15 = alfa 0. Výřez
+     u Prahy (px,py > 14 u 16px dlaždice) vypadne na sloupce 13-15,
+     tj. v každém řádku [30, 30, null] → row-major 9 hodnot. */
+  const tile = makePng(16, 16, (x) => (x < 15 ? [32 + RAIN_DBZ, 0, 0, 255] : [0, 0, 0, 0]), 0);
+  const impl = async (url) => {
+    if (url.indexOf("weather-maps.json") >= 0) return okJson(mapsFixture());
+    if (url.indexOf("/v2/radar/") >= 0) return new Response(tile, { status: 200 });
+    if (url.indexOf("ensemble-api") >= 0) return okJson(ensFixture());
+    if (url.indexOf("api.open-meteo.com") >= 0) return okJson(fcFixture());
+    if (url.indexOf("aviationweather.gov") >= 0) {
+      return okJson([{ icaoId: "LKPR", obsTime: 1794000300, temp: 2,
+        rawOb: "METAR LKPR 061930Z 07006KT 6000 -DZ BKN010 02/M01 Q1026 NOSIG" }]);
+    }
+    return okJson([]);
+  };
+  const kv = mockKv();
+  const w = m.createWorker({ fetchImpl: impl, kv });
+  /* 14:00 UTC = rotační hodina, dílek 0 → Praha */
+  const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 14, 0) });
+  assert.ok(res.ok, JSON.stringify(res));
+  const rec = JSON.parse(kv.store.get(res.key).v);
+  const pra = rec.p["Praha"];
+  assert.ok(pra.rv, "rv u Prahy");
+  assert.deepStrictEqual(pra.rv.px, [30, 30, null, 30, 30, null, 30, 30, null],
+    "px = 9 surových dBZ, row-major, null = pixel bez odrazu");
+  assert.strictEqual(pra.rv.mm, 2.73, "medián jen z pixelů s odrazem");
+  assert.strictEqual(pra.rv.ec, 6, "echo = 6 z 9 pixelů");
+  assert.strictEqual(pra.rv.sn, 0, "bez sněhového bitu");
+  /* tentýž běh: METAR -DZ → příznak mrholení v záznamu */
+  assert.strictEqual(pra.met.r, 1, "-DZ je srážkový jev");
+  assert.strictEqual(pra.met.dz, 1, "příznak mrholení uložen");
+  assert.strictEqual(pra.met.i, 1, "slabá intenzita");
+});
+
+test("kolo 9: METAR dz — mrholení (-DZ, -RADZ) ano, RA/SN/BR ne", async () => {
+  const m = await collector();
+  const dz = (raw) => m.parseMetar("METAR LKPR 061930Z 07006KT 8000 " + raw + " NSC 01/M00 Q1025 NOSIG");
+  let p = dz("-DZ");
+  assert.strictEqual(p.r, 1, "-DZ je déšť (srážkový jev)");
+  assert.strictEqual(p.i, 1, "slabá intenzita");
+  assert.strictEqual(p.dz, 1, "příznak mrholení");
+  p = dz("RA");
+  assert.strictEqual(p.r, 1);
+  assert.strictEqual(p.dz, 0, "déšť bez DZ nemá příznak mrholení");
+  p = dz("-RADZ");
+  assert.strictEqual(p.r, 1);
+  assert.strictEqual(p.dz, 1, "kombinace RA+DZ nese dz");
+  p = dz("SN");
+  assert.strictEqual(p.dz, 0, "sníh není mrholení");
+  p = dz("BR");
+  assert.strictEqual(p.r, 0);
+  assert.strictEqual(p.dz, 0, "mlha se netýká");
+  /* zpětná kompatibilita: staré záznamy bez dz prostě pole nemají */
+  p = m.parseMetar("METAR LKPR 061930Z 07006KT 8000 -RA NSC 01/M00 Q1025 NOSIG");
+  assert.ok(p.dz !== undefined, "pole dz je vždy vyplněno (0/1)");
+});
+
+test("kolo 9: rotační hodina (14:30) chová se jako dřív — ens po rv, cooldown 429 funguje", async () => {
+  const m = await collector();
+  const urls = [];
+  let ensCalls = 0;
+  const impl = async (url) => {
+    urls.push(url);
+    if (url.indexOf("ensemble-api") >= 0) {
+      ensCalls++;
+      return new Response("quota exceeded", { status: 429 });
+    }
+    if (url.indexOf("api.open-meteo.com") >= 0) return okJson(fcFixture());
+    if (url.indexOf("weather-maps.json") >= 0) return okJson(mapsFixture());
+    if (url.indexOf("/v2/radar/") >= 0) return new Response(tileFixture(), { status: 200 });
+    if (url.indexOf("aviationweather.gov") >= 0) return metarFixtureFor(url);
+    return okJson([]);
+  };
+  const kv = mockKv();
+  const w = m.createWorker({ fetchImpl: impl, kv });
+  /* 14:30 UTC ∈ ENS_ROT_HOURS → ens se sbírá, 429 = cooldown kola */
+  const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 14, 30) });
+  assert.ok(res.ok, JSON.stringify(res));
+  assert.strictEqual(ensCalls, 1, "429 stojí jediný subrequest na celé kolo");
+  const rec = JSON.parse(kv.store.get(res.key).v);
+  assert.strictEqual(rec.cd, "ens429", "důvod cooldownu v záznamu");
+  Object.keys(rec.p).forEach((n) => {
+    assert.deepStrictEqual(rec.p[n].err, ["ens"], "jediná chyba je ens u " + n);
+  });
 });
