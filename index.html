@@ -1653,6 +1653,14 @@ var Z_NEAR      = 7;   /* zpřesnění pohybu pro blízké buňky — ~0,8 km/px
 /* poslední znak: snow=1 zapne sněhový příznak v datech (viz readTilePatch) */
 var RV_OPTS = "/0/0_1.png";
 
+/* KOLO 11: timeout jedné radarové dlaždice (Image nemá vlastní časovač).
+   Dave (18. 11. 16:47): radar se na prvotním načtení nezobrazil — jeden
+   visící požadavek na CDN zasekl celý radarový řetězec (Promise nikdy
+   neresolvoval), kompas i radarová větev blendu zmizely beze slova.
+   Po 12 s se visícímu požadavku odmlčí, dlaždice se počítá za chybějící
+   a řetězec jede dál (viz readTilePatchBase a scheduleRadarRetry). */
+var RV_TILE_TIMEOUT_MS = 12000;
+
 function tileCoords(lat, lon, z){
   var n = Math.pow(2, z);
   var latR = lat*Math.PI/180;
@@ -1682,7 +1690,21 @@ function readCoverage(host, lat, lon){
   return new Promise(function(resolve){
     var img = new Image();
     img.crossOrigin = "anonymous";
+    /* KOLO 11: maska pokrytí dřív při odmlčení CDN taky visela donekonečna;
+       po RV_TILE_TIMEOUT_MS se prostě přizná "error" (radar pak zkusí
+       znovu, viz scheduleRadarRetry). */
+    var settled = false;
+    var tm = setTimeout(function(){
+      if(settled) return;
+      settled = true;
+      img.onload = img.onerror = null;
+      try{ img.src = ""; }catch(e){}
+      resolve("error");
+    }, RV_TILE_TIMEOUT_MS);
     img.onload = function(){
+      if(settled) return;
+      settled = true;
+      clearTimeout(tm);
       try{
         var c = document.createElement("canvas");
         c.width = 256; c.height = 256;
@@ -1697,7 +1719,12 @@ function readCoverage(host, lat, lon){
         resolve(opaque > total/2 ? "none" : "ok");
       }catch(e){ resolve("error"); }
     };
-    img.onerror = function(){ resolve("error"); };
+    img.onerror = function(){
+      if(settled) return;
+      settled = true;
+      clearTimeout(tm);
+      resolve("error");
+    };
     img.src = url;
   });
 }
@@ -1720,6 +1747,8 @@ function hasNative15min(lat, lon){
 function sourceCaveat(){
   var notes = [];
   if(radarCoverage === "none") notes.push("radar sem nedosahuje");
+  /* KOLO 11: výpadek radaru se pojmenuje u zdroje, nezmizí tiše. */
+  if(radarState === "error") notes.push("radar nedostupný (zkusím znovu)");
   if(!native15) notes.push("15min data dopočítaná z hodinových");
   return notes.length ? " · " + notes.join(", ") : "";
 }
@@ -4081,8 +4110,32 @@ function metarTrend(raw){
 }
 var modelState = null;   /* {times:[Date], consensus:[int], N, perHourMax:[mm]} */
 
-function loadRadar(lat, lon, myId){
+/* ================= KOLO 11: RADAR SE NESMÍ ZTRATIT BEZE SLOVA =================
+   Dave (18. 11., mobil): kompas i radarová větev na prvotním načtení
+   tiše zmizely. Backend byl přitom zdravý (ověřeno měřením: metadata,
+   maska pokrytí i dlaždice odpovídaly 200). Příčiny byli dva tiší
+   zabijáci: (1) visící dlaždice bez časovače zasekla celý řetězec,
+   (2) jednorázová chyba znamenala "radar nedostupný" AŽ DO PŘÍŠTÍHO
+   ručního načtení — a nikdo uživateli neřekl ani slovo.
+   Lék ve třech vrstvách: timeout dlaždic (viz readTilePatchBase),
+   automatický dotah (níž) a viditelný stav místo zmizení
+   (renderCompassBase + sourceCaveat). */
+var bpRadarRetryT = null;          /* běžící dotah — max jeden na appku */
+var RV_RETRY_DELAYS = [20000, 60000];   /* dva pokusy: +20 s, +60 s */
+function scheduleRadarRetry(lat, lon, myId, attempt){
+  if(attempt >= RV_RETRY_DELAYS.length) return;   /* víc než dvě dotahy nikdy */
+  if(bpRadarRetryT != null) return;              /* jeden už běží */
+  bpRadarRetryT = setTimeout(function(){
+    bpRadarRetryT = null;
+    if(typeof radarState !== "undefined" && radarState !== "error") return; /* mezitím vyřešeno */
+    if(isStale(myId)) return;                    /* mezitím se změnila lokální */
+    loadRadar(lat, lon, myId, attempt+1);
+  }, RV_RETRY_DELAYS[attempt]);
+}
+
+function loadRadar(lat, lon, myId, attempt){
   if(myId == null) myId = reqId;
+  attempt = attempt || 0;
   radarState = null;
   radarCoverage = null;
   rvNowcast = null;
@@ -4444,7 +4497,10 @@ function loadRadar(lat, lon, myId){
           radarState = detail ? readNow(detail, frameAgeMin, 0, 0, tcI.kmPerPx) : "error";
           radarCompass = computeRadarCompass(mp && mp.frames ? mp.frames : null, null, tcM, null);
           renderCompass();
-          recomputeWhen(); return;
+          recomputeWhen();
+          /* KOLO 11: chybový stav bez intenzity je selhání řetězce → dotah. */
+          if(radarState === "error") scheduleRadarRetry(lat, lon, myId, attempt);
+          return;
         }
 
         var ps = mp.frames, mo = mp.motion;
@@ -4465,6 +4521,9 @@ function loadRadar(lat, lon, myId){
         radarState = detail ? readNow(detail, frameAgeMin, vxKm, vyKm, tcI.kmPerPx)
                             : "error";
         var persistMm = (radarState !== "error" && radarState.nowMm != null) ? radarState.nowMm : 0;
+        /* KOLO 11: bez intenzitní dlaždice není co ukázat ani čím vážit —
+           to je selhání řetězce, ne „suchý radar“. Naplánuje se dotah. */
+        if(radarState === "error") scheduleRadarRetry(lat, lon, myId, attempt);
 
         /* ================= ČASOVĚ POSUNUTÝ ENSEMBLE =================
            Osm snímků se dosud stáhlo, spočítala se z nich rychlost —
@@ -4564,7 +4623,7 @@ function loadRadar(lat, lon, myId){
         recomputeWhen();
       });
     })
-    .catch(function(){ if(isStale(myId)) return; radarState = "error"; radarCompass = null; renderCompass(); recomputeWhen(); });
+    .catch(function(){ if(isStale(myId)) return; radarState = "error"; radarCompass = null; renderCompass(); recomputeWhen(); scheduleRadarRetry(lat, lon, myId, attempt); });
 }
 
 /* ============================================================
@@ -4875,6 +4934,19 @@ function renderCompassBase(){
   }
   var viaSat = (radarCoverage === "none" && imergCompass) && !radarCompass;
   var C = viaSat ? imergCompass : radarCompass;
+  /* KOLO 11: selhání radaru NESMÍ být tiché. Dřív kompas prostě zmizel
+     a Dave (18. 11.) musel hádat, jestli „radar nic nevidí“, nebo
+     „radar spadl“. Teď je na místě kompasu vidět, co se stalo —
+     a že se to zkusí znovu samo. */
+  if(radarState === "error" && !C){
+    el.hidden = false;
+    el.innerHTML = '<div class="label">Radar</div>'
+      + '<div class="ct">'
+      + '<div class="verd">Radar se nepodařilo načíst.</div>'
+      + '<div class="expl">Síť nebo API zrovna nespolupracuje, takže kompas nemám z čeho kreslit. Zkusím to znovu sám; zatím platí modely, satelit a minutacast.</div>'
+      + '</div>';
+    return;
+  }
   if(!C){ el.hidden = true; el.innerHTML = ""; return; }
   var RE = 46, CX = 50, CY = 50;                 /* dosah kreslený v SVG px */
   var px = function(e){ return CX + e/C.reachKm*RE; };
@@ -5459,7 +5531,22 @@ function readTilePatchBase(url, px, py, r){
   return new Promise(function(resolve){
     var img = new Image();
     img.crossOrigin = "anonymous";
+    /* KOLO 11: visící dlaždice (CDN edge, mobilní přechod) dřív neresolvovala
+       nikdy — celý radarový řetězec zůstal viset a kompas beze slova zmizel.
+       Timeout dlaždici po RV_TILE_TIMEOUT_MS vzdá a počítá ji nulou:
+       jeden chycený snímek ensemble odskáče, zbytek jede dál. */
+    var settled = false;
+    var tm = setTimeout(function(){
+      if(settled) return;
+      settled = true;
+      img.onload = img.onerror = null;
+      try{ img.src = ""; }catch(e){}   /* zruší i síťový požadavek, kde jde */
+      resolve(null);
+    }, RV_TILE_TIMEOUT_MS);
     img.onload = function(){
+      if(settled) return;
+      settled = true;
+      clearTimeout(tm);
       try{
         var c = document.createElement("canvas");
         c.width = 256; c.height = 256;
@@ -5492,7 +5579,12 @@ function readTilePatchBase(url, px, py, r){
         resolve({data:out, snow:snow, mm:mm, n:n, x0:x0, y0:y0, snowSeen:snowSeen});
       }catch(e){ resolve(null); }        /* CORS blok */
     };
-    img.onerror = function(){ resolve(null); };
+    img.onerror = function(){
+      if(settled) return;
+      settled = true;
+      clearTimeout(tm);
+      resolve(null);
+    };
     img.src = url;
   });
 }
