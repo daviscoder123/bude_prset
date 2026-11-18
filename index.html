@@ -8215,20 +8215,21 @@ function clockWithDay(now, mins){
   if(days === 1) return "zítra " + hhmm;
   return "pozítří " + hhmm;
 }
-/* Kolo 9c: okraj dat leží většinou za den a sám o sobě je jen přibližný.
-   Ukazovat ho po minutách („zítra 12:59“) je falešná přesnost, která
-   navíc zaváněla větou „zítra bude pršet ve 12:59“ (screenshot Josefov).
-   Vzdálený horizont se proto zaokrouhlí na celou hodinu a přidá „kolem“:
-   vrací „zítra kolem 13:00“ místo „zítra 12:59“. Do 6 h zůstává čas přesný,
-   tam mez zaokrouhlením ztratila víc, než vydělala. */
-function approxClock(now, mins){
-  var approx = mins > 360;
-  var m = approx ? Math.round(mins/60)*60 : mins;
-  var out = clockWithDay(now, m);
-  if(approx){
-    out = out.indexOf(" ") >= 0 ? out.replace(" ", " kolem ") : "kolem " + out;
-  }
-  return out;
+/* Kolo 9d (Daveova formulace: „Pršet má i zítra po 13. hodině“): okraj
+   dat se neukazuje po minutách ani s odbornou zmínkou o „datech“. Když
+   déšť za okraj předpovědi neustává, věta řekne prostě, že má trvat
+   i další den, s hodinou zaokrouhlenou na celou hodinu: „zítra po
+   13. hodině“ místo falešně přesného „zítra 12:59“. Hour z placeParts
+   přijde na dvě číslice, +p.hour ho svede na přirozené číslo
+   („po 8. hodině“, ne „po 08. hodině“). */
+function rainBeyondPhrase(now, mins){
+  var m = Math.round(mins/60)*60;
+  var p = placeParts(new Date(now + m*60000));
+  var np = placeParts(new Date(now));
+  var days = Math.round((Date.UTC(+p.year, +p.month-1, +p.day) -
+                         Date.UTC(+np.year, +np.month-1, +np.day)) / 86400000);
+  var den = days === 1 ? "zítra " : (days >= 2 ? "pozítří " : "");
+  return den + "po " + (+p.hour) + ". hodině";
 }
 /* ===== ČESKÉ SKLOŇOVÁNÍ ČÍSLOVEK =====
    Čeština má tři tvary podle počtu: 1 minuta, 2–4 minuty, 5+ minut.
@@ -8272,8 +8273,11 @@ function renderRainEnd(now, startMin, timeline){
   if(!end){ el.innerHTML = ""; return; }
 
   if(end.beyond){
-    el.innerHTML = "Konec zatím není v dohledu — v datech až po <b>"
-                 + approxClock(now, end.horizon) + "</b> žádná souvislá přestávka.";
+    /* Dave (kolo 9d): „Pršet má i zítra po 13. hodině“ — prostě a přímo,
+       po celé hodině. Blízký okraj dat (do 6 h) neche přesný po minutách. */
+    el.innerHTML = end.horizon > 360
+      ? "Pršet má i <b>" + rainBeyondPhrase(now, end.horizon) + "</b>."
+      : "Pršet má trvat i po <b>" + clockWithDay(now, end.horizon) + "</b>.";
     return;
   }
   var dur = Math.max(5, end.min - end.wetStart);

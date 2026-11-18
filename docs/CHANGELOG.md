@@ -188,3 +188,12 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
       a shoda modelů liší o 30 % a víc (screenshot: 12 % × 49 %),
       řádek ensemblu přidá „odhady se rozcházejí — ber to jako
       nejisté“, dosud to hlídal jen stav s ensembly. Testů 96/96.
+  - **(kolo 9d):** Daveova formulace konce za okrajem dat: „Konec zatím
+    není v dohledu — v datech až po zítra kolem 13:00 žádná souvislá
+    přestávka“ se zjednodušila na „Pršet má i zítra po 13. hodině.“ —
+    prostě, po celé hodině a bez odborné zmínky o datech. Nová funkce
+    rainBeyondPhrase zaokrouhlí okraj nad 6 h na celou hodinu se dnem
+    („zítra po 13. hodině“, „pozítří po 9. hodině“, ráno bez nuly
+    „po 8. hodině“); blízký okraj zůstává přesný po minutách.
+    Nahradila approxClock z kola 9c. Testů 96/96 (náhrada 1:1,
+    dvě testovací sady upraveny).
