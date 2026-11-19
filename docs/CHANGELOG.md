@@ -391,3 +391,84 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
       za ~30 min", absence trajektorie; strukturálně: pohled ČHMÚ
       se kreslí před kompozitovými větvemi, reset při změně
       lokality, delegovaný klik na Neměnném rodiči).
+  - **(kolo 15) Verdikt nepředjímá běžící měření; radar kreslí
+    reálné pole; start aplikace nečeká na GPS.** Dave (19. 11.
+    13:27, mobil, dvě obrazovky z jedné minuty): „Proč to na mobilu
+    ukazuje něco jiného — verdikt." a „Radar není hezky vykreslený
+    a na první načtení je načítání velmi problematické." Měřená
+    příčina: ČHMÚ viděl slabé echo přímo nad Josefovem (neprůhledné
+    pixely na snímcích 12:25 i 12:30 UTC, ~1 100 pixelů echa do
+    20 km), ale na výpadkovém mobilním připojení došel pozorovací
+    zdroj později než modelové signály — a recomputeWhen mezitím
+    vykreslil definitivní „Možná kape · nepotvrzeno · 0 potvrzení",
+    aby se o chvíli později překlopil na „Slabý déšť právě teď ·
+    potvrzuje radar ČHMÚ". Tři léky:
+    - **Registr „měřím ještě" (gtPending).** Každý pozorovací
+      loader (kompozit, stanice METAR, ČHMÚ, met.no, regionální
+      nowcast, DWD RADVOR/KNMI, GIBS, Meteosat) se při startu
+      zaregistruje a po dořešení odregistruje; while registru
+      není prázdný a hlasy jsou jen modelové, VERDIKT zobrazí
+      stav „Ověřuji pozorováním" s výčtem zdrojů, na které se
+      čeká — místo předčasného „nepotvrzeno". Pojistná lhůta
+      90 s: zapomenuté odregistrování (kdyby) nikdy nezamrzne
+      verdikt navždy. Říkání pravdy: „nepotvrzeno" se zobrazí,
+      až když o něčem skutečně nikdo nedodá svědectví.
+    - **Reálné pole srážek v kompasu.** Pohled ČHMÚ čte now-výřez
+      ±48 km ze stejného PNG (bez jediného požadavku navíc) a
+      kreslí bloky 3×3 km dle ordinálu škály; sucho v okruhu
+      48 km se pak říká nahlas. Kompozitový ciferník dostal
+      jemné (alfa 0,08–0,38) pozadí ze skutečného posledního
+      snímku pod elipsu a trajektorii buňky. Elipsa ČHMÚ zůstává
+      jako fallback, když se pole nepodaří vyčíst.
+    - **Rychlý a čestný start.** Naposledy použitá lokalita se
+      ukládá do localStorage a aplikace s ní startuje okamžitě,
+      zatímco geolokace běží na pozadí (a při zamítnutí nebo
+      selhání GPS zůstává funkční předpověď pro poslední místo).
+      Panel radaru při načítání kompozitu nezmizí tiše, ale
+      zobrazí cifernák se stavem „Měřím radar…" — spolu se
+      stavem „ověřuji" to dělá první sekundy na mobilu čitelné,
+      nikoli rozbité. (Opraven též cizí znak v komentáři
+      loadSatellite.)
+    - Testy: 132/132 (nové kolo 15: registr start/settle/štítky/
+      pojistka; modelové hlasy + běžící měření → mode "checking"
+      a žádné „nepotvrzeno"; chmiFieldFromPatch — severní blok
+      k severu, sucho = prázdné pole, chmiReadNow ignoruje echo
+      6 km od středu; radarFieldFromPatch + compassFieldSvg — práh,
+      dosah, poloha; strukturálně: „Měřím radar…" v panelu, pole
+      v obou pohledech, „Verdikt · ověřuji" v mobilním panelu,
+      cache lokality v load/init).
+
+## Kolo 15b — „Ověřuji“ končí známou chybou, ne až za 20 s (19. 11.)
+
+  CI kola 15 odhalil vadu samotného registru: když pozorovací zdroj
+  odpověděl chybou (síť výpadek), registr „měřím“ zůstal otevřený
+  až do vyčerpání obou dotahů (+20 s, +60 s — celkem ~80 s). Na
+  pomalém mobilu i v testech tedy verdikt osmdesát sekund tvrdil
+  „Ověřuji“, přestože síť už dávno odpověděla; mobilní layout
+  v stavu checking je navíc o řádek vyšší, takže fitGuard škáloval
+  fonty pod přípustnou mez (0,78 na 393 px). Lék: registr drží jen
+  první pokus měření — známá chyba ho zavře hned (se spočtením
+  verdiktu a překreslením kompasu; skeleton „Měřím radar…“ ustoupí
+  stavu chyby), další dotahy (kolo 11/12) běží potichu a nesmí
+  verdikt na „ověřuji“ vracet znovu a znovu. Uspěje-li pozdější
+  dotah, recomputeWhen při úspěchu verdikt sám překreslí — měřeno
+  19. 11.: totéž URL odpovídá o chvíli později 200.
+
+  - scheduleRadarRetry/scheduleMetarRetry/scheduleChmiRetry: settle
+    na vstupu při známé chybě (gtPendingHas → gtSettle → recompute,
+    radar/ČHMÚ navíc renderCompass), strop dvou dotahů beze změny.
+  - loadRadar/loadMetar/loadChmi: gtStart jen při prvním pokusu
+    (attempt 0), retry nikdy registr neotevře (žádné blikání
+    maybe ⇄ checking).
+  - Browser testy: tři omezené settle-waity (15 s) čekají, až verdikt
+    opustí přechodné „ověřuji“, než se zmerí výsledný stav a layout —
+    assertion dál tvrdí totéž (maybe + nepotvrzeno, --fit ≥ 0,8),
+    jen už nesoutěží s dokončením měření. Měřeno v CI po fixu: test 8
+    zelený, 393×665 fit 0,78 → 0,85; stav testu 1 potvrdí další běh CI.
+  - Testy beze změny požadavků: 132/132 regression+worker, build
+    index.html 491 484 znaků. Oba selhané CI browser testy padly na
+    přechodném stavu „checking“: test 8, protože registr držel
+    „měřím“ přes čekání na dotahy (layout 393 px zbytněl o řádek);
+    test 1, protože assertion četl verdikt dřív, než pozorovací
+    řetězce dozněly. Obě příčiny jsou opraveny v aplikaci, tvrzení
+    testů zůstala beze změny.
