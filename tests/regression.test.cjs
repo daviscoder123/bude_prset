@@ -1058,3 +1058,74 @@ test('kolo 12c: ČHMÚ potvrzuje „prší právě teď“ samo (čerstvé ECHO)
   c.recomputeWhen();
   assert.notEqual(c.whenState.mode,'wet','ECHO starší 45 min samo nepotvrzuje');
 });
+
+/* ===== Kolo 13: radar RainViewer má druhou nohu přes Worker =====
+   Dave 19. 11. (mobil): „Radar nejede“ — kompas hlásil „Radar se
+   nepodařilo načíst“ celý den, přestože ze předpokládaně zdravé sítě
+   curl na tentýž maps.json/dlaždici odpovídal 200 za 0,09 s; ČHMÚ i
+   vše přes Worker na Cloudflare z téhož telefonu jede. Fix = po
+   selhání přímé cesty zkusit /rv/maps a /rv/img (Worker kolo 13);
+   bezWorkeru se chování nezmění. Zároveň (Dave): řádek ČHMÚ v seznamu
+   modelů se ruší — ČHMŮ hlasuje dál, jen už není sloupcem mezi
+   předpověďmi. */
+test('kolo 13: maps.json po selhání přímé cesty jede přes Worker /rv/maps',async()=>{
+  const calls=[];
+  const c=context(['rvMapsJson','cachedJsonNoOffline','cachedJson','fetchT','pruneCache'],{
+    CACHE:{},CACHE_MAX:200,OFFLINE_KEY:'bpOffline',
+    fetch:(url)=>{
+      calls.push(url);
+      if(url==='https://api.rainviewer.com/public/weather-maps.json')
+        return Promise.reject(new TypeError('Failed to fetch'));
+      if(url==='https://w.example/rv/maps')
+        return Promise.resolve({ok:true,json:()=>Promise.resolve({version:'2.0',viaProxy:true})});
+      return Promise.resolve({ok:false,status:404});
+    },
+    AbortController:FakeAbortController,setTimeout,clearTimeout,
+    BP_PROXY:'https://w.example'
+  });
+  const j=await c.rvMapsJson();
+  assert.equal(j.viaProxy,true,'data doručil Worker');
+  assert.deepEqual(calls,['https://api.rainviewer.com/public/weather-maps.json','https://w.example/rv/maps'],
+    'přímá cesta první, proxy druhá');
+  /* druhý běh: přímá cesta se ZNOVU zkouší (síť se třeba vrátila),
+     výsledek proxy nohy ale drží CACHE — proxy se nevolá znovu */
+  calls.length=0;
+  const j2=await c.rvMapsJson();
+  assert.equal(j2.viaProxy,true);
+  assert.deepEqual(calls,['https://api.rainviewer.com/public/weather-maps.json'],
+    'jen přímý retry, proxy leg drží CACHE');
+});
+test('kolo 13: obě nohy selžou-li, zůstává offline záloha jako dřív',async()=>{
+  const c=context(['rvMapsJson','cachedJsonNoOffline','cachedJson','fetchT','pruneCache'],{
+    CACHE:{},CACHE_MAX:200,OFFLINE_KEY:'bpOffline',
+    fetch:()=>Promise.reject(new TypeError('Failed to fetch')),
+    AbortController:FakeAbortController,setTimeout,clearTimeout,
+    BP_PROXY:'https://w.example',
+    localStorage:{getItem:()=>JSON.stringify({'https://api.rainviewer.com/public/weather-maps.json':{t:1,d:{version:'2.0',backup:true}}}),setItem:()=>{}},
+    offlineStale:()=>{}
+  });
+  const j=await c.rvMapsJson().catch(()=>null);
+  assert.equal(j && j.backup,true,'poslední šance je offline záloha');
+});
+test('kolo 13: proxy URL se staví jen pro rainviewer dlaždice',()=>{
+  const c=context(['rvIsTileUrl','rvProxyTileUrl'],{BP_PROXY:'https://w.example'});
+  const tile='https://tilecache.rainviewer.com/v2/radar/2c66a8ce20eb/256/7/69/43/0/0_1.png';
+  assert.equal(c.rvIsTileUrl(tile),true,'dlaždice appky projde');
+  assert.equal(c.rvIsTileUrl('https://evil.example/v2/radar/x.png'),false,'cizí host nikdy');
+  assert.equal(c.rvIsTileUrl('https://tilecache.rainviewer.com/v2/coverage/0/256/5/17/9/2/1_1.png'),false,'maska pokrytí se neproxuje');
+  assert.equal(c.rvProxyTileUrl(tile),
+    'https://w.example/rv/img?u='+encodeURIComponent('/v2/radar/2c66a8ce20eb/256/7/69/43/0/0_1.png'));
+});
+test('kolo 13: strukturální pojistky radaru i zrušeného řádku ČHMÚ',()=>{
+  assert.ok(script.includes('function rvMapsJson'),'maps pojistka existuje');
+  const rm=fn('rvMapsJson');
+  assert.ok(rm.includes('/rv/maps'),'míří na worker endpoint');
+  assert.ok(rm.includes('if(!BP_PROXY) throw e'),'bez workeru se nic nemění');
+  const rp=fn('readTilePatch');
+  assert.ok(rp.includes('rvIsTileUrl(url)') && rp.includes('rvProxyTileUrl(url)'),
+    'po selhání dlaždice se zkouší proxy');
+  assert.ok(!script.includes('function renderChmiRow'),'řádek ČHMÚ v tabulce modelů je pryč');
+  assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
+    'hlasování ČHMÚ ve verdiktu zůstává');
+  assert.ok(!fn('loadChmi').includes('renderChmiRow'),'loadChmi už řádek nekreslí');
+});

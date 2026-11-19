@@ -115,6 +115,14 @@ var UPSTREAMS = {
    nesmí být otevřená proxy. */
 var CHMI_HOST = "https://opendata.chmi.cz";
 var CHMI_PATH_RE = /^\/meteorology\/weather\/radar\/[A-Za-z0-9_.\/-]+$/;
+/* KOLO 13: passthrough radarových dlaždic RainVieweru pro mobilní sítě,
+   ze kterých přímé dotazy prohlížeče selhávají (měřeno 19. 11.: stejná
+   dlaždice curl 200, na Daveově mobilu celý den „Radar se nepodařilo
+   načíst"). Whitelist je záměrně úzký — přesně tvar, který posílá
+   appka (rvTile: /v2/radar/<hash>/256/<z>/<x>/<y>/<schéma>/<smooth>_<sníh>.png),
+   aby Worker nebyl otevřenou png proxy. */
+var RV_TILE_HOST = "https://tilecache.rainviewer.com";
+var RV_TILE_PATH_RE = /^\/v2\/radar\/[0-9a-z]{6,32}\/256\/[0-9]{1,2}\/[0-9]{1,3}\/[0-9]{1,3}\/[0-9]{1,2}\/[0-9]_[0-9]\.png$/;
 var CHMI_FCT_LEADS = ["10", "20", "30", "40", "50", "60"];
 var CHMI_TAR_TTL = 240;        /* archiv se rodí po 5 minutách */
 
@@ -907,7 +915,8 @@ export function createWorker(deps) {
         ok: true, service: "bude-prset-proxy", endpoints: Object.keys(UPSTREAMS),
         collector: { places: MUNICIPALITIES.length, slices: SLICE_COUNT, kv: !!kv },
         analysis: ["/analysis", "/analysis/page", "/analysis/status"],
-        chmi: ["/chmi/img", "/chmi/fct"]
+        chmi: ["/chmi/img", "/chmi/fct"],
+        rv: ["/rv/maps", "/rv/img"]
       });
     }
 
@@ -1090,6 +1099,95 @@ export function createWorker(deps) {
         headers: {
           "content-type": "image/png", "access-control-allow-origin": "*",
           "cache-control": "public, max-age=" + CHMI_TAR_TTL, "x-bp-cache": "MISS"
+        }
+      });
+    }
+
+    /* --- KOLO 13: RainViewer passthrough (pojistka mobilních sítí) ---
+       Appka běžně čte maps.json i dlaždice přímo (CDN je rychlé a
+       platí za přenos dat u mobilních tarifů jen jednou). Když ale
+       přímá cesta z mobilní sítě nedorazí (Dave 19. 11.: radarState
+       "error" celý den, ačkoliv curl na tentýž URL odpovídá 200),
+       zkusí appka tyto dva endpointy. Odpovědi jsou tvarově identické
+       s upstreamem; žádný přepočet, jen CORS * a cache. */
+    if (u.pathname === "/rv/maps") {
+      if (cache) {
+        var rvMapsHit = await cache.match(RV_MAPS_URL);
+        if (rvMapsHit) {
+          return new Response(await rvMapsHit.arrayBuffer(), {
+            status: 200,
+            headers: {
+              "content-type": "application/json", "access-control-allow-origin": "*",
+              "cache-control": "public, max-age=60", "x-bp-cache": "HIT"
+            }
+          });
+        }
+      }
+      var rvMapsUp;
+      try {
+        rvMapsUp = await fetchImpl(RV_MAPS_URL, { headers: { "user-agent": "bude-prset-proxy/1.0 (+https://github.com/daviscoder123/bude_prset)" } });
+      } catch (e) {
+        return json(502, { error: "RainViewer nedostupné", detail: String(e && e.message || e) });
+      }
+      if (!rvMapsUp.ok) return json(rvMapsUp.status === 404 ? 404 : 502, { error: "RainViewer vrátil " + rvMapsUp.status });
+      var rvMapsBody = new Uint8Array(await rvMapsUp.arrayBuffer());
+      if (cache) {
+        try {
+          await cache.put(RV_MAPS_URL, new Response(rvMapsBody, {
+            status: 200,
+            headers: { "content-type": "application/json", "cache-control": "public, max-age=60" }
+          }));
+        } catch (e) { /* cache je doplněk */ }
+      }
+      return new Response(rvMapsBody, {
+        status: 200,
+        headers: {
+          "content-type": "application/json", "access-control-allow-origin": "*",
+          "cache-control": "public, max-age=60", "x-bp-cache": "MISS"
+        }
+      });
+    }
+    if (u.pathname === "/rv/img") {
+      var rvu = u.searchParams.get("u") || "";
+      if (rvu.indexOf("..") >= 0 || !RV_TILE_PATH_RE.test(rvu)) {
+        return json(400, { error: "cesta musí být dlaždice /v2/radar/<hash>/256/<z>/<x>/<y>/<schéma>/<smooth>_<sníh>.png" });
+      }
+      var rvTileUrl = RV_TILE_HOST + rvu;
+      /* Snímek pod neměnným hashem je neměnný — dlouhá cache je tady
+         bezpečná (a mobilní data levnější). */
+      if (cache) {
+        var rvHit = await cache.match(rvTileUrl);
+        if (rvHit) {
+          return new Response(await rvHit.arrayBuffer(), {
+            status: 200,
+            headers: {
+              "content-type": "image/png", "access-control-allow-origin": "*",
+              "cache-control": "public, max-age=3600", "x-bp-cache": "HIT"
+            }
+          });
+        }
+      }
+      var rvUp;
+      try {
+        rvUp = await fetchImpl(rvTileUrl, { headers: { "user-agent": "bude-prset-proxy/1.0 (+https://github.com/daviscoder123/bude_prset)" } });
+      } catch (e) {
+        return json(502, { error: "RainViewer nedostupné", detail: String(e && e.message || e) });
+      }
+      if (!rvUp.ok) return json(rvUp.status === 404 ? 404 : 502, { error: "RainViewer vrátil " + rvUp.status });
+      var rvBytes = new Uint8Array(await rvUp.arrayBuffer());
+      if (cache) {
+        try {
+          await cache.put(rvTileUrl, new Response(rvBytes, {
+            status: 200,
+            headers: { "content-type": "image/png", "cache-control": "public, max-age=3600" }
+          }));
+        } catch (e) { /* cache je doplněk */ }
+      }
+      return new Response(rvBytes, {
+        status: 200,
+        headers: {
+          "content-type": "image/png", "access-control-allow-origin": "*",
+          "cache-control": "public, max-age=3600", "x-bp-cache": "MISS"
         }
       });
     }

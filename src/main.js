@@ -860,7 +860,7 @@ function omUrl(host, path, qs){
   return BP_PROXY ? BP_PROXY + "/om" + path + "?" + qs
                   : "https://" + host + path + "?" + qs;
 }
-function cachedJson(url, ttlMs){
+function cachedJson(url, ttlMs, noOffline){   /* noOffline: kolo 13, viz cachedJsonNoOffline */
   var c = CACHE[url];
   if(c && (Date.now()-c.t) < ttlMs) return Promise.resolve(c.d);
   return fetchT(url).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
@@ -874,6 +874,7 @@ function cachedJson(url, ttlMs){
     .catch(function(e){
       /* Výpadek sítě ≠ chybná odpověď serveru. HTTP 5xx se šíří dál —
          server přece odpověděl; jen opravdu mrtvou síť zachrání záloha. */
+      if(noOffline) throw e;   /* kolo 13: volající má vlastní druhou nohu */
       if(typeof localStorage === "undefined" || !e || /^HTTP /.test(e.message)) throw e;
       var o = null;
       try{ o = JSON.parse(localStorage.getItem(OFFLINE_KEY) || "{}")[url]; }catch(ignored){}
@@ -881,6 +882,15 @@ function cachedJson(url, ttlMs){
       try{ offlineStale(o.t); }catch(e2){}
       return o.d;
     });
+}
+/* KOLO 13 (19. 11.): cachedJson dostal třetí parametr noOffline.
+   Volající s vlastní fallback nohou (rvMapsJson) nesmí nechat síťový
+   výpadek přebít zálohou ze localStorage dřív, než se fallback stihne
+   zkusit — jinak by appka naDaveově mobilu servírovala týdny starý
+   seznam snímků místo živého dotazu přes Worker. Ostatní volající
+   se chovají identicky jako dřív (parametr undefined = stará cesta). */
+function cachedJsonNoOffline(url, ttlMs){
+  return cachedJson(url, ttlMs, true);
 }
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -958,6 +968,39 @@ function tileCoords(lat, lon, z){
 }
 function rvTile(host, path, tc){
   return host + path + "/256/" + tc.z + "/" + tc.tx + "/" + tc.ty + RV_OPTS;
+}
+/* KOLO 13 (Dave 19. 11. 12:45, mobil): „Radar nejede" — kompas hlásil
+   „Radar se nepodařilo načíst", a to celý den, ačkoliv z tohoto stroje
+   api.rainviewer.com odpovídalo 200/818 B za 0,09 s a dlaždice také 200,
+   ČHMÚ i METAR nezávisle pršely/potvrzovaly déšť. Stejně selhával i
+   aviationweather.gov — přímé dotazy na cizí domény z Daveovy mobilní
+   sítě padají, zatímco všechno, co putuje přes Worker na Cloudflare,
+   jede (ČHMÚ řádek s echem se zobrazil). Radar proto dostane druhou
+   nohu: po selhání přímé maps.json se zkusí /rv/maps na Workeru a po
+   selhání přímé dlaždice /rv/img (Worker dlaždice protáhne s CORS *,
+   stejné schéma 0, žádná změna dekódování). Worker musí mít kolo 13
+   nasazené; dokud nemá, vrátí 404 a appka zůstane u starého chování —
+   verdikt stejně drží pozemní pravda z kola 12c. Maps se záměrně ptají
+   přes cachedJsonNoOffline: offline záloha nesmí vypadnout za živým
+   Workerem. (Maska pokrytí readCoverage záměrně zůstává přímá — její
+   selhání jen degraduje radarCoverage na „error", verdikt nechytá.) */
+function rvMapsJson(){
+  return cachedJsonNoOffline("https://api.rainviewer.com/public/weather-maps.json", 300000)
+    .catch(function(e){
+      if(!BP_PROXY) throw e;
+      return cachedJsonNoOffline(BP_PROXY + "/rv/maps", 300000)
+        .catch(function(e2){ throw e; });
+    })
+    .catch(function(){
+      /* poslední šance je offline záloha — původní chování cachedJson */
+      return cachedJson("https://api.rainviewer.com/public/weather-maps.json", 300000);
+    });
+}
+function rvIsTileUrl(url){
+  return /^https:\/\/[a-z0-9.-]*rainviewer\.com\/v2\/radar\//i.test(url);
+}
+function rvProxyTileUrl(url){
+  return BP_PROXY + "/rv/img?u=" + encodeURIComponent(url.replace(/^https:\/\/[a-z0-9.-]*rainviewer\.com/i, ""));
 }
 
 /* Dosahuje sem radar? RainViewer na to má vlastní produkt — masku pokrytí.
@@ -1644,7 +1687,7 @@ function metarApproxMm(wx){
 var RVV_MAX_READS = 16;                  /* tile čtení na jedno spuštění */
 var RVV_MAX_AGE_MS = 2.2*3600*1000;      /* historie radaru jde ~2 h zpátky */
 function rvVerifyObsAt(lat, lon, targetMs){
-  return cachedJson("https://api.rainviewer.com/public/weather-maps.json", 300000)
+  return rvMapsJson()      /* kolo 13: druhá noha přes Worker, viz výše */
     .then(function(j){
       var past = (j.radar && j.radar.past) ? j.radar.past : [];
       if(!past.length) return null;
@@ -2879,12 +2922,10 @@ if(mh && NARROW.matches){
 
   modelState = {times:times, consensus:consensus, N:N, nAg:nAg, perHourMax:perHourMax, spread:spread, peak:pk,
                 longTimes:longTimes, longMed:longMed, snowFrac: perHourSnow};
-  /* Řádek ČHMÚ se kreslí i odsud, ne jen z loadChmi().
-     Ve snímku z 23. 7. v tabulce chyběl a nemuselo to být jen CORSem:
-     když ČHMÚ odpoví dřív, než dorazí modely, renderChmiRow() nemá do
-     čeho kreslit (modelState je ještě null) a tabulka se pak přepíše.
-     Zavolat to z obou stran je levnější než hlídat pořadí. */
-  try{ renderChmiRow(); }catch(e){}
+  /* KOLO 13: renderChmiRow() se odsud volat nemusí — řádek ČHMÚ
+     v tabulce modelů je zrušen (Dave 19. 11.). CHMU přestal být v
+     tabulce sloupcem, ale nejsou zrušeny jeho hlasy: chmiSolo
+     v kompasu, chmiPotvrzuje v recomputeWhen, svědek v groundTruthWitnesses. */
   renderVerdictExtras(pk, spread, N);
   recomputeWhen();
 
@@ -3763,7 +3804,7 @@ function loadRadar(lat, lon, myId, attempt){
      ws:// — z HTTPS stránky ji prohlížeč odmítne, proto se používá
      modelový bleskový potenciál ze sloučeného dotazu výše. */
 
-  cachedJson("https://api.rainviewer.com/public/weather-maps.json", 300000)
+  rvMapsJson()     /* kolo 13: přímý dotaz, po selhání Worker /rv/maps */
     .then(function(j){
       /* Osm snímků místo pěti: sedm dvojic místo čtyř dá stabilnější
          medián rychlosti a hlavně to umožní časově posunutý ensemble
@@ -5035,7 +5076,19 @@ function readTilePatch(url, px, py, r){
   var key = url + "|" + px + "|" + py + "|" + r;
   if(PATCH_CACHE.has(key)) return PATCH_CACHE.get(key);
   try{ meterAdd(url, 10000, true); }catch(e){}  /* ~10 kB PNG načteného snímku, odhad */
+  /* KOLO 13: přímá dlaždice neodpověděla (síť mobilního operára,
+     viz komentář u rvMapsJson)? Zkusí se stejná dlaždice přes Worker
+     (/rv/img). Worker dlaždici nečekaně nezmění — čte se tentýž
+     schéma-0 PNG; fallback se nepouští pro cizí hosty ani opakovaně
+     (proxovaná URL rainviewer.com neobsahuje, rvIsTileUrl ji odmítne).
+     Prázdný BP_PROXY = chování beze změny. Worker bez kola 13 vrátí
+     404, což zde skončí stejně null — a řetězec jede dál jako dřív. */
   var p = readTilePatchBase(url, px, py, r).then(function(v){
+    if(v === null && BP_PROXY && rvIsTileUrl(url)){
+      return readTilePatchBase(rvProxyTileUrl(url), px, py, r);
+    }
+    return v;
+  }).then(function(v){
     if(v === null) PATCH_CACHE.delete(key);
     return v;
   }, function(){ PATCH_CACHE.delete(key); return null; });
@@ -5465,7 +5518,11 @@ function loadChmi(lat, lon, myId, attempt){
         chmiNote = "PseudoCAPPI 2 km · 1×1 km · snímek " + chmiState.ageMin + " min"
                  + (steps.length ? " · COTREC " + steps.length + " kroků" : " · bez extrapolace")
                  + (chmiScale ? "" : " · legenda nepoužitelná, jen echo ano/ne");
-        renderChmiRow();
+        /* KOLO 13: řádek ČHMÚ v tabulce modelů je pryč (Dave 19. 11.:
+           „nechápu, proč má ČHMÚ radar kolonku v seznamu modelů").
+           Národní radar dál hlasuje v recomputeWhen, v kompasu
+           (chmiSolo) a mezi svědky verdiktu — jen už není sloupcem
+           mezi předpověďmi. */
         recomputeWhen();
       }
     }
@@ -5483,33 +5540,6 @@ function chmiFirstEchoMin(){
 function chmiSaysDry(){
   if(!chmiState || chmiState === "off" || chmiState === "error") return false;
   return !chmiState.nowWet && !chmiState.first && chmiState.steps.length >= 4;
-}
-
-/* Řádek v tabulce modelů. Není to model a nesmí tak vypadat: nemá čísla
-   v mm/h a nezasahuje do shody ani do verdiktu. Ukazuje jen, kde má
-   národní radar echo v nejbližší hodině. */
-function renderChmiRow(){
-  var body = $("body");
-  if(!body || !modelState || !chmiState || chmiState === "off" || chmiState === "error") return;
-  var old = document.getElementById("chmiRow");
-  if(old) old.remove();
-  var tr = document.createElement("tr");
-  tr.id = "chmiRow";
-  tr.className = "national";
-  var cells = modelState.times.map(function(t, i){
-    var mins = Math.round((t.getTime() - Date.now())/60000);
-    if(i > 1 || mins > 70) return "<td class=\"cell\">·</td>";     /* radar dál nevidí */
-    var wet = chmiState.nowWet && mins <= 5;
-    if(!wet && chmiState.first) wet = Math.abs(chmiState.first.dt - mins) <= 30;
-    if(!wet) return "<td class=\"cell\">0</td>";
-    var a = 0.25 + (chmiState.nowOrd || 0.5)*0.6;
-    return "<td class=\"cell wet\" style=\"background:rgba(74,190,120,"+a.toFixed(2)+")\">•</td>";
-  }).join("");
-  tr.innerHTML = "<td class=\"name\"><div class=\"n\">🇨🇿&nbsp;"+(NARROW.matches?"ČHMÚ":"ČHMÚ radar")+"<span class=\"badge\">NÁRODNÍ</span></div>"
-    + "<div class=\"a\">pozorování + COTREC, 1 km · jen 1. hodina</div></td>" + cells
-    + "<td class=\"sumcell\" style=\"color:var(--muted)\">—</td>";
-  body.insertBefore(tr, body.firstChild);
-  fitNames();   /* i řádek ČHMÚ musí projít pojistkou proti useknutí */
 }
 
 /* ==================== REGIONÁLNÍ NOWCASTY ====================
