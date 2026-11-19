@@ -1140,3 +1140,71 @@ test("kolo 9: rotační hodina (14:30) chová se jako dřív — ens po rv, cool
     assert.deepStrictEqual(rec.p[n].err, ["ens"], "jediná chyba je ens u " + n);
   });
 });
+
+/* ===== Kolo 13: RainViewer passthrough (pojistka mobilních sítí) =====
+   Appka po selhání přímé cesty zkouší /rv/maps a /rv/img — Worker musí
+   vracet tvarově identickou odpověď s CORS *, jinak canvas dekódování
+   v appce spadne. Whitelist cesty musí odpovídat tvaru z appky
+   (rvTile: /v2/radar/<hash>/256/<z>/<x>/<y>/<schéma>/<smooth>_<sníh>.png). */
+test("/rv/maps: passthrough maps.json s CORS, cache HIT", async () => {
+  const maps = { version: "2.0", host: "https://tilecache.rainviewer.com", radar: { past: [{ time: 1795082400, path: "/v2/radar/2c66a8ce20eb" }] } };
+  const up = mockFetch(() => okJson(maps));
+  const cache = mockCache();
+  const w = await workerWith({ fetchImpl: up.impl, cache });
+  const r1 = await w.fetch(new Request("https://w.example/rv/maps"));
+  assert.strictEqual(r1.status, 200);
+  assert.strictEqual(r1.headers.get("access-control-allow-origin"), "*");
+  assert.strictEqual(r1.headers.get("content-type"), "application/json");
+  assert.strictEqual(r1.headers.get("x-bp-cache"), "MISS");
+  const j1 = await r1.json();
+  assert.strictEqual(j1.radar.past.length, 1);
+  assert.strictEqual(up.state.urls[0], "https://api.rainviewer.com/public/weather-maps.json",
+    "upstream musí být api.rainviewer.com");
+  /* druhý dotaz: cache HIT, upstream se nevolá */
+  const r2 = await w.fetch(new Request("https://w.example/rv/maps"));
+  assert.strictEqual(r2.headers.get("x-bp-cache"), "HIT");
+  assert.strictEqual(up.state.calls, 1);
+  assert.strictEqual((await r2.json()).radar.past.length, 1);
+});
+test("/rv/img: passthrough dlaždice s CORS, whitelist, cache HIT", async () => {
+  const up = mockFetch(() => new Response(new Uint8Array(PNG_STUB), {
+    status: 200, headers: { "content-type": "image/png" }
+  }));
+  const cache = mockCache();
+  const w = await workerWith({ fetchImpl: up.impl, cache });
+  const good = "/v2/radar/2c66a8ce20eb/256/7/69/43/0/0_1.png";   /* tvar z appky (rvTile) */
+  const r1 = await w.fetch(new Request("https://w.example/rv/img?u=" + encodeURIComponent(good)));
+  assert.strictEqual(r1.status, 200);
+  assert.strictEqual(r1.headers.get("access-control-allow-origin"), "*");
+  assert.strictEqual(r1.headers.get("content-type"), "image/png");
+  assert.strictEqual(r1.headers.get("x-bp-cache"), "MISS");
+  assert.deepEqual(Array.from(new Uint8Array(await r1.arrayBuffer())), PNG_STUB);
+  assert.strictEqual(up.state.urls[0], "https://tilecache.rainviewer.com" + good,
+    "upstream musí být tilecache.rainviewer.com, nic jiného");
+  /* druhý dotaz: cache HIT, upstream se nevolá */
+  const r2 = await w.fetch(new Request("https://w.example/rv/img?u=" + encodeURIComponent(good)));
+  assert.strictEqual(r2.headers.get("x-bp-cache"), "HIT");
+  assert.strictEqual(up.state.calls, 1);
+});
+test("/rv/img: mimo whitelist → 400 a upstream se nevolá", async () => {
+  const up = mockFetch(() => { throw new Error("nesmi se volat"); });
+  const w = await workerWith({ fetchImpl: up.impl });
+  for (const bad of [
+    "/v2/radar/2c66a8ce20eb/../../secret.png",       /* cesta ven */
+    "/v2/coverage/0/256/5/17/9/2/1_1.png",           /* jiný produkt (maska pokrytí) */
+    "https://evil.example/x.png",                    /* absolutní URL cizího hosta */
+    "/v2/radar/2c66a8ce20eb/512/7/69/43/0/0_1.png",  /* jiná velikost než 256 */
+    ""                                               /* prázdná */
+  ]) {
+    const r = await w.fetch(new Request("https://w.example/rv/img?u=" + encodeURIComponent(bad)));
+    assert.strictEqual(r.status, 400, "cesta musí být odmítnuta: " + bad);
+  }
+  assert.strictEqual(up.state.calls, 0);
+});
+test("/rv/img: 404 upstreamu se šíří jako 404 (appka pak ví, že snímek chybí)", async () => {
+  const up = mockFetch(() => new Response("gone", { status: 404 }));
+  const w = await workerWith({ fetchImpl: up.impl });
+  const r = await w.fetch(new Request("https://w.example/rv/img?u=" +
+    encodeURIComponent("/v2/radar/2c66a8ce20eb/256/7/69/43/0/0_1.png")));
+  assert.strictEqual(r.status, 404);
+});
