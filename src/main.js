@@ -2029,7 +2029,8 @@ window.addEventListener("pageshow", function(e){
       závislý zdroj — jen se použije i opačným směrem.                  */
 
 var geoRefineT = null;
-var geoAskedByUser = false;   /* kolo 16: vzdělávací dialog jen na výslovné klepnutí na špendlík */
+var geoWatchId = null;      /* kolo 17: pozorovatel pro pádovanou GPS (watchPosition) */
+var geoHintT = null;        /* kolo 17: hláška „trvá to déle“ po 10 s */
 
 /* Složí název z toho, co geokodér vrátil. Městská část má přednost
    před obcí: kdo je v Řečkovicích, chce vidět Řečkovice. */
@@ -2082,11 +2083,21 @@ function pojmenujMisto(lat, lon){
   });
 }
 
+function geoWatchStop(){
+  if(geoWatchId != null && navigator.geolocation && navigator.geolocation.clearWatch){
+    try{ navigator.geolocation.clearWatch(geoWatchId); }catch(e){}
+  }
+  geoWatchId = null;
+}
 function acquirePosition(silent){
   if(!navigator.geolocation){ if(!silent) noGeo(); return; }
   clearTimeout(geoRefineT);
+  clearTimeout(geoHintT);
+  geoWatchStop();            /* maximálně jeden pozorovatel na celou aplikaci */
 
   function pouzij(lat, lon, presnostM, jePresna){
+    geoWatchStop();          /* fix dorazil — pozorovatel už nepotřebujeme */
+    clearTimeout(geoHintT);
     curFromGeo = true;
     /* KOLO 16 (Dave 19. 11. 14:04: „nenačítají se věci“): hrubá fáze GPS
        dřív přenačetla CELÉ appku při každém otevření, i když se poloha
@@ -2110,13 +2121,51 @@ function acquirePosition(silent){
     if(!jePresna) upresni(lat, lon, silent);
   }
 
+  /* KOLO 17 (Dave 19. 11.: „Nejede zjišťování polohy. Oprav
+     načítání polohy.“): měřený běh na mobilu ukázal, že jednorázový
+     getCurrentPosition na studeném startu (slabý signál, indoor,
+     úsporný režim) prostě neodpoví do svého časovače — a aplikace to
+     vzdala, přestože telefon by fix doručil o chvíli později.
+     Léky: (1) hrubá fáze
+     dostala 15 s místo 12 s; (2) když
+     vyprší (code 3) nebo je poloha nedostupná (code 2), NEVZDÁ SE TO,
+     ale otevře watchPosition s přesným GPS a čeká až 75 s — první
+     platný fix okamžitě použije; (3) po 10 s čekání uživatel vidí
+     v cloně, že se něco děje a že si může klepnout a psát obec.
+     Zamítnutí (code 1) se dál řeší vzdělávacím dialogem (iOS po
+     zamítnutí svůj dotaz už nikdy nezopakuje — dialog je jediná
+     cesta, jak uživatele dovést k povolení). */
+  if(!silent && !lastJ){
+    geoHintT = setTimeout(function(){
+      if(lastJ) return;      /* data mezitím dojela z jiné lokality — nic neřešit */
+      status("Zjišťuji tvou polohu…<br><span style=\"font-size:11px\">Trvá to déle, než čeká poloha z Wi-Fi a vysílačů — přecházím na pomalejší přesné GPS (může to trvat až minutu).</span><br><span style=\"font-size:11px\">Nechceš-li čekat, klepnutím tuto hlášku zavřeš a napiš obec ručně.</span>");
+    }, 10000);
+  }
   /* Fáze 1 — rychlá poloha, ať se něco ukáže hned. */
   navigator.geolocation.getCurrentPosition(function(p){
     pouzij(p.coords.latitude, p.coords.longitude, p.coords.accuracy,
            p.coords.accuracy != null && p.coords.accuracy <= 150);
   }, function(err){
-    if(!silent) noGeo(err);
-  }, {timeout:12000, maximumAge:60000, enableHighAccuracy:false});
+    if(err && (err.code === 2 || err.code === 3)
+       && navigator.geolocation.watchPosition){
+      /* Fallback: pozorovatel drží GPS kanál otevřený dlouho po tom,
+         co jednorázový dotaz podlehl časovači; dorazí-li první fix,
+         použije se hned a pozorovatel se zavře (geoWatchStop v pouzij). */
+      if(!silent && !lastJ){
+        clearTimeout(geoHintT);
+        status("Zjišťuji tvou polohu přesným GPS…<br><span style=\"font-size:11px\">Rychlá metoda (Wi-Fi/vysílače) neodpověděla — čekám na GPS, to může trvat i minutu.</span><br><span style=\"font-size:11px\">Nechceš-li čekat, klepnutím zavřeš a napiš obec ručně.</span>");
+      }
+      geoWatchId = navigator.geolocation.watchPosition(function(p){
+        pouzij(p.coords.latitude, p.coords.longitude, p.coords.accuracy,
+               p.coords.accuracy != null && p.coords.accuracy <= 150);
+      }, function(err2){
+        geoWatchStop();
+        if(!silent) noGeo(err2);
+      }, {timeout:75000, maximumAge:0, enableHighAccuracy:true});
+    } else {
+      if(!silent) noGeo(err);
+    }
+  }, {timeout:15000, maximumAge:60000, enableHighAccuracy:false});
 }
 
 /* Fáze 2 — přesná poloha na pozadí. Přenačte se jen tehdy, když se
@@ -2140,14 +2189,17 @@ function upresni(hrubaLat, hrubaLon, silent){
 }
 function noGeo(err){
   status(null);
-  /* KOLO 16 (Dave 19. 11. 14:05: „nenačítají se věci“): při startu už
-     geolokace NEBLOKUJE. Dřív visela přes celou obrazovku clona
-     „Zjišťuji tvou polohu…“ i desítky sekund — obsah se pod ní mezitím
-     dávno načetl, jen nebyl vidět. Vzdělávací dialog s tlačítkem
-     „Zkusit znovu“ se ukáže jen tehdy, když si o polihu uživatel
-     výslovně řekl špendlíkem; jiné selhání končí nenápadným
-     placeholderem a appka zůstává plně použitelná. */
-  if(err && err.code === 1 && geoAskedByUser){
+  clearTimeout(geoHintT);
+  /* KOLO 17 (Dave 19. 11.: „Nejede zjišťování polohy. Tu clonu při
+     startu, když nejsou načteny data, tam nech. Oprav načítání
+     polohy.“): zamítnutí (code 1) vždy ukáže vzdělávací dialog —
+     iOS ani Android po zamítnutí svůj dotaz už nikdy nezopakují a
+     uživatel bez něj nikdy nezjistí, PROČ poloha nejede; to byla
+     nejpravděpodobnější příčina „nefunguje“. Jiné selhání: nejsou-li
+     načtená data (žádná lokalita), oznamuje se to v cloně, kterou
+     Dave na startu výslovně chce zpátky; s načtenou lokalitou stačí
+     nenápadná zpráva u vyhledávání a panely zůstávají živé. */
+  if(err && err.code === 1){
     /* přístup zamítnut na úrovni systému/prohlížeče */
     var s = $("status");
     s.firstElementChild.innerHTML =
@@ -2157,19 +2209,19 @@ function noGeo(err){
       '<div style="margin-top:10px;font-size:11px">…nebo zavři toto okno a napiš obec ručně.</div>';
     s.classList.add("show");
     var btn = document.getElementById("retryGeo");
-    if(btn) btn.addEventListener("click", function(){ status(null); geoAskedByUser = true; acquirePosition(false); });
+    if(btn) btn.addEventListener("click", function(){ status("Žádám o polohu…"); acquirePosition(false); });
   } else {
     $("locInput").placeholder = "Napiš obec nebo adresu (kdekoliv na světě)";
-    /* kolo 16: bez známé lokality se uživatel dozví, proč je tabule
-       prázdná — nenápadně v panelu, ne modální clonou */
     if(!cur){
       if($("soloPillTxt")) $("soloPillTxt").textContent = "Bez polohy";
       if($("soloSub")) $("soloSub").textContent =
-        "Polohu se nepodařilo zjistit — napiš obec do vyhledávání nahoře nebo klepni na špendlík.";
+        "Polohu se nepodařilo zjistit — napiš obec do vyhledávání nahoře.";
       $("locInput").focus();
+      status("Polohu se nepodařilo zjistit — slabý signál nebo vypnuté polohové služby.<br>Klepnutím zavřeš tuto hlášku a napiš obec ručně.");
+    } else {
+      showMsg("Polohu se nepodařilo zjistit — zůstávám na " + cur.name + ".");
     }
   }
-  geoAskedByUser = false;   /* příští tichý start už dialog nevyvolá */
 }
 
 /* ================= VYHLEDÁVÁNÍ OBCÍ ================= */
@@ -2196,11 +2248,9 @@ $("locBtn").addEventListener("click", function(e){ e.preventDefault(); confirmLo
 $("pinBtn").addEventListener("click", function(e){
   e.preventDefault(); e.stopPropagation();
   manualPickAt = 0;
-  geoAskedByUser = true;             /* kolo 16: vzdělání jen na výslovnou žádost */
-  /* KOLO 16: žádná celoplošná clona „Žádám o polohu…“ — ta dřív
-     zablokovala i jinak plně načtenou appku (na pomalém GPS fixu
-     třeba na 12 s). Nápověda se objeví nenápadně u vyhledávání
-     a panely zůstávají živé. */
+  /* KOLO 16/17: špendlík neblokuje celoplošnou clonou (appka zůstává
+     živá), nápověda se ukáže u vyhledávání; selže-li GPS i po
+     watchPosition (kolo 17), uživatel dostane jasné vysvětlení. */
   showMsg("Zjišťuji tvou polohu…");
   acquirePosition(false);
 });
@@ -2332,6 +2382,8 @@ function pick(i){
   if(!p) return;
   curFromGeo = false;
   manualPickAt = Date.now();
+  geoWatchStop();            /* kolo 17: ruční volba ruší čekající GPS pozorovatele */
+  clearTimeout(geoHintT);
   closeSugg();
   input.blur();
   load({lat:p.lat, lon:p.lon, name:[p.name, p.cc].filter(Boolean).join(", "), cc:p.cc});
