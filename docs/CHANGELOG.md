@@ -472,3 +472,39 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
     test 1, protože assertion četl verdikt dřív, než pozorovací
     řetězce dozněly. Obě příčiny jsou opraveny v aplikaci, tvrzení
     testů zůstala beze změny.
+
+## Kolo 16 — svižný start: žádná GPS clona, žádné zbytečné přenačtení (19. 11.)
+
+  Dave (19. 11. 14:05, mobil, IMG_5092/IMG_5093): „Nenačítají se věci
+  a seka se to. Chci svižnou appku." Měřený rozbor snímků: v 14:04
+  aplikace zobrazila plný stav, v 14:05 však samotnou clonu
+  „Zjišťuji tvou polohu…". Tři příčiny:
+  (1) Šablona spouštěla fixní celoplošnou clonu (z-index 50,
+  backdrop-blur) na každém otevření — obsah se pod ní mezitím
+  načetl, ale nebyl vidět, dokud GPS neodpověděla (timeout 12 s
+  na studeném fixu i déle). Rychlý start z kola 15 byl tedy
+  neviditelný.
+  (2) Hrubá fáze GPS přenačítala CELÉ appku při každém otevření
+  i návratu do popředí, i když se poloha vůbec nezměnila — panely
+  problikly, všechno se stahovalo znovu (sekvence IMG_5092 →
+  IMG_5093 přesně ukazuje přenačtení za clonou).
+  (3) recomputeWhen volá fitPanels na každé dotečení dat; při
+  startu jich přijde i deset za pár sekund a každé měření layoutu
+  stojí na mobilu jednotky až desítky ms — vlny cukání.
+
+  Léky:
+  - Template: #status začíná skrytý. Při startu žádná blokující
+    clona; vzdělávací dialog (iPhone povolení) jen po výslovném
+    klepnutí na špendlík, jinak nenápadný placeholder a poznámka
+    v panelu. Špendlík ukazuje nápovědu u vyhledávání (showMsg),
+    panely zůstávají živé.
+  - acquirePosition: fix do 1 km od načtené lokality nespouští
+    přenačtení; přesná fáze (upresni) dál hlídá skutečný pohyb.
+  - load() zavírá nápovědu špendlíku (closeSugg).
+  - fitPanels: měření layoutu maximálně jednou za 150 ms
+    (FIT_COALESCE_MS) se závěrečným dojezdem — burst dotečených
+    dat už cukání způsobit nemůže.
+  - Testy: 135/135 (tři nové: skrytý status v template, 1 km práh
+    GPS bez přenačtení, slévání fitPanels s dojezdem); browser
+    fixture čeká na vyhledávání místo zavírání GPS dialogu.
+    Build index.html 494 504 znaků.

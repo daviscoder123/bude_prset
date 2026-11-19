@@ -102,6 +102,7 @@ test('new load clears complete state before starting any data source',()=>{
     lastJ:{old:true},lastModels:[],lastForecastId:1,
     modelState:{old:true},verdictState:{old:true},orogState:{factor:1.5},
     threshFor:()=>0.2,status:()=>{},pickModels:()=>[],MODELS:[],HOURS_END:24,
+    closeSugg:()=>{},   /* kolo 16: load zavírá nápovědu u špendlíku */
     cachedJson:never,loadEnsemble:()=>{},
     /* Kolo 8ac: load() sestavuje URL přes omUrl(); v testu odpovídá
        stub produkčnímu výchozímu stavu (BP_PROXY="" → přímé URL). */
@@ -1304,4 +1305,59 @@ test('kolo 15: strukturální — panel radaru měří nahlas, start z poslední
     'kompozit se registruje a po dokončení odregistruje');
   assert.ok(script.includes('gtStart("chmi")') && script.includes('gtStart("stanice")'),
     'ČHMÚ i stanice se hlásí do registru měření');
+});
+
+test('kolo 16: start neblokuje GPS clonou, template status je skrytý',()=>{
+  /* Dave 19. 11. 14:05 (mobil): obrazovka samotné „Zjišťuji tvou polohu…“
+     desítky sekund, obsah pod ní se dávno načetl. Clona při startu nesmí
+     existovat; status se ukazuje jen výslovně (špendlík, vzdělávací
+     dialog, chyba načtení dat). */
+  assert.match(html,/<div id="status"><div><span class="pulse">●<\/span><\/div><\/div>/,
+    'status div v template začíná skrytý (bez class="show")');
+  assert.ok(!/id="status" class="show"/.test(html),
+    'žádná přednačtená blokující clona');
+  assert.ok(fn('noGeo').includes('geoAskedByUser'),
+    'vzdělávací dialog jen po výslovné žádosti o polohu (špendlík)');
+  assert.ok(script.includes('geoAskedByUser = true')
+        && script.includes('showMsg("Zjišťuji tvou polohu…")'),
+    'špendlík nenastavuje celoplošnou clonu, jen nápovědu u vyhledávání');
+});
+
+test('kolo 16: GPS přenačítá jen při skutečné změně polohy (do 1 km ne)',()=>{
+  /* Dave 19. 11. 14:04: „nenačítají se věci“ — hrubá fáze GPS přenačetla
+     celou appku při každém otevření, i když se poloha vůbec nezměnila.
+     Panely pak problikly a všechno se stahovalo znovu (IMG_5092 → IMG_5093). */
+  const ap=fn('acquirePosition');
+  assert.ok(ap.includes('distKm(cur.lat, cur.lon, lat, lon) < 1'),
+    'fix do 1 km od načtené lokality nespouští přenačtení');
+  assert.ok(ap.includes('upresni(lat, lon, silent)'),
+    'přesná fáze dál běží na pozadí');
+  assert.ok(fn('load').includes('closeSugg()'),
+    'nápověda u špendlíku se zavře, když lokalita dojede (load zavírá sugg)');
+});
+
+test('kolo 16: fitPanels slévá měření layoutu do jednoho za 150 ms',()=>{
+  /* Dave 19. 11. 14:05: „seka se to“ — každé dotečení dat volalo
+     recomputeWhen → fitPanels přes rAF; při startu jich přijde i deset
+     za pár sekund a každé z nich je na mobilu jednotky až desítky ms
+     přepočtu layoutu. */
+  let fits=0, trails=[];
+  const c=context(['fitPanels'],{
+    fitPanel:()=>{fits++;},
+    fitGuard:()=>{},
+    document:{querySelector:()=>null},
+    requestAnimationFrame:(cb)=>{cb();},      /* synchronní stub */
+    setTimeout:(cb,ms)=>{trails.push({cb,ms});return 0;},
+    FIT_COALESCE_MS:150, fitLastAt:0, fitTrailScheduled:false
+  });
+  c.fitPanels();
+  assert.equal(fits,2,'první měření proběhne hned (oba panely; nic nečeká)');
+  c.fitPanels();   /* druhá žádost okamžitě = tentýž burst */
+  c.fitPanels();
+  assert.equal(fits,2,'burst se změří jen jednou, ne třikrát');
+  assert.equal(trails.length,1,'naplánuje se právě jeden závěrečný dojezd');
+  assert.equal(trails[0].ms,150,'dojezd nacasovaný na FIT_COALESCE_MS');
+  const fp=fn('fitPanels');
+  assert.ok(fp.includes('fitTrailScheduled'),'větrník na dojezd');
+  assert.ok(script.includes('var FIT_COALESCE_MS'),'konstanta je pojmenovaná');
 });

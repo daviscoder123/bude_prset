@@ -1836,7 +1836,25 @@ function fitPanel(el){
     el.style.fontSize = (scale*100).toFixed(0)+"%";
   }
 }
+var FIT_COALESCE_MS = 150;   /* kolo 16: minimalist, měření layoutu max tak často */
+var fitLastAt = 0, fitTrailScheduled = false;
 function fitPanels(){
+  /* KOLO 16 (Dave 19. 11. 14:05: „seka se to“): každé dotečení dat
+     volá recomputeWhen a ten fitPanels přes rAF. Při startu jich za
+     pár sekund přijde i deset (radar, ČHMÚ, stanice, ensemble, blend,
+     družice…) a každé měření layoutu je na mobilu jednotky až
+     desítky ms vázaných na přepočet — appka cukala ve vlnách.
+     Pojistka: skutečné měření maximálně jednou za FIT_COALESCE_MS;
+     když přijde žádost dřív, naplánuje se závěrečný dojezd, aby
+     poslední stav layoutu vždy sedl. */
+  var t = Date.now();
+  if(fitTrailScheduled) return;
+  if(t - fitLastAt < FIT_COALESCE_MS){
+    fitTrailScheduled = true;
+    setTimeout(function(){ fitTrailScheduled = false; fitPanels(); }, FIT_COALESCE_MS);
+    return;
+  }
+  fitLastAt = t;
   requestAnimationFrame(function(){
     var v = document.querySelector(".verdict"), w = document.querySelector(".when");
     fitPanel(v); fitPanel(w);
@@ -2011,6 +2029,7 @@ window.addEventListener("pageshow", function(e){
       závislý zdroj — jen se použije i opačným směrem.                  */
 
 var geoRefineT = null;
+var geoAskedByUser = false;   /* kolo 16: vzdělávací dialog jen na výslovné klepnutí na špendlík */
 
 /* Složí název z toho, co geokodér vrátil. Městská část má přednost
    před obcí: kdo je v Řečkovicích, chce vidět Řečkovice. */
@@ -2069,6 +2088,18 @@ function acquirePosition(silent){
 
   function pouzij(lat, lon, presnostM, jePresna){
     curFromGeo = true;
+    /* KOLO 16 (Dave 19. 11. 14:04: „nenačítají se věci“): hrubá fáze GPS
+       dřív přenačetla CELÉ appku při každém otevření, i když se poloha
+       nehnula ani o metr — panely párkrát problikly, všechno se znovu
+       stahovalo a start vypadal jako nekonečné Načítám. Když appka už
+       lokalitu má a nový fix je do 1 km od ní, přenačítat nemusí nic;
+       přesná fáze (upresni) sama rozhodne, kdy se uživatel doopravdy
+       pohnul (tam je tentýž 1km práh na přesnějších souřadnicích). */
+    var manualFresh = manualPickAt && (Date.now() - manualPickAt < 5*60*1000);
+    if(cur && !manualFresh && distKm(cur.lat, cur.lon, lat, lon) < 1){
+      if(!jePresna) upresni(lat, lon, silent);
+      return;
+    }
     pojmenujMisto(lat, lon).then(function(o){
       if(silent && !curFromGeo) return;      /* uživatel mezitím zvolil obec ručně */
       var misto = {lat:lat, lon:lon, cc:(o && o.cc) || "",
@@ -2109,7 +2140,14 @@ function upresni(hrubaLat, hrubaLon, silent){
 }
 function noGeo(err){
   status(null);
-  if(err && err.code === 1){
+  /* KOLO 16 (Dave 19. 11. 14:05: „nenačítají se věci“): při startu už
+     geolokace NEBLOKUJE. Dřív visela přes celou obrazovku clona
+     „Zjišťuji tvou polohu…“ i desítky sekund — obsah se pod ní mezitím
+     dávno načetl, jen nebyl vidět. Vzdělávací dialog s tlačítkem
+     „Zkusit znovu“ se ukáže jen tehdy, když si o polihu uživatel
+     výslovně řekl špendlíkem; jiné selhání končí nenápadným
+     placeholderem a appka zůstává plně použitelná. */
+  if(err && err.code === 1 && geoAskedByUser){
     /* přístup zamítnut na úrovni systému/prohlížeče */
     var s = $("status");
     s.firstElementChild.innerHTML =
@@ -2119,11 +2157,19 @@ function noGeo(err){
       '<div style="margin-top:10px;font-size:11px">…nebo zavři toto okno a napiš obec ručně.</div>';
     s.classList.add("show");
     var btn = document.getElementById("retryGeo");
-    if(btn) btn.addEventListener("click", function(){ status("Žádám o polohu…"); acquirePosition(false); });
+    if(btn) btn.addEventListener("click", function(){ status(null); geoAskedByUser = true; acquirePosition(false); });
   } else {
     $("locInput").placeholder = "Napiš obec nebo adresu (kdekoliv na světě)";
-    $("locInput").focus();
+    /* kolo 16: bez známé lokality se uživatel dozví, proč je tabule
+       prázdná — nenápadně v panelu, ne modální clonou */
+    if(!cur){
+      if($("soloPillTxt")) $("soloPillTxt").textContent = "Bez polohy";
+      if($("soloSub")) $("soloSub").textContent =
+        "Polohu se nepodařilo zjistit — napiš obec do vyhledávání nahoře nebo klepni na špendlík.";
+      $("locInput").focus();
+    }
   }
+  geoAskedByUser = false;   /* příští tichý start už dialog nevyvolá */
 }
 
 /* ================= VYHLEDÁVÁNÍ OBCÍ ================= */
@@ -2150,7 +2196,12 @@ $("locBtn").addEventListener("click", function(e){ e.preventDefault(); confirmLo
 $("pinBtn").addEventListener("click", function(e){
   e.preventDefault(); e.stopPropagation();
   manualPickAt = 0;
-  status("Žádám o polohu…");
+  geoAskedByUser = true;             /* kolo 16: vzdělání jen na výslovnou žádost */
+  /* KOLO 16: žádná celoplošná clona „Žádám o polohu…“ — ta dřív
+     zablokovala i jinak plně načtenou appku (na pomalém GPS fixu
+     třeba na 12 s). Nápověda se objeví nenápadně u vyhledávání
+     a panely zůstávají živé. */
+  showMsg("Zjišťuji tvou polohu…");
   acquirePosition(false);
 });
 /* Klik na pozadí stavové hlášky ji zavře. Jedna registrace na celou appku,
@@ -2388,6 +2439,7 @@ function showForecastLoading(){
 function load(place, silent){
   var myId = ++reqId;       /* od této chvíle jsou všechny předchozí dotazy neplatné */
   resetForecastState();
+  closeSugg();              /* kolo 16: hint „Zjišťuji tvou polohu…“ u špendlíku se při načtení místa zavře */
   cur = place;
   /* KOLO 15: poslední lokalita se uloží do localStorage (nikam se
      neposílá), aby příští start nezůstal slepý: geolokace na mobilu
