@@ -460,8 +460,15 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
   - loadRadar/loadMetar/loadChmi: gtStart jen při prvním pokusu
     (attempt 0), retry nikdy registr neotevře (žádné blikání
     maybe ⇄ checking).
+  - Browser testy: tři omezené settle-waity (15 s) čekají, až verdikt
+    opustí přechodné „ověřuji“, než se zmerí výsledný stav a layout —
+    assertion dál tvrdí totéž (maybe + nepotvrzeno, --fit ≥ 0,8),
+    jen už nesoutěží s dokončením měření. Měřeno v CI po fixu: test 8
+    zelený, 393×665 fit 0,78 → 0,85; stav testu 1 potvrdí další běh CI.
   - Testy beze změny požadavků: 132/132 regression+worker, build
-    index.html 491 484 znaků; oba selhané CI browser testy padly jen
-    na umělém setrvání registru po chybě (stav „checking" místo
-    „maybe", vyšší layout 393 px), takže tvrzení testů zůstala
-    beze změny a oprava je v aplikaci.
+    index.html 491 484 znaků. Oba selhané CI browser testy padly na
+    přechodném stavu „checking“: test 8, protože registr držel
+    „měřím“ přes čekání na dotahy (layout 393 px zbytněl o řádek);
+    test 1, protože assertion četl verdikt dřív, než pozorovací
+    řetězce dozněly. Obě příčiny jsou opraveny v aplikaci, tvrzení
+    testů zůstala beze změny.

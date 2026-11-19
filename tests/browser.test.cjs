@@ -104,6 +104,16 @@ test('desktop search, model-only rain, mobile resize and geolocation',async()=>{
     await search(p,'Praha');
     await ready(p,'Praha');
     await p.waitForFunction(()=>window.modelCurrent?.mmh===0.4);
+    /* Kolo 15/15b: while observation loaders are measuring (register gtPending),
+       the verdict legitimately sits in the transient mode 'checking' — even here,
+       where every observation request fails hard, the chains first walk their
+       sequential candidate URLs and only then settle (kolo 15b: a KNOWN error
+       settles immediately; in-flight probing still takes a moment). The old
+       assertion raced that probing. Waiting for the settle does not weaken the
+       test — it asserts the FINAL verdict for model-only rain, which must be
+       'maybe' + 'nepotvrzeno', not a snapshot taken mid-measurement. */
+    await p.waitForFunction(()=>window.whenState && window.whenState.mode!=='checking',
+      null,{timeout:15000});
     assert.ok(control.modelRequests.every(u=>new URL(u).searchParams.get('timeformat')==='unixtime'));
     const before=await p.evaluate(()=>({
       ts:modelState.times[0].getTime(),api:lastJ.hourly.time[0],
@@ -229,6 +239,11 @@ test('mobile compact layout keeps fonts uninflated and fits one screen without s
   const {ctx,p,errors}=await fixture('Europe/Prague',375);
   try{
     await search(p,'Praha');await ready(p,'Praha');
+    /* kolo 15/15b: settle-wait — kompaktní layout se měří v ustáleném
+       verdiktu, ne v přechodném „ověřuji“ (o řádek vyšší panel by mohl
+       zbytečně svištěl fitGuard). Stejný omezený wait jako v prvním testu. */
+    await p.waitForFunction(()=>window.whenState && window.whenState.mode!=='checking',
+      null,{timeout:15000});
     /* fitGuard nastavuje --fit az v rAF a dohaneci se po 300/900 ms —
        az pak je layout ustaly (kolo 8h: doplnky ensemble/verdikt pribyly
        po renderu a tabulka sla dolu z panelu). Cekame 1,2 s + snimek. */
@@ -376,6 +391,11 @@ test('mobile type scale is deterministic and fits on real phone sizes (360-430)'
     const {ctx,p,errors}=await fixture('Europe/Prague',w,h);
     try{
       await search(p,'Praha');await ready(p,'Praha');
+      /* kolo 15/15b: fitGuard must measure the SETTLED layout, not the
+         transient 'checking' verdict (one line taller → needless --fit
+         shrink). Same bounded settle-wait as in the first test. */
+      await p.waitForFunction(()=>window.whenState && window.whenState.mode!=='checking',
+        null,{timeout:15000});
       /* viz test vyse: pockat az se fitGuard dohane po doplncich (kolo 8h) */
       await p.evaluate(()=>new Promise(res=>setTimeout(()=>requestAnimationFrame(()=>res()),1200)));
       const s=await p.evaluate(()=>{
