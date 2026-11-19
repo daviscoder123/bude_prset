@@ -1032,8 +1032,15 @@ function hasNative15min(lat, lon){
 function sourceCaveat(){
   var notes = [];
   if(radarCoverage === "none") notes.push("radar sem nedosahuje");
-  /* KOLO 11: výpadek radaru se pojmenuje u zdroje, nezmizí tiše. */
+  /* KOLO 11: výpadek radaru se pojmenuje u zdroje, nezmizí tiše.
+     KOLO 12b: totéž pro oba pozemní svědky — když u „nezávislá
+     potvrzení: 0“ stojí mlčení, uživatel musí VIDĚT, že stanice či
+     ČHMÚ spadly a že se to zkusí samo (retry z kola 12), ne že nic
+     neprší. Případ 19. 11.: pršelo, stanice -RA,ČHMÚ zeleně nad
+     Prahou, panel mlčel o všech třech. */
   if(radarState === "error") notes.push("radar nedostupný (zkusím znovu)");
+  if(obsMetar === "error") notes.push("stanice nedostupná (zkusím znovu)");
+  if(chmiState === "error") notes.push("český radar nedostupný (zkusím znovu)");
   if(!native15) notes.push("15min data dopočítaná z hodinových");
   return notes.length ? " · " + notes.join(", ") : "";
 }
@@ -5194,8 +5201,17 @@ function chmiStamp(ms){
    Bez BP_PROXY zůstávají přímé URL — canvas je pak prohlížeč zablokuje
    a modul se sám vypne, přesně jako dřív. */
 function chmiProxyImg(path){
-  return BP_PROXY ? BP_PROXY + "/chmi/img?u=" + encodeURIComponent(path)
-                  : CHMI_BASE + path;
+  /* KOLO 12b: Worker žádá CELU cestu včetně /meteorology/weather/radar
+     (whitelist CHMI_PATH_RE v worker.mjs). Měřeno 19. 11. 12:22: krátká
+     cesta vrátila 400 („cesta musí být .png pod /meteorology/weather/
+     radar/“), takže ČHMÚ modul v produkci stále končil chmiState
+     „error“ — žádný hlas do „nezávislých potvrzení“, žádný řádek v
+     tabulce, žádný druhý svědek pro kompas. S celou cestí Worker
+     odpovídá 200 (ověřeno: now PNG 25 464 B, legenda 985 B, fct PNG
+     25 650 B). Přímá varianta se nemění: CHMI_BASE už prefix má. */
+  return BP_PROXY
+    ? BP_PROXY + "/chmi/img?u=" + encodeURIComponent("/meteorology/weather/radar" + path)
+    : CHMI_BASE + path;
 }
 function chmiUrlNow(ms){
   return chmiProxyImg("/composite/pseudocappi2km/png/pacz2gmaps3.z_cappi020."

@@ -286,3 +286,27 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
       strop dvou, přerušeno při úspěchu) a ČHMÚ po chybě
       dotahuje samo (scheduleChmiRetry stejným vzorem jako
       radar v kole 11).
+  - **(kolo 12b) ČHMÚ modul v produkci mlčel — a nikdo to neviděl.**
+    Dave (19. 11. 12:21, mobil): i po deployi kola 12 „bez změny":
+    „nezávislá potvrzení: 0", žádný řádek ČHMÚ v tabulce. Měřeno
+    12:22: Worker ČHMÚ proxy je zdravý, ale žádá CELU cestu
+    (CHMI_PATH_RE:^/meteorology/weather/radar/…, viz worker.mjs),
+    zatímco aplikace posílala „/composite/…" bez prefixu — Worker
+    odpověděl 400 („cesta musí být .png pod /meteorology/weather/
+    radar/") na každý snímek i legendu, loadChmi tak vždy skončila
+    chmiState „error". Národní radar tedy do verdiktu, kompasu ani
+    tabulky nepromluvil, právě když jej situace potřebovala (nad
+    Prahou PseudoCAPPI echo zesilalo zeleně → modře u -RA).
+    Léky:
+    - **chmiProxyImg nese celou cestu** včetně /meteorology/weather/
+      radar — ověřeno proti produkčnímu Workeru: now PNG 25 464 B,
+      legenda 985 B, fct PNG 25 650 B, vše 200 s CORS.
+    - **Suché/echo ověřeno na snímku 11:10 UTC**: bez echa =
+      průhledné pixely (a=0), Praha modré echo (0,108,192) —
+      chmiReadPatch a chmiNowWet nad tím dávají smysluplné
+      „teď ECHO".
+    - **Výpadek stanice i ČHMÚ se pojmenuje u zdrojů** („stanice
+      nedostupná (zkusím znovu)", „český radar nedostupný
+      (zkusím znovu)") — mlčící svědek už nepřipadá za „neprší".
+      Kompas tím získává druhého nezávislého svědka pro verdikt
+      „Právě nad tebou prší." i když METAR na mobilu nedo-jede.
