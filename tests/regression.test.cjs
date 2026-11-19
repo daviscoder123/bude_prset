@@ -1307,20 +1307,43 @@ test('kolo 15: strukturální — panel radaru měří nahlas, start z poslední
     'ČHMÚ i stanice se hlásí do registru měření');
 });
 
-test('kolo 16: start neblokuje GPS clonou, template status je skrytý',()=>{
-  /* Dave 19. 11. 14:05 (mobil): obrazovka samotné „Zjišťuji tvou polohu…“
-     desítky sekund, obsah pod ní se dávno načetl. Clona při startu nesmí
-     existovat; status se ukazuje jen výslovně (špendlík, vzdělávací
-     dialog, chyba načtení dat). */
-  assert.match(html,/<div id="status"><div><span class="pulse">●<\/span><\/div><\/div>/,
-    'status div v template začíná skrytý (bez class="show")');
-  assert.ok(!/id="status" class="show"/.test(html),
-    'žádná přednačtená blokující clona');
-  assert.ok(fn('noGeo').includes('geoAskedByUser'),
-    'vzdělávací dialog jen po výslovné žádosti o polohu (špendlík)');
-  assert.ok(script.includes('geoAskedByUser = true')
-        && script.includes('showMsg("Zjišťuji tvou polohu…")'),
-    'špendlík nenastavuje celoplošnou clonu, jen nápovědu u vyhledávání');
+test('kolo 16/17: špendlík neblokuje clonou, startovní clona je zpátky (Dave)',()=>{
+  /* Kolo 16 odstranilo startovní clonu; Dave 19. 11. výslovně žádal:
+     „Tu clonu při startu, když nejsou načtené data, tam nech.“ Kolo 17
+     ji vrací (skryje se prvním renderem dat, viz status(null) v load),
+     špendlík ale dál neblokuje těžkou clonou — jen nápověda u hledání. */
+  assert.match(html,/<div id="status" class="show"><div><span class="pulse">●<\/span><br>Zjišťuji tvou polohu…<\/div><\/div>/,
+    'startovní clona „Zjišťuji tvou polohu…“ je v template zpátky');
+  assert.ok(script.includes('showMsg("Zjišťuji tvou polohu…")'),
+    'špendlík ukazuje nápovědu u vyhledávání, ne celoplošnou clonu');
+  assert.ok(script.includes('geoWatchStop();            /* kolo 17: ruční volba'),
+    'ruční volba obce zastaví čekající GPS pozorovatele');
+});
+
+test('kolo 17: geolokace nenechá studený start GPS zahodit (watchPosition)',()=>{
+  /* Dave 19. 11.: „Nejede zjišťování polohy. Oprav načítání polohy.
+     Nefunguje.“ Jednorázový getCurrentPosition na studeném startu
+     neodpoví do 12 s a stará appka to vzdala, přestože telefon fix
+     doručil by o chvíli později. Léky: delší hrubý timeout, fallback
+     na watchPosition (kódy 2 a 3), jasná komunikace v cloně. */
+  const ap=fn('acquirePosition');
+  assert.ok(ap.includes('timeout:15000'),'hrubá fáze má 15 s (dříve 12 s)');
+  assert.ok(ap.includes('watchPosition'),
+    'po výpadku/vypršení se otevře pozorovatel watchPosition');
+  assert.ok(fn('geoWatchStop').includes('clearWatch'),
+    'pozorovatel lze korektně zavřít (clearWatch)');
+  assert.ok(ap.includes('err.code === 2 || err.code === 3'),
+    'fallback na kódy 2 (nedostupná) i 3 (timeout)');
+  assert.ok(ap.includes('timeout:75000'),'pozorovatel čeká na GPS až 75 s');
+  assert.ok(ap.includes('geoHintT') && ap.includes('10000'),
+    'po 10 s čekání clona řekne, co se děje');
+  assert.ok(fn('geoWatchStop') !== undefined && fn('acquirePosition').includes('geoWatchStop()'),
+    'fix dorazil → pozorovatel se zavře (geoWatchStop v pouzij)');
+  const ng=fn('noGeo');
+  assert.ok(ng.includes('err && err.code === 1'),
+    'zamítnutí vždy ukáže vzdělávací dialog (iOS dotaz nezopakuje)');
+  assert.ok(ng.includes('Polohu se nepodařilo zjistit'),
+    'bez dat se důvod řekne nahlas, v cloně');
 });
 
 test('kolo 16: GPS přenačítá jen při skutečné změně polohy (do 1 km ne)',()=>{
