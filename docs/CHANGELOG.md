@@ -367,3 +367,27 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
       pro rainviewer dlaždice; strukturální pojistky zrušené
       renderChmiRow i zachovalého hlasování ČHMÚ; worker:
       passthrough maps i tiles, whitelist 400, šíření 404).
+  - **(kolo 14) Přepínač kompozit / ČHMÚ v panelu radar.** Dave
+    (19. 11. 13:14): „minimalistické tlačítko vpravo v rohu v panelu
+    radar na přepnutí na radar ČHMÚ a při opětovném kliknutí
+    přepnutí zpět. Pouze při lokaci česká republika. Stejný design.
+    Jiná data. Nic jiného nepředělávej." Vpravo nahoře v panelu
+    radar se pro lokality v pokrytí ČHMÚ a se zdravým modulem ČHMÚ
+    objeví tlačítko ČHMÚ; klik přepne cifernák na data národního
+    radaru, další klik vrací kompozit. Strnulost hlediska: pohled
+    ČHMÚ kreslí tentýž design (kruh, prstence 25/50 km, verdikt,
+    vysvětlení, zdroj) a tentýž cifernák, ale obsahem je aktuální
+    snímek PseudoCAPPI (1 km/px, dnes citlivější na mrholení než
+    kompozit: zelené echo nad Prahou, kde kompozit neviděl nic)
+    plus kroky COTREC; trajektorii a ETA ČHMÚ nezná, takže je
+    nekreslí ani nekecá (src říká „bez trajektorie"). Tlačítko
+    je i v chybové větvi kompozitu: když kompozit na mobilní síti
+    padne, národní radar se přepnutím zobrazí dál. Nová lokalita
+    vždy začíná na kompozitu. Mimo pokrytí ČHMÚ se tlačítko
+    nekreslí vůbec.
+    - Testy: 127/127 (nové kolo 14: tlačítko jen v pokrytí a se
+      zdravými daty včetně Berlína a výpadku ČHMÚ; obsah pohledu
+      ČHMÚ — verdikt hit/miss, elipsa echa, COTREC „první echo
+      za ~30 min", absence trajektorie; strukturálně: pohled ČHMÚ
+      se kreslí před kompozitovými větvemi, reset při změně
+      lokality, delegovaný klik na Neměnném rodiči).
