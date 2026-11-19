@@ -84,9 +84,11 @@ async function fixture(timezone='America/Los_Angeles',width=1280,height=900){
     return route.fulfill({status:503,json:{error:'Unavailable in deterministic test'}});
   });
   await p.goto(base,{waitUntil:'domcontentloaded'});
-  // Geolocation is denied by default: dismiss the existing help dialog.
-  await p.locator('#retryGeo').waitFor({state:'visible'});
-  await p.locator('#status').click({position:{x:4,y:4}});
+  // Kolo 16: start už nespouští blokující GPS clonu (dřív přes celou
+  // obrazovku „Zjišťuji tvou polohu…“). Geolokace v čerstvém kontextu
+  // (default deny) selže tiše, žádný #retryGeo dialog k zavření —
+  // appka rovnou nabízí vyhledávání.
+  await p.locator('#locInput').waitFor({state:'visible'});
   return {ctx,p,errors,control,epoch};
 }
 async function search(p,name,enter=false){
