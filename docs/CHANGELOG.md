@@ -543,3 +543,13 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
     watchPosition fallback, 15 s/75 s, hint po 10 s, vzdělávací
     dialog, geoWatchStop v pouzij i v pick); browser fixture zase
     zavírá startovní dialog. Build index.html 497 525 znaků.
+
+## Kolo 17b — behaviorální důkaz geolokačního fallbacku (19. 11.)
+Dva nové regresní testy vykonávají kód kola 17 v izolovaném kontextu, nikoli
+pouze kontrolují zdrojový text. Test 1 simuluje studený start: telefon vrátí
+code 3 (timeout hrubé fáze), aplikace nesmí zavolat noGeo, musí otevřít
+pozorovatele watchPosition (timeout 75 000 ms, enableHighAccuracy), po
+doručení fixu (accuracy 25 m) musí použít lokalitu (load s názvem z geokodéru)
+a pozorovatele zavřít (clearWatch). Test 2 simuluje zamítnutí přístupu
+(code 1): volání jde do noGeo a watchPosition se neotevírá. Celkem 138/138
+testů, build beze změny (main.js a index.html nedotčeny).

@@ -1384,3 +1384,64 @@ test('kolo 16: fitPanels slévá měření layoutu do jednoho za 150 ms',()=>{
   assert.ok(fp.includes('fitTrailScheduled'),'větrník na dojezd');
   assert.ok(script.includes('var FIT_COALESCE_MS'),'konstanta je pojmenovaná');
 });
+
+test('kolo 17b: behaviorálně — vypršení hrubé fáze otevře watchPosition, fix se použije, pozorovatel zavře',async()=>{
+  /* Dave: „Nejede zjišťování polohy… Oprav načítání polohy.“ — tohle
+     je důkaz vykonaný, ne jen přečtený: simulovaný telefon ihned vrátí
+     code 3 (timeout), aplikace nesmí zavolat noGeo, musí otevřít
+     pozorovatele watchPosition (přesné GPS, 75 s), a až pozorovatel
+     dodá fix (accuracy 25 m), musí se použít jako lokalita a pozorovatel
+     se musí zavřít (clearWatch 77). */
+  let watchOpened=0, watchOk=null, watchOpts=null, watchId=77;
+  const clearedIds=[], loads=[], statusMsgs=[], noGeoCalls=[];
+  const c=context(['acquirePosition','geoWatchStop','distKm','skladejNazev'],{
+    navigator:{geolocation:{
+      getCurrentPosition:(ok,err)=>{ err({code:3}); },   /* studený start: timeout hned */
+      watchPosition:(ok2,err2,opts)=>{ watchOpened++; watchOk=ok2; watchOpts=opts; return watchId; },
+      clearWatch:(id)=>{ clearedIds.push(id); }
+    }},
+    clearTimeout:()=>{},                /* v testu negradí reálné časovače */
+    setTimeout:()=>{ return 5; },
+    geoRefineT:null, geoHintT:null, geoWatchId:null, geoAskedByUser:null,
+    lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
+    status:(m)=>{ statusMsgs.push(m); },
+    pojmenujMisto:()=>Promise.resolve({district:null, city:'Praha', cc:'CZ'}),
+    load:(place,silent)=>{ loads.push({place,silent}); },
+    noGeo:(err)=>{ noGeoCalls.push(err); }
+  });
+  c.acquirePosition(false);
+  assert.equal(watchOpened,1,'po code 3 se otevírá watchPosition, aplikace se nevzdává');
+  assert.equal(noGeoCalls.length,0,'noGeo se pro code 3 nevolá');
+  assert.equal(statusMsgs.length,1,'uživatel dostane zprávu o přechodu na přesné GPS');
+  assert.ok(String(statusMsgs[0]).includes('přesným GPS'),'zpráva říká, jaká metoda běží');
+  assert.ok(watchOpts && watchOpts.timeout===75000 && watchOpts.enableHighAccuracy===true,
+    'pozorovatel čeká na GPS až 75 s s vysokou přesností: '+JSON.stringify(watchOpts));
+  /* telefon o chvíli později doručí první platný fix */
+  watchOk({coords:{latitude:50.05, longitude:14.40, accuracy:25}});
+  await new Promise(r=>setTimeout(r,10));           /* pojmenujMisto().then → load */
+  assert.equal(loads.length,1,'fix se použije jako lokalita');
+  assert.equal(loads[0].place.lat,50.05);
+  assert.equal(loads[0].place.name,'Praha, CZ','název složí geokodér (skladejNazev)');
+  assert.equal(loads[0].silent,false,'fix na startu není silent');
+  assert.ok(clearedIds.includes(watchId),'po doručení fixu se pozorovatel zavře (clearWatch)');
+});
+
+test('kolo 17b: behaviorálně — zamítnutí (code 1) jde do noGeo, watchPosition se neotvírá',()=>{
+  const noGeoErr=[]; let watchOpened=0;
+  const c=context(['acquirePosition','geoWatchStop'],{
+    navigator:{geolocation:{
+      getCurrentPosition:(ok,err)=>{ err({code:1}); },
+      watchPosition:()=>{ watchOpened++; return 1; },
+      clearWatch:()=>{}
+    }},
+    clearTimeout:()=>{}, setTimeout:()=>{ return 5; },
+    geoRefineT:null, geoHintT:null, geoWatchId:null,
+    lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
+    status:()=>{}, pojmenujMisto:()=>Promise.resolve(null), load:()=>{},
+    noGeo:(e)=>{ noGeoErr.push(e); }
+  });
+  c.acquirePosition(false);
+  assert.equal(noGeoErr.length,1,'zamítnutí jde do vzdělávacího dialogu (noGeo)');
+  assert.equal(noGeoErr[0].code,1);
+  assert.equal(watchOpened,0,'přesné GPS nemá smysl, když je přístup zamítnutý');
+});
