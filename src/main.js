@@ -1970,7 +1970,21 @@ function fmtHrHead(d){ return NARROW.matches ? String(+placeParts(d).hour) : fmt
 var curFromGeo = false;
 var manualPickAt = 0;      /* kdy si uživatel naposledy ručně vybral obec */
 init();
-function init(){ acquirePosition(false); }
+function init(){
+  /* KOLO 15: okamžitý start z poslední lokality. Na prvním načtení
+     appka čekala na GPS fix a teprv potom začala stahovat data —
+     na mobilu to znamenalo dlouhé prázdné „Načítám“. Poslední použitá
+     lokalita (do 8 h stará, uložená v load() do localStorage) se
+     vezme hned a geolokace ji na pozadí zpřesní; když selže nebo ji
+     uživatel odepře, appka stejně zobrazí platnou předpověď. */
+  var last = null;
+  try{ last = JSON.parse(localStorage.getItem("bpPlace_v1") || "null"); }catch(e){}
+  if(last && typeof last.lat === "number" && typeof last.lon === "number"
+     && last.name && Date.now() - (last.t || 0) < 8*3600*1000){
+    load({lat:last.lat, lon:last.lon, cc:last.cc || "", name:last.name}, true);
+  }
+  acquirePosition(false);
+}
 /* iOS standalone: návrat do appky = "otevření" → znovu požádat o polohu.
    Ruční volbu obce respektujeme jen krátce v rámci téže seance (5 min). */
 window.addEventListener("pageshow", function(e){
@@ -2279,6 +2293,49 @@ var lastFetch = 0;
 var reqId = 0;              /* generace požadavku — starší odpovědi se zahodí */
 function isStale(id){ return id !== reqId; }
 /* Reset je synchronní, před spuštěním nových zdrojů, i při refreshi téhož místa. */
+var radarField = null;   /* KOLO 15: skutečné pole srážek kolem bodu (buňky pro kompas) [{e,n,mm|rkm…}] */
+
+/* ================= KOLO 15: REGISTR „POZOROVÁNÍ JEŠTĚ BĚŽÍ“ =================
+   Dave (19. 11. 13:27, mobil, dvě obrazovky z jedné minuty): verdikt
+   „Možná kape · nepotvrzeno · nezávislá potvrzení: 0“ a tentýž okamžik
+   o pár sekund později „Slabý déšť právě teď · potvrzuje radar ČHMÚ“.
+   Příčina není v datech: na pomalém mobilním připojení dojedou
+   pozorovací nohy (radarový kompozit, stanice, ČHMÚ) desítky sekund
+   po modelových signálech — a recomputeWhen() mezitím vykreslil
+   DEFINITIVNÍ verdikt z čistě modelových hlasů, jako by pozorování
+   neexistovala. Řešení: registr běžících pozorování. Dokud nějaké
+   běží a jediné hlasy jsou modelové, VERDIKT nehlásí „nepotvrzeno“,
+   ale „ověřuji“ — jediné, co v tu chvíli víme jistě, je, že ještě
+   nevíme. Pojistou je GT_MAX_PENDING_MS: i kdyby někde chybělo
+   gtSettle (nová větva, výjimečná cesta), registr se sám pročistí. */
+var GT_MAX_PENDING_MS = 90000;
+var gtPending = {};   /* {klíč: čas začátku měření} */
+var GT_LABELS = {radar:"radarový kompozit", stanice:"stanice", chmi:"radar ČHMÚ",
+                 metno:"met.no nowcast", regio:"regionální nowcast",
+                 wms:"DWD RADVOR/KNMI", sat:"družice"};
+function gtStart(key){ gtPending[key] = Date.now(); }
+function gtSettle(key){ try{ delete gtPending[key]; }catch(e){} }
+function gtPrune(){
+  var t = Date.now();
+  for(var k in gtPending){
+    if(!Object.prototype.hasOwnProperty.call(gtPending, k)) continue;
+    if(t - gtPending[k] > GT_MAX_PENDING_MS) delete gtPending[k];
+  }
+}
+function gtPendingLabels(){
+  gtPrune();
+  var out = [];
+  for(var k in gtPending){
+    if(!Object.prototype.hasOwnProperty.call(gtPending, k)) continue;
+    out.push(GT_LABELS[k] || k);
+  }
+  return out;
+}
+function gtAnyPending(){ return gtPendingLabels().length > 0; }
+function gtPendingHas(key){
+  gtPrune();
+  return Object.prototype.hasOwnProperty.call(gtPending, key);
+}
 function resetForecastState(){
   lastJ = null; lastModels = null; lastForecastId = null;
   predictionsQueued = false;
@@ -2297,6 +2354,7 @@ function resetForecastState(){
   metnoNow = null; metnoNowNote = "";
   wmsncState = null; wmsncNote = ""; wmsncSrc = null;
   eumetState = null; eumetNote = ""; satState = null; satNote = "";
+  gtPending = {}; radarField = null;   /* kolo 15: nová lokalita = nic se neměří */
   /* Blesky Blitzortung se počítají KOLEM ZVOLENÉ LOKALITY (okruh 200 km
      kolem souřadnic uzavřených ve spojení). Když uživatel přepne obec,
      musí se celá session zavřít — jinak by nová předpověď dědila počty
@@ -2331,6 +2389,13 @@ function load(place, silent){
   var myId = ++reqId;       /* od této chvíle jsou všechny předchozí dotazy neplatné */
   resetForecastState();
   cur = place;
+  /* KOLO 15: poslední lokalita se uloží do localStorage (nikam se
+     neposílá), aby příští start nezůstal slepý: geolokace na mobilu
+     trvá i několik sekund a appka do té doby nevěděla ani, kde je. */
+  try{
+    localStorage.setItem("bpPlace_v1", JSON.stringify(
+      {lat:place.lat, lon:place.lon, cc:place.cc || "", name:place.name, t:Date.now()}));
+  }catch(e){}               /* soukromé procházení / plná kvóta: nevadí */
   showForecastLoading();
   THRESH = threshFor(place.lat);   /* v tropech vyšší — viz threshFor() */
   lastFetch = Date.now();
@@ -3509,7 +3574,7 @@ var modelState = null;   /* {times:[Date], consensus:[int], N, perHourMax:[mm]} 
 var bpMetarRetryT = null;          /* běžící METAR dotah — max jeden */
 var METAR_RETRY_DELAYS = [20000, 60000];   /* dva pokusy: +20 s, +60 s */
 function scheduleMetarRetry(lat, lon, myId, attempt){
-  if(attempt >= METAR_RETRY_DELAYS.length) return;   /* víc než dvě dotahy nikdy */
+  if(attempt >= METAR_RETRY_DELAYS.length){ gtSettle("stanice"); return; }   /* víc než dvě dotahy nikdy */
   if(bpMetarRetryT != null) return;                  /* jeden už běží */
   bpMetarRetryT = setTimeout(function(){
     bpMetarRetryT = null;
@@ -3525,6 +3590,7 @@ function scheduleMetarRetry(lat, lon, myId, attempt){
    vůbec; měřeno 19. 11.: totéž URL o chvíli později 200 s daty). */
 function loadMetar(lat, lon, myId, attempt){
   attempt = attempt || 0;
+  gtStart("stanice");   /* kolo 15 */
   cachedJson("https://aviationweather.gov/api/data/metar?format=json&hours=2&bbox="
     + metarBbox(lat, lon), 600000)
     .then(function(arr){
@@ -3556,6 +3622,7 @@ function loadMetar(lat, lon, myId, attempt){
                   km: Math.round(bestD), raw: best.rawOb || "",
                   ageMin: Math.max(0, Math.round((Date.now()/1000 - (best.obsTime || 0))/60))};
       satVerifyAgainstMetar();      /* družice si tímhle buduje (nebo kazí) důvěru */
+      gtSettle("stanice");   /* kolo 15 */
       recomputeWhen();
     })
     .catch(function(){
@@ -3578,7 +3645,7 @@ function loadMetar(lat, lon, myId, attempt){
 var bpRadarRetryT = null;          /* běžící dotah — max jeden na appku */
 var RV_RETRY_DELAYS = [20000, 60000];   /* dva pokusy: +20 s, +60 s */
 function scheduleRadarRetry(lat, lon, myId, attempt){
-  if(attempt >= RV_RETRY_DELAYS.length) return;   /* víc než dvě dotahy nikdy */
+  if(attempt >= RV_RETRY_DELAYS.length){ gtSettle("radar"); return; }   /* víc než dvě dotahy nikdy — a registr „měřím“ končí */
   if(bpRadarRetryT != null) return;              /* jeden už běží */
   bpRadarRetryT = setTimeout(function(){
     bpRadarRetryT = null;
@@ -3600,7 +3667,8 @@ function loadRadar(lat, lon, myId, attempt){
   altNowcast = null;
   stormMotion = null;
   radarTimeline = null; radarTrendRate = null;
-  radarCompass = null; imergCompass = null; renderCompass();
+  radarCompass = null; imergCompass = null; radarField = null; renderCompass();
+  gtStart("radar");      /* kolo 15: kompozit běží → verdikt neříká „nepotvrzeno“ */
   gridNowcast = null;
 
   /* blízkost velké vodní plochy — vlastnost místa, klidně z paměti opakovaně */
@@ -3929,6 +3997,10 @@ function loadRadar(lat, lon, myId, attempt){
           /* Bez odhadu pohybu zbývá jen odečíst, co je nad hlavou teď. */
           radarState = detail ? readNow(detail, frameAgeMin, 0, 0, tcI.kmPerPx) : "error";
           radarCompass = computeRadarCompass(mp && mp.frames ? mp.frames : null, null, tcM, null);
+          /* kolo 15: i bez pohybu se dá nakreslit reálné pole srážek */
+          radarField = (mp && mp.frames && mp.frames.length)
+            ? radarFieldFromPatch(mp.frames[mp.frames.length-1].patch, tcM.kmPerPx, 4) : null;
+          if(radarState !== "error") gtSettle("radar");
           renderCompass();
           recomputeWhen();
           /* KOLO 11: chybový stav bez intenzity je selhání řetězce → dotah. */
@@ -4052,11 +4124,16 @@ function loadRadar(lat, lon, myId, attempt){
            když je buňka blízko (viz computeRadarCompass). */
         radarCompass = computeRadarCompass(ps, mo, tcM,
           mp.near ? {mo: mp.near, kmPerPx: mp.kmNear} : null);
+        /* KOLO 15: kompas kreslí reálné pole srážek kolem bodu, ne jen
+           jednu elipsu nejsilnější buňky — poslouží poslední hrubý
+           snímek (zoom 6, ±~75 km podle šířky). */
+        radarField = radarFieldFromPatch(ps[ps.length-1].patch, tcM.kmPerPx, 4);
+        gtSettle("radar");
         renderCompass();
         recomputeWhen();
       });
     })
-    .catch(function(){ if(isStale(myId)) return; radarState = "error"; radarCompass = null; renderCompass(); recomputeWhen(); scheduleRadarRetry(lat, lon, myId, attempt); });
+    .catch(function(){ if(isStale(myId)) return; radarState = "error"; radarCompass = null; radarField = null; renderCompass(); recomputeWhen(); scheduleRadarRetry(lat, lon, myId, attempt); });
 }
 
 /* ============================================================
@@ -4366,25 +4443,40 @@ function chmiCompassIntensityTxt(ord){
 }
 function renderChmiCompass(el){
   var s = chmiState;
-  /* Stejný cifernák jako kompozit: kruh, prstence 25/50 km,
-     sever. Echo nad tebou je elipsa ve středu (petice jako „over"). */
+  /* KOLO 15: ciferník se neztrácí — kruh, prstence, sever. Nově je
+     ale pozadí SKUTEČNÝM polem srážek: výřez ±48 km ze snímku PseudoCAPPI
+     (1 km na pixel) se rozloží na bloky a vykreslí ve stejném designu,
+     který dřív zastupovala jediná elipsa ve středu. Kompas tak konečně
+     vypadá jako národní radar, ne jako zástupné schéma. */
+  var REACH = CHMI_FIELD_KM, RE = 46;
+  var chmiRings = "";
+  [25, 50].forEach(function(km){
+    if(km < REACH) chmiRings += '<circle cx="50" cy="50" r="' + (km/REACH*RE).toFixed(1)
+      + '" fill="none" stroke="rgba(255,255,255,.14)" stroke-width=".7"/>';
+  });
   var svg = '<svg viewBox="0 0 100 100" width="clamp(86px,15vh,120px)" height="clamp(86px,15vh,120px)" aria-hidden="true">'
     + '<circle cx="50" cy="50" r="46" fill="rgba(255,255,255,.03)" stroke="rgba(255,255,255,.25)" stroke-width=".8"/>'
-    + '<circle cx="50" cy="50" r="15.3" fill="none" stroke="rgba(255,255,255,.14)" stroke-width=".7"/>'
-    + '<circle cx="50" cy="50" r="30.7" fill="none" stroke="rgba(255,255,255,.14)" stroke-width=".7"/>'
+    + chmiRings
     + '<text x="50" y="9.5" text-anchor="middle" font-size="7" fill="rgba(255,255,255,.6)">S</text>'
     + '<line x1="45" y1="50" x2="47" y2="50" stroke="#A8E4FF" stroke-width="1"/>'
     + '<line x1="53" y1="50" x2="55" y2="50" stroke="#A8E4FF" stroke-width="1"/>';
+  var fieldSvg = (s.field && s.field.length) ? compassFieldSvg(s.field, REACH, true) : "";
+  if(fieldSvg) svg += fieldSvg;
   var verd = "", expl = "", cls = "";
   if(s.nowWet){
     var ord = (s.nowOrd != null) ? s.nowOrd : 0.5;
     var a = (0.18 + 0.45*Math.min(1, ord)).toFixed(2);
-    svg += '<ellipse cx="50" cy="50" rx="' + (3 + 9*ord).toFixed(1) + '" ry="' + (3 + 9*ord).toFixed(1)
-      + '" fill="rgba(168,228,255,' + a + ')" stroke="rgba(168,228,255,.85)" stroke-width=".8"/>';
+    if(!fieldSvg){
+      /* Fallback: pole se nepodařilo vyčíst — elipsa ve středu jako
+         v minulém kole, ať pohled nikdy nezevšední. */
+      svg += '<ellipse cx="50" cy="50" rx="' + (3 + 9*ord).toFixed(1) + '" ry="' + (3 + 9*ord).toFixed(1)
+        + '" fill="rgba(168,228,255,' + a + ')" stroke="rgba(168,228,255,.85)" stroke-width=".8"/>';
+    }
     verd = "Právě nad tebou."; cls = "hit";
     expl = "Národní radar ČHMÚ vidí nad tebou " + chmiCompassIntensityTxt(ord)
          + ". Snímek před " + s.ageMin + " min, rozlišení 1 km na pixel — takhle slabý déšť"
-         + " kompozit často nezahlídne, ČHMÚ ano.";
+         + " kompozit často nezahlídne, ČHMÚ ano."
+         + (fieldSvg ? " Kolem tebe je vykreslené reálné pole do ~" + REACH + " km." : "");
   } else {
     verd = "Nad tebou nic."; cls = "miss";
     if(s.first && s.first.dt != null){
@@ -4395,9 +4487,11 @@ function renderChmiCompass(el){
     } else {
       expl = "Nad tebou je sucho.";
     }
+    if(s.field && s.field.length === 0) expl += " V okruhu ~" + REACH + " km ČHMÚ nevidí žádné echo.";
   }
-  svg += '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF"/></svg>';
-  var src = "radar ČHMÚ · PseudoCAPPI 2 km · 1 km/px · snímek " + s.ageMin + " min · bez trajektorie";
+  svg += '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF" stroke="rgba(255,255,255,.6)" stroke-width=".6"/></svg>';
+  var src = "radar ČHMÚ · PseudoCAPPI 2 km · 1 km/px · snímek " + s.ageMin
+          + " min · dohled ~" + REACH + " km · bez trajektorie";
   el.innerHTML = chmiCompassSwitchHtml()
     + '<div class="label">Radar</div>' + svg
     + '<div class="ct"><div class="verd ' + cls + '">' + verd + '</div>'
@@ -4486,7 +4580,29 @@ function renderCompassBase(){
     }
     return;
   }
-  if(!C){ el.hidden = true; el.innerHTML = ""; return; }
+  /* KOLO 15: kompozit se měří → panel nezmizí, ale viditelně měří.
+     Dave (19. 11., mobil, první načtení): radarový panel tiše zmizel
+     a verdikt mezitím hlásil fálešné „nepotvrzeno“ ze samých modelů —
+     dohromady to vypadalo jako rozbitá aplikace. */
+  if(!C){
+    if(gtPendingHas("radar")){
+      el.hidden = false;
+      el.innerHTML = chmiCompassSwitchHtml()
+        + '<div class="label">Radar</div>'
+        + '<svg viewBox="0 0 100 100" width="clamp(86px,15vh,120px)" height="clamp(86px,15vh,120px)" aria-hidden="true">'
+        + '<circle cx="50" cy="50" r="46" fill="rgba(255,255,255,.03)" stroke="rgba(255,255,255,.25)" stroke-width=".8"/>'
+        + '<circle cx="50" cy="50" r="15.3" fill="none" stroke="rgba(255,255,255,.14)" stroke-width=".7"/>'
+        + '<circle cx="50" cy="50" r="30.7" fill="none" stroke="rgba(255,255,255,.14)" stroke-width=".7"/>'
+        + '<circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,.08)" stroke-width=".6"/>'
+        + '<text x="50" y="9.5" text-anchor="middle" font-size="7" fill="rgba(255,255,255,.6)">S</text>'
+        + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF"/></svg>'
+        + '<div class="ct"><div class="verd">Měřím radar…</div>'
+        + '<div class="expl">Skládám snímek kompozitu kolem tebe (přibližně desítky kB). Chvíli to trvá, panel se sám doplní.</div>'
+        + '<div class="src">načítám měření…</div></div>';
+      return;
+    }
+    el.hidden = true; el.innerHTML = ""; return;
+  }
   var RE = 46, CX = 50, CY = 50;                 /* dosah kreslený v SVG px */
   var px = function(e){ return CX + e/C.reachKm*RE; };
   var py = function(n){ return CY - n/C.reachKm*RE; };
@@ -4502,6 +4618,12 @@ function renderCompassBase(){
     + '<line x1="45" y1="50" x2="47" y2="50" stroke="#A8E4FF" stroke-width="1"/>'
     + '<line x1="53" y1="50" x2="55" y2="50" stroke="#A8E4FF" stroke-width="1"/>'
     + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF"/>';
+  /* KOLO 15: za středem se vykreslí REÁLNÉ pole srážek z posledního
+     snímku — jemné, ať elipsa buňky a trajektorie zůstanou hlavní. */
+  if(!viaSat && radarField && radarField.length){
+    svg += compassFieldSvg(radarField, C.reachKm, false)
+         + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF" stroke="rgba(255,255,255,.6)" stroke-width=".6"/>';
+  }
   var verd = "", expl = "", cls = "";
   var snowTxt = C.snow ? " (sníh)" : "";
   var src = viaSat
@@ -5337,7 +5459,8 @@ var CHMI_IMG  = {lonMin:11.267, lonMax:20.770, latMin:48.047, latMax:52.167};
 /* Uvnitř tohohle obdélníku jsou data platná, vně je obrázek prázdný. */
 var CHMI_DATA = {lonMin:11.267, lonMax:19.624, latMin:48.047, latMax:51.458};
 var CHMI_LEADS = [10,20,30,40,50,60];      /* co ČHMÚ publikuje */
-var CHMI_R = 2;                            /* výřez ±2 px ≈ ±2 km */
+var CHMI_R = 2;                            /* výřez ±2 px ≈ ±2 km (COTREC kroky) */
+var CHMI_FIELD_KM = 48;                    /* KOLO 15: now-výřez pro kompas — ±48 km, 1 km/px */
 
 var chmiState = null;   /* {nowWet, nowOrd, ageMin, first:{min,ord}|null, steps:[]} | "off" | "error" */
 var chmiNote = "";
@@ -5418,7 +5541,9 @@ function readChmiPatch(url, lat, lon, r){
         var x0 = Math.max(0, Math.min(w-n, p.x-r));
         var y0 = Math.max(0, Math.min(h-n, p.y-r));
         var d = c.getContext("2d").getImageData(x0, y0, n, n).data;   /* tady spadne CORS */
-        var out = {px:[], n:n};
+        /* KOLO 15: pozice uživatele a začátek výřezu v obrázku — z nich
+           si pole kreslí skutečné vzdálenosti a směry buněk od tebe. */
+        var out = {px:[], n:n, x0:x0, y0:y0, ux:p.x, uy:p.y};
         for(var i=0;i<d.length;i+=4) out.px.push([d[i], d[i+1], d[i+2], d[i+3]]);
         chmiImgCache[url] = out;
         resolve(out);
@@ -5527,13 +5652,130 @@ function chmiReadPatch(patch){
   return {wet:wet, ord: seen ? ord : 0, pixels:seen};
 }
 
+/* ================= KOLO 15: REÁLNÉ POLE SRÁŽEK V KOMPASU =================
+   Dave (19. 11. 13:27, mobil): „Radar není hezky vykreslený.“ Ciferník
+   dosud ukazoval jednu elipsu nejsilnější buňky (nebo u ČHMÚ elipsu
+   uprostřed) — přitom appka má v ruce celé okolo: kompozit dává výřez
+   ~±75 km a národní radar je 1 km na pixel. Od teď kompas kreslí
+   SKUTEČNÉ pole srážek jako soustavu kruhů v dosavadním designu
+   (bílé kruhy, světloblue echo #A8E4FF), zesvětlené tak, aby
+   trajektorie a elipsa buňky zůstaly hlavní řečí. */
+
+/* Střed výřezu: wet + ord z prostředních ≤3×3 px (1 km/px → sousedé
+   kilometru kolem tebe). Nezvadne na „max ord celého výřezu“, jak by
+   dělalo chmiReadPatch na širokém poli — u ±48 km by to hlásilo
+   supersilné echo, které fyzicky letí jinde. */
+function chmiReadNow(patch){
+  if(!patch) return null;
+  var n = patch.n, c = Math.floor(n/2);
+  var wet = false, ord = 0, seen = 0;
+  for(var dy=-1; dy<=1; dy++){
+    for(var dx=-1; dx<=1; dx++){
+      var x = c+dx, y = c+dy;
+      if(x < 0 || y < 0 || x >= n || y >= n) continue;
+      var p = patch.px[y*n+x];
+      if(p[3] < 40) continue;                          /* průhledné = bez echa */
+      if(p[0]>245 && p[1]>245 && p[2]>245) continue;   /* podklad */
+      seen++; wet = true;
+      var o = chmiOrdinal(p);
+      if(o != null && o > ord) ord = o;
+    }
+  }
+  return {wet:wet, ord: seen ? ord : 0, pixels:seen};
+}
+
+/* Pole z ČHMÚ PNG výřezu: bloky aggr×aggr px (1 km/px), ordinál =
+   nejsilnější pixel bloku. Poloměr bloku v km = aggr/2. Zarovnání
+   výřezu na okraji obrázku ošetří ux/uy z readChmiPatch. */
+function chmiFieldFromPatch(patch, reachKm, aggr){
+  if(!patch || !patch.px || !patch.px.length) return null;
+  var n = patch.n, ag = aggr || 3;
+  var cells = build();
+  if(cells.length > 420){ ag *= 2; cells = build(); }   /* velká plocha → hrubší bloky, ať SVG nezetherlands mobil */
+  function build(){
+    var out = [];
+    for(var by=0; by<n; by+=ag){
+      for(var bx=0; bx<n; bx+=ag){
+        var ord = 0, seen = 0;
+        for(var yy=0; yy<ag && by+yy<n; yy++){
+          for(var xx=0; xx<ag && bx+xx<n; xx++){
+            var p = patch.px[(by+yy)*n + (bx+xx)];
+            if(p[3] < 40) continue;
+            if(p[0]>245 && p[1]>245 && p[2]>245) continue;
+            seen++;
+            var o = chmiOrdinal(p);
+            if(o != null && o > ord) ord = o;
+          }
+        }
+        if(!seen) continue;
+        var eKm = (patch.x0 + bx + ag/2) - (patch.ux != null ? patch.ux : (n-1)/2 + (patch.x0||0)); /* px na východ od tebe */
+        var nKm = (patch.uy != null ? patch.uy : (n-1)/2 + (patch.y0||0)) - (patch.y0 + by + ag/2); /* px na sever od tebe */
+        if(Math.abs(eKm) > reachKm+2 || Math.abs(nKm) > reachKm+2) continue;
+        out.push({e:eKm, n:nKm, o:ord, rkm:ag/2});
+      }
+    }
+    return out;
+  }
+  return cells.length ? cells : [];
+}
+
+/* Pole z kompozitní dlaždice (mm/h na pixel, zoom 6): bloky aggr×aggr,
+   hodnota = max mm/h v bloku. Buňky mimo dosah kompasu se zahazují. */
+function radarFieldFromPatch(patch, kmPerPx, aggr){
+  if(!patch || !patch.mm || !patch.mm.length || !kmPerPx) return null;
+  var n = patch.n, ag = aggr || 4;
+  var cells = build();
+  if(cells.length > 420){ ag *= 2; cells = build(); }
+  function build(){
+    var out = [];
+    for(var by=0; by<n; by+=ag){
+      for(var bx=0; bx<n; bx+=ag){
+        var mm = 0, seen = false;
+        for(var yy=0; yy<ag && by+yy<n; yy++){
+          for(var xx=0; xx<ag && bx+xx<n; xx++){
+            var m = patch.mm[(by+yy)*n + (bx+xx)];
+            if(m == null) continue;
+            seen = true;
+            if(m > mm) mm = m;
+          }
+        }
+        if(!seen || mm < 0.08) continue;    /* pod práh hlasování nezrají ani do kresby */
+        out.push({e:(bx + ag/2 - (n-1)/2) * kmPerPx,
+                  n:((n-1)/2 - (by + ag/2)) * kmPerPx,
+                  mm:mm, rkm:ag*kmPerPx/2});
+      }
+    }
+    return out;
+  }
+  return cells.length ? cells : null;
+}
+
+/* Společný kreslič: soustava kruhů v barvě echa, alfa podle intenzity.
+   ČHMÚ (forChmi=true) kreslí výrazněji — je to primární produkt
+   pohledu; kompozit jen jemné pozadí pod elipsu a trajektorii. */
+function compassFieldSvg(cells, reachKm, forChmi){
+  if(!cells || !cells.length || !reachKm) return "";
+  var RE = 46, CX = 50, CY = 50, out = "";
+  for(var i=0; i<cells.length; i++){
+    var c = cells[i];
+    var x = CX + c.e/reachKm*RE, y = CY - c.n/reachKm*RE;
+    if(x < 3 || x > 97 || y < 3 || y > 97) continue;
+    var r = Math.max(1.1, (c.rkm || 1.5)/reachKm*RE);
+    var a = forChmi ? (0.20 + 0.50*Math.min(1, c.o != null ? c.o : 0.5))
+                    : (0.08 + 0.30*Math.min(1, (c.mm || 0)/3));
+    out += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1)
+        + '" r="' + r.toFixed(1) + '" fill="rgba(168,228,255,' + a.toFixed(2) + ')"/>';
+  }
+  return out;
+}
+
 /* KOLO 12: ČHMÚ po chybě dotahuje samo (viz METAR výše) — národní radar
    je druhá noha pozemní pravdy a jednorázová výpadková odpověď workeru
    ani opendata nesmí umlčet modul až do ručního obnovení. */
 var bpChmiRetryT = null;
 var CHMI_RETRY_DELAYS = [20000, 60000];   /* dva pokusy: +20 s, +60 s */
 function scheduleChmiRetry(lat, lon, myId, attempt){
-  if(attempt >= CHMI_RETRY_DELAYS.length) return;   /* víc než dvě dotahy nikdy */
+  if(attempt >= CHMI_RETRY_DELAYS.length){ gtSettle("chmi"); return; }   /* víc než dvě dotahy nikdy */
   if(bpChmiRetryT != null) return;                  /* jeden už běží */
   bpChmiRetryT = setTimeout(function(){
     bpChmiRetryT = null;
@@ -5546,14 +5788,19 @@ function scheduleChmiRetry(lat, lon, myId, attempt){
 function loadChmi(lat, lon, myId, attempt){
   attempt = attempt || 0;
   chmiState = null; chmiNote = "";
+  gtStart("chmi");   /* kolo 15 */
   if(!chmiInRange(lat, lon)){
     chmiState = "off";
     chmiNote = "mimo dosah českého radaru";
+    gtSettle("chmi");
     return;
   }
   loadChmiScale().then(function(){
     if(isStale(myId)) return;
-    /* Poslední hotový snímek — publikace má pár minut zpoždění, zkoušíme zpět. */
+    /* Poslední hotový snímek — publikace má pár minut zpoždění, zkoušíme zpět.
+       KOLO 15: now-výřez se čte o kus širší (±48 km místo ±2 km) —
+       ze stejného PNG se dá vykreslit reálné pole srážek v kompasu,
+       k tomu stačí jediný výřez a žádný extra požadavek navíc. */
     var slots = [];
     for(var k=1; k<=5; k++) slots.push(Date.now() - k*300000);
     var i = 0, nowFrame = null;
@@ -5561,9 +5808,9 @@ function loadChmi(lat, lon, myId, attempt){
       if(isStale(myId)) return;
       if(i >= slots.length || nowFrame){ afterNow(); return; }
       var ms = slots[i++];
-      readChmiPatch(chmiUrlNow(ms), lat, lon, CHMI_R).then(function(p){
-        var r = chmiReadPatch(p);
-        if(r) nowFrame = {ms:ms, r:r};
+      readChmiPatch(chmiUrlNow(ms), lat, lon, CHMI_FIELD_KM).then(function(p){
+        var r = chmiReadNow(p);
+        if(r) nowFrame = {ms:ms, r:r, field: chmiFieldFromPatch(p, CHMI_FIELD_KM, 3)};
         nextNow();
       });
     })();
@@ -5602,8 +5849,10 @@ function loadChmi(lat, lon, myId, attempt){
           nowWet: nowFrame.r.wet, nowOrd: nowFrame.r.ord,
           ageMin: Math.round((Date.now() - nowFrame.ms)/60000),
           steps: steps, first: first,
+          field: nowFrame.field || null,      /* kolo 15: buňky pro kompas */
           scale: chmiScale ? chmiScale.length : 0
         };
+        gtSettle("chmi");   /* kolo 15 */
         chmiNote = "PseudoCAPPI 2 km · 1×1 km · snímek " + chmiState.ageMin + " min"
                  + (steps.length ? " · COTREC " + steps.length + " kroků" : " · bez extrapolace")
                  + (chmiScale ? "" : " · legenda nepoužitelná, jen echo ano/ne");
@@ -5745,18 +5994,19 @@ function pickRegionalProvider(lat, lon){
   return best;
 }
 function loadRegionalNowcast(lat, lon, myId){
+  gtStart("regio");   /* kolo 15 */
   regioNowcast = null; regioName = ""; regioNote = "";
   var P = pickRegionalProvider(lat, lon);
-  if(!P){ regioNowcast = "off"; regioNote = "žádný regionální nowcast tuhle oblast nepokrývá"; return; }
+  if(!P){ regioNowcast = "off"; regioNote = "žádný regionální nowcast tuhle oblast nepokrývá"; gtSettle("regio"); return; }
   regioName = P.name;
   P.load(lat, lon).then(function(series){
     if(isStale(myId)) return;
-    regioNowcast = series;
+    gtSettle("regio"); regioNowcast = series;
     regioNote = P.note + " · " + series.length + " kroků";
     recomputeWhen();
   }).catch(function(e){
     if(isStale(myId)) return;
-    regioNowcast = "error";
+    gtSettle("regio"); regioNowcast = "error";
     regioNote = P.name + " selhal: " + (e && e.message || e);
     console.warn("[bp] regionální nowcast " + P.key + ": " + regioNote);
     recomputeWhen();
@@ -5775,10 +6025,11 @@ function metnoNowcastArea(lat, lon){
 }
 var metnoNowNote = "";
 function loadMetnoNowcast(lat, lon, myId){
+  gtStart("metno");   /* kolo 15 */
   metnoNow = null; metnoNowNote = "";
-  if(!metnoNowcastArea(lat, lon)){ metnoNow = "off"; metnoNowNote = "mimo severskou doménu"; return; }
+  if(!metnoNowcastArea(lat, lon)){ metnoNow = "off"; metnoNowNote = "mimo severskou doménu"; gtSettle("metno"); return; }
   if(!metnoAllowed()){
-    metnoNow = "off";
+    metnoNow = "off"; gtSettle("metno");
     metnoNowNote = "z " + (location.hostname || "file://") + " se met.no nevolá (pravidla met.no)";
     return;
   }
@@ -5794,14 +6045,14 @@ function loadMetnoNowcast(lat, lon, myId){
         if(v == null) return;
         out.push({t: Math.round(Date.parse(e.time)/1000), mmh: saneMm(v)});
       });
-      metnoNow = out.length ? out : "error";
+      gtSettle("metno"); metnoNow = out.length ? out : "error";
       if(!out.length) metnoNowNote = "odpověď bez precipitation_rate";
       else metnoNowNote = "ok · " + out.length + " kroků po 5 min";
       recomputeWhen();
     })
     .catch(function(e){
       if(isStale(myId)) return;
-      metnoNow = "error";
+      metnoNow = "error"; gtSettle("metno");
       metnoNowNote = (e && e.message) || "neznámá chyba";
       console.warn("[bp] met.no nowcast: " + metnoNowNote);
       recomputeWhen();
@@ -6343,6 +6594,22 @@ function renderSolo(){
     return;
   }
 
+  /* ================= KOLO 15: OVĚŘUJI (pozorování ještě běží) =================
+     Mobilní sloučený panel nikdy neřekne „nepotvrzeno“, dokud někdo
+     ještě měří — jinak si Dave v jedné minutě přečetl dva protichůdné
+     verdikty (19. 11. 13:27). */
+  if(W && W.mode === "checking"){
+    pill.textContent = "Verdikt · ověřuji";
+    big.textContent = "Ověřuji";
+    if(word) word.textContent = "Verdikt ještě není hotový";
+    sub.textContent = "Modely hlásí srážky: " + W.votes.join(", ") + ". Radar, stanice i ČHMÚ ještě měří ("
+      + W.pending.join(", ") + ") — přesný verdikt se doplní sám.";
+    facts.innerHTML = "";
+    talk.textContent = "Na pomalém připojení pozorovací data docházejí o pár sekund později. Aplikace se aktualizuje sama, nemusíš stránku obnovovat.";
+    src.textContent = "čekám na: " + W.pending.join(", ");
+    return;
+  }
+
   /* ================= 2. MOŽNÁ MRHOLÍ ================= */
   if(W && W.mode === "maybe"){
     box.classList.add("soon");
@@ -6722,9 +6989,10 @@ function wmsncOrdToMm(ord, anchorOrd, anchorMm){
 }
 
 function loadWmsNowcast(lat, lon, myId){
+  gtStart("wms");   /* kolo 15 */
   wmsncState = null; wmsncNote = ""; wmsncSrc = null;
   var src = wmsncPick(lat, lon);
-  if(!src){ wmsncState = "off"; wmsncNote = "mimo dosah DWD i KNMI"; return; }
+  if(!src){ wmsncState = "off"; wmsncNote = "mimo dosah DWD i KNMI"; gtSettle("wms"); return; }
   wmsncSrc = src;
 
   /* --- 1. najdi vrstvu, která opravdu existuje --- */
@@ -6742,7 +7010,7 @@ function loadWmsNowcast(lat, lon, myId){
   tryLayer(0).then(function(layer){
     if(isStale(myId)) return;
     if(!layer){
-      wmsncState = "error";
+      gtSettle("wms"); wmsncState = "error";
       wmsncNote = src.n + ": žádná z " + src.layerCands.length
         + " zkoušených vrstev nevrátila obrázek (chybný název vrstvy, nebo chybí CORS)";
       recomputeWhen(); return;
@@ -6750,7 +7018,7 @@ function loadWmsNowcast(lat, lon, myId){
     return wmsncLoadScale(src, layer).then(function(scale){
       if(isStale(myId)) return;
       if(!scale){
-        wmsncState = "error";
+        gtSettle("wms"); wmsncState = "error";
         wmsncNote = src.n + ": legenda se nenačetla → barvy nejde přeložit na intenzitu";
         recomputeWhen(); return;
       }
@@ -6766,7 +7034,7 @@ function loadWmsNowcast(lat, lon, myId){
         if(isStale(myId)) return;
         var got = steps.filter(function(s){ return s.pixels > 0 || s.ord != null; });
         if(!got.length){
-          wmsncState = "error";
+          gtSettle("wms"); wmsncState = "error";
           wmsncNote = src.n + " (" + layer + "): vrstva odpovídá, ale výřez je prázdný";
           recomputeWhen(); return;
         }
@@ -6781,7 +7049,7 @@ function loadWmsNowcast(lat, lon, myId){
            posunou, jinak by celý zdroj chodil dřív (stejná chyba, jakou
            měla vlastní advekce se stářím snímku). */
         var offsetMin = (Date.now() - base)/60000;
-        wmsncState = steps.map(function(s){
+        gtSettle("wms"); wmsncState = steps.map(function(s){
           return {min: Math.max(0, s.min - offsetMin),
                   mmh: wmsncOrdToMm(s.ord, anchorOrd, anchorMm),
                   ord: s.ord};
@@ -6795,7 +7063,7 @@ function loadWmsNowcast(lat, lon, myId){
     });
   }).catch(function(e){
     if(isStale(myId)) return;
-    wmsncState = "error";
+    gtSettle("wms"); wmsncState = "error";
     wmsncNote = (src ? src.n + ": " : "") + (e && e.message || e);
     recomputeWhen();
   });
@@ -6907,9 +7175,10 @@ function eumetLoadScale(layer){
 }
 
 function loadEumetsat(lat, lon, myId){
+  gtStart("eum");   /* kolo 15 */
   eumetState = null; eumetNote = "";
   if(!eumetInArea(lat, lon)){
-    eumetState = "off"; eumetNote = "mimo disk Meteosatu-0°"; return;
+    eumetState = "off"; eumetNote = "mimo disk Meteosatu-0°"; gtSettle("eum"); return;
   }
   /* Dřív se tady EUMETSAT vypínalo, když oblast pokrýval GIBS (ten uměl
      absolutní kelviny). GIBS ale datové palety zrušil (viz loadSatellite),
@@ -6932,7 +7201,7 @@ function loadEumetsat(lat, lon, myId){
   tryLayer(0).then(function(layer){
     if(isStale(myId)) return;
     if(!layer){
-      eumetState = "error";
+      gtSettle("eum"); eumetState = "error";
       eumetNote = "žádná vrstva Meteosatu nevrátila obrázek (název vrstvy, nebo chybí CORS)";
       return;
     }
@@ -6943,7 +7212,7 @@ function loadEumetsat(lat, lon, myId){
     return eumetLoadScale(layer).then(function(scale){
       if(isStale(myId)) return;
       if(!scale){
-        eumetState = "error"; eumetNote = "legenda EUMETView se nenačetla";
+        gtSettle("eum"); eumetState = "error"; eumetNote = "legenda EUMETView se nenačetla";
         return;
       }
       return Promise.all([0,1,2,3,4,5].slice(0, eumetFramesFor(layer)).map(function(k){
@@ -6969,7 +7238,7 @@ function loadEumetsat(lat, lon, myId){
         if(isStale(myId)) return;
         var ok = fr.filter(Boolean).sort(function(a,b){ return a.ms - b.ms; });
         if(ok.length < 2){
-          eumetState = "error";
+          gtSettle("eum"); eumetState = "error";
           eumetNote = "jen " + ok.length + " použitelný snímek — na trend to nestačí";
           return;
         }
@@ -6983,7 +7252,7 @@ function loadEumetsat(lat, lon, myId){
            extrému k okraji škály vyšší vrcholy, tedy rostoucí konvekci.
            Bez absolutní kalibrace se hlásí jen SÍLA a SMĚR, ne kelviny. */
         var last = ok[ok.length-1];
-        eumetState = {
+        gtSettle("eum"); eumetState = {
           ordNow: last.hi, ordMin: last.lo,
           trend: pohyb > 0.004 ? "roste" : pohyb < -0.004 ? "slábne" : "stabilní",
           rate: pohyb, frames: ok.length, layer: layer,
@@ -6997,7 +7266,7 @@ function loadEumetsat(lat, lon, myId){
     });
   }).catch(function(e){
     if(isStale(myId)) return;
-    eumetState = "error"; eumetNote = (e && e.message) || String(e);
+    gtSettle("eum"); eumetState = "error"; eumetNote = (e && e.message) || String(e);
   });
 }
 
@@ -7296,6 +7565,7 @@ function readSatPatch(url, px, py, r, cm){
 
 function loadSatellite(lat, lon, myId){
   satState = null; satNote = "";
+  gtStart("sat");   /* kolo 15 */
   /* KOLO 8ba — GIBS u GOES/Himawari skončil jako zdroj ČÍSEL.
      1. TileMatrixSet „GoogleMapsCompatible_Level7" už tyhle vrstvy
         neznají (jen Level6, jinak 400) — viz IMERG, který to má
@@ -7311,6 +7581,7 @@ function loadSatellite(lat, lon, myId){
      (stačí smazat tento return). */
   satState = "off";
   satNote = "GIBS zrušil datové palety GOES/Himawari — bez nich nelze číst kelviny";
+  gtSettle("sat");   /* kolo 15: rozhodnuto hned, nezdržuje verdikt */
   return;
   var L = satLayerFor(lat, lon);
   if(!L){
@@ -7322,7 +7593,7 @@ function loadSatellite(lat, lon, myId){
     if(isStale(myId)) return;
     if(!cm){ satState = "error"; satNote = "paleta se nenačetla → nepoužito"; recomputeWhen(); return; }
     var tc = tileCoords(lat, lon, SAT_Z);
-    /* Zkusíme několik posledních десetiminutovek — nejnovější snímek ještě
+    /* Zkusíme několik posledních desetiminutových snímků — nejnovější ještě
        nemusí být zpracovaný. Bereme tři po sobě, ať jde spočítat trend. */
     var slots = [];
     for(var k=1; k<=6; k++) slots.push(Date.now() - k*600000);
@@ -8305,6 +8576,28 @@ function recomputeWhen(){
                  chmiSolo:(indepVotes < 2 && chmiPotvrzuje),
                  end: estimateRainEnd(now, 0, blendTimeline), trend:trendPhrase,
                  station:stationNote, now:now};
+    renderSolo();
+    return;
+  }
+
+  /* ---- KOLO 15: POZOROVÁNÍ JEŠTĚ BĚŽÍ → „ověřuji“, ne „nepotvrzeno“ ----
+     Měřený případ 19. 11. 13:27 (mobil, dvě obrazovky z jedné minuty):
+     verdikt „Možná kape · nepotvrzeno · 0 potvrzení“ se během
+     několika sekund překlopil na „Slabý déšť právě teď · potvrzuje
+     radar ČHMÚ“ — ČHMÚ prostě na výpadkovém připojení došel později.
+     „Nepotvrzeno“ je tvrzení o výsledku měření; dokud měření běží,
+     aplikace nesmí výsledek předjímat. */
+  if(votes.length >= 1 && indepVotes < 2 && gtAnyPending()){
+    var pendList = gtPendingLabels();
+    big.className = "big";
+    big.innerHTML = "Ověřuji <small>pozorováním</small>";
+    sub.innerHTML = "Signál srážek: " + votes.join(", ") + ". Pozemní pozorování ("
+      + pendList.join(", ") + ") ještě měří — verdikt se stanoví, až dodají data."
+      + beamNote + blitzNote();
+    srcEl.textContent = "ověřuji · čekám na: " + pendList.join(", ") + sourceCaveat();
+    if($("whenUntil")) $("whenUntil").innerHTML = "";
+    whenState = {mode:"checking", votes:votes, indep:indepVotes,
+                 pending:pendList, now:now};
     renderSolo();
     return;
   }
