@@ -147,9 +147,9 @@ test('model-only current and native/interpolated minutely signals cannot confirm
     altNowcast:[{t:Date.now()/1000,mmh:0.4}],modelCurrent:{mmh:0.4,code:61},
     native15:true,obsMetar:null,chmiState:null,metnoNow:null,regioNowcast:null,satState:null,
     modelState:{},whenState:null,THRESH_OBS:0.2,setTimeout:()=>{},fitPanels:()=>{},
-    /* Kolo 4: recomputeWhen si pájí živé blesky (Blitzortung) a kontroluje
-       výšku paprsku radaru vůči METAR stanici. V vm kontextu jsou to stuby —
-       testují se rozhodovací větve, ne síťová vrstva. */
+    /* Kolo 15: registr běžících pozorování — v tomhle testu už vše
+       dořeklo, proto „měřím ještě“ nezahlazuje větve maybe/wet. */
+    gtAnyPending:()=>false,gtPendingLabels:()=>[],
     radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
     buildBlendTimeline:()=>[],wmoType:()=>({t:'déšť'}),sourceCaveat:()=>'',renderSolo:()=>{}
   });
@@ -1041,6 +1041,7 @@ test('kolo 12c: ČHMÚ potvrzuje „prší právě teď“ samo (čerstvé ECHO)
     native15:true,obsMetar:null,
     chmiState:{nowWet:true,nowOrd:0.25,ageMin:7,steps:[],first:null,scale:12},
     metnoNow:null,regioNowcast:null,satState:null,modelState:{},whenState:null,
+    gtAnyPending:()=>false,gtPendingLabels:()=>[],   /* kolo 15 */
     setTimeout:()=>{},fitPanels:()=>{},
     radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
     THRESH_OBS:0.2,MAX_SANE_MMH:500,
@@ -1160,6 +1161,7 @@ test('kolo 14: pohled ČHMÚ v panelu — stejný design, data národního radar
   const c=context(['renderChmiCompass','chmiCompassSwitchHtml','chmiCompassReady','chmiInRange','chmiCompassIntensityTxt'],{
     CHMI_DATA:{lonMin:11.267,lonMax:19.624,latMin:48.047,latMax:51.458},
     cur:{lat:50.08,lon:14.44},chmiCompassOn:true,
+    CHMI_FIELD_KM:48,compassFieldSvg:()=>'' ,   /* kolo 15: jednotkovélinky pro kreslení pole */
     chmiState:{nowWet:true,nowOrd:0.4,ageMin:6,steps:[],first:null}
   });
   const el={hidden:true,innerHTML:''};
@@ -1190,4 +1192,116 @@ test('kolo 14: strukturální — pohled ČHMÚ visí před kompozitovými větv
   assert.ok(fn('resetForecastState').includes('chmiCompassOn = false'),
     'nová lokalita začíná na kompozitu');
   assert.ok(script.includes('id === "radSwitch"'),'klik na tlačítko přepíná pohled');
+});
+
+/* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
+
+test('kolo 15: registr běžících pozorování — start, settle, štítky, pojistný čas',()=>{
+  const c=context(['gtStart','gtSettle','gtPendingLabels','gtAnyPending','gtPendingHas','gtPrune'],
+    {gtPending:{},GT_MAX_PENDING_MS:90000,
+     GT_LABELS:{radar:'radarový kompozit',stanice:'stanice',chmi:'radar ČHMÚ',
+                metno:'met.no nowcast',regio:'regionální nowcast',
+                wms:'DWD RADVOR/KNMI',sat:'družice',eum:'Meteosat'}});
+  assert.equal(c.gtAnyPending(),false,'prázdný registr = nic neběží');
+  c.gtStart('radar'); c.gtStart('stanice');
+  assert.equal(c.gtAnyPending(),true);
+  assert.equal(c.gtPendingLabels().sort().join('|'),'radarový kompozit|stanice',
+    'registry vrací lidské popisy');
+  assert.equal(c.gtPendingHas('radar'),true);
+  c.gtSettle('radar');
+  assert.equal(c.gtPendingHas('radar'),false,'settled zdroj zmizí z registru');
+  assert.equal(c.gtPendingHas('stanice'),true);
+  /* pojistka: zapomenutý settle po 90 s se sám pročistí */
+  c.gtPending.stanice = Date.now() - 100000;
+  assert.equal(c.gtAnyPending(),false,'prošlý záznam registr nezahlčuje verdikt');
+});
+
+test('kolo 15: modelové hlasy + měření běží → verdikt „ověřuji“, ne „nepotvrzeno“',()=>{
+  const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
+  const c=context(['recomputeWhen','stanicePotvrzujeSelf','chmiNowWet'],{
+    $:id=>nodes[id],reqId:1,cur:{},radarState:null,stormMotion:null,
+    altNowcast:[{t:Date.now()/1000,mmh:0.4}],modelCurrent:{mmh:0.4,code:61},
+    native15:true,obsMetar:null,chmiState:null,metnoNow:null,regioNowcast:null,satState:null,
+    modelState:{},whenState:null,THRESH_OBS:0.2,setTimeout:()=>{},fitPanels:()=>{},
+    /* továrna na „něco měří“: radar i stanice ještě nedošly */
+    gtAnyPending:()=>true,gtPendingLabels:()=>['radarový kompozit','stanice'],
+    radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
+    buildBlendTimeline:()=>[],wmoType:()=>({t:'déšť'}),sourceCaveat:()=>'',renderSolo:()=>{}
+  });
+  c.recomputeWhen();
+  assert.equal(c.whenState.mode,'checking',
+    'běžící pozorování brzdí předčasné „nepotvrzeno“');
+  assert.ok(c.whenState.votes.length>=1,'modelové signály se neztratí');
+  assert.deepEqual(c.whenState.pending,['radarový kompozit','stanice'],'nádech čeká na konkrétní zdroje');
+  assert.match(nodes.whenBig.innerHTML,/Ověřuji/);
+  assert.match(nodes.whenSub.innerHTML,/ještě měří/);
+  assert.match(nodes.whenSrc.textContent,/^ověřuji · čekám na: radarový kompozit, stanice/);
+});
+
+test('kolo 15: chmiFieldFromPatch — severní blok se kreslí k severu, sucho je prázdné pole',()=>{
+  /* patch 13×13 px (1 km/px), střed = uživatel; mokrý blok 3 px na sever,
+     alfa škála odrazí přes stub chmiOrdinal = červený kanál / 255. */
+  const c=context(['chmiFieldFromPatch','chmiReadNow'],
+    {chmiOrdinal:(px)=>px[3]>=40?px[0]/255:null});
+  const n=13, px=[];
+  for(let y=0;y<n;y++) for(let x=0;x<n;x++){
+    const wet = x>=3 && x<=5 && y>=3 && y<=5;   /* blok AGGR=3 severozápadně od středu */
+    px.push(wet?[204,0,0,255]:[0,0,0,0]);
+  }
+  const patch={n,px,x0:0,y0:0,ux:6,uy:6};
+  const cells=c.chmiFieldFromPatch(patch,48,3);
+  assert.ok(Array.isArray(cells) && cells.length===1,'jeden blok = jedna buňka');
+  assert.equal(cells[0].n>0,true,'blok leží na sever od tebe');
+  assert.equal(cells[0].o,0.8,'ordinál = červená/255');
+  assert.equal(cells[0].rkm,1.5,'poloměr bloku = aggr/2 km');
+  /* dry patch → prázdné pole (sucho je taky informace) */
+  const dry={n,px:px.map(()=>[0,0,0,0]),x0:0,y0:0,ux:6,uy:6};
+  assert.equal(c.chmiFieldFromPatch(dry,48,3).length,0);
+  /* chmiReadNow: mokrý pixel v rohu NEpotvrdí déšť nad tebou */
+  const corner={n:13,px:px.map((p,i)=>i===0?[204,0,0,255]:[0,0,0,0]),x0:0,y0:0,ux:6,uy:6};
+  const r1=c.chmiReadNow(corner);
+  assert.equal(r1.wet,false,'echo 6 km od středu neznamená déšť nad tebou');
+  const center=c.chmiReadNow(patch);
+  assert.equal(center.wet,true,'sousedé ±1 km kolem tebe ano');
+});
+
+test('kolo 15: radarFieldFromPatch + compassFieldSvg — buňky pod práhem se nekreslí',()=>{
+  const c=context(['radarFieldFromPatch','compassFieldSvg'],{});
+  const n=9, mm=new Array(81).fill(0);
+  mm[1*9+7]=0.5;   /* blok AGGR=4 ~ severovýchod */
+  mm[7*9+1]=0.05;  /* pod práh hlasování */
+  const cells=c.radarFieldFromPatch({n,mm},1.5,4);
+  assert.equal(cells.length,1,'jen práh překonávající buňka');
+  assert.equal(cells[0].mm,0.5);
+  assert.equal(cells[0].e>0 && cells[0].n>0,true,'severovýchodní poloha se zachová');
+  /* kresba: kruh severně od středu, alfa v designu kompozitu */
+  const svg=c.compassFieldSvg([{e:10,n:10,mm:0.5,rkm:3},{e:200,n:0,mm:1,rkm:3}],75,false);
+  assert.ok(svg.includes('cy="43.9"'),'severní buňka jde nad střed (50-10/75*46)');
+  assert.ok(!svg.includes('172.'),'buňka mimo dosah se nekreslí');
+  assert.equal((svg.match(/<circle/g)||[]).length,1);
+  assert.ok(svg.includes('rgba(168,228,255,'));
+});
+
+test('kolo 15: strukturální — panel radaru měří nahlas, start z poslední lokality',()=>{
+  const rcb=fn('renderCompassBase');
+  assert.ok(rcb.includes('Měřím radar…'),'kompozit na cestě = viditelný stav, ne zmizení panelu');
+  assert.ok(rcb.includes('gtPendingHas("radar")'),'skeleton říká jen když COMPOZIT skutečně běží');
+  assert.ok(rcb.includes('compassFieldSvg(radarField, C.reachKm, false)'),
+    'kompozitový kompas kreslí reálné pole');
+  const rcc=fn('renderChmiCompass');
+  assert.ok(rcc.includes('CHMI_FIELD_KM') && rcc.includes('compassFieldSvg'),
+    'pohled ČHMÚ kreslí reálné pole z výřezu');
+  assert.ok(rcc.includes('dohled'),'zdrojová řádka říká dosah pohledu');
+  assert.ok(fn('recomputeWhen').includes('mode:"checking"'),
+    'verdikt má stav „ověřuji“');
+  assert.ok(fn('renderSolo').includes('Verdikt · ověřuji'),
+    'mobilní panel umí říct, že verdict ještě není hotový');
+  /* rychlý start: naposledy použitá lokalita z localStorage */
+  assert.ok(fn('load').includes('bpPlace_v1'),'load ukládá poslední lokalitu');
+  assert.ok(fn('init').includes('bpPlace_v1') && fn('init').includes('acquirePosition'),
+    'start vezme cache instantly a geolokaci nechá běžet');
+  assert.ok(script.includes('gtStart("radar")') && script.includes('gtSettle("radar")'),
+    'kompozit se registruje a po dokončení odregistruje');
+  assert.ok(script.includes('gtStart("chmi")') && script.includes('gtStart("stanice")'),
+    'ČHMÚ i stanice se hlásí do registru měření');
 });
