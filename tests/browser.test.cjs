@@ -84,11 +84,12 @@ async function fixture(timezone='America/Los_Angeles',width=1280,height=900){
     return route.fulfill({status:503,json:{error:'Unavailable in deterministic test'}});
   });
   await p.goto(base,{waitUntil:'domcontentloaded'});
-  // Kolo 16: start už nespouští blokující GPS clonu (dřív přes celou
-  // obrazovku „Zjišťuji tvou polohu…“). Geolokace v čerstvém kontextu
-  // (default deny) selže tiše, žádný #retryGeo dialog k zavření —
-  // appka rovnou nabízí vyhledávání.
-  await p.locator('#locInput').waitFor({state:'visible'});
+  // Kolo 17: startovní clona „Zjišťuji tvou polohu…“ je zpátky (Dave
+  // 19. 11.: „Tu clonu při startu, když nejsou načteny data, tam nech.“)
+  // a zamítnutá geolokace (default v čerstvém kontextu, code 1) ukazuje
+  // vzdělávací dialog — zavřeme ho klepnutím do pozadí, jako před kolnem 16.
+  await p.locator('#retryGeo').waitFor({state:'visible'});
+  await p.locator('#status').click({position:{x:4,y:4}});
   return {ctx,p,errors,control,epoch};
 }
 async function search(p,name,enter=false){

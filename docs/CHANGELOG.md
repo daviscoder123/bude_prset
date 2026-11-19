@@ -508,3 +508,38 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
     GPS bez přenačtení, slévání fitPanels s dojezdem); browser
     fixture čeká na vyhledávání místo zavírání GPS dialogu.
     Build index.html 494 504 znaků.
+
+## Kolo 17 — geolokace doopravdy dojede; startovní clona zpátky (19. 11.)
+
+  Dave (19. 11.): „Ono to nezjišťuje polohu. V tom je celý problém.
+  Nejede zjišťování polohy. Tu clonu při startu, když nejsou načteny
+  data, tam nech. Oprav načítání polohy. Nefunguje.“
+
+  Rozbor: jednorázový getCurrentPosition má časovač 12 s; na studeném
+  startu GPS (slabý signál, uzavřené prostranství, úsporný režim)
+  v tomto čase neodpoví, aplikace to vzdala a uživatel viděl buď
+  visící clonu, nebo tiché nic. Přitom telefon by fix doručil
+  o chvíli později — jen se ho nikdo neptal déle.
+
+  Léky:
+  - watchPosition fallback: po vypršení (code 3) nebo nedostupnosti
+    (code 2) se aplikace nevzdává, ale otevře pozorovatel s přesným
+    GPS na až 75 s; první platný fix se použije okamžitě a pozorovatel
+    se zavře (geoWatchStop). Hrubá fáze dostala 15 s místo 12 s.
+  - Po 10 s čekání clona říká, co se děje („rychlá metoda
+    neodpověděla — přecházím na přesné GPS, může to trvat i minutu“)
+    a že klepnutím jde psát obec ručně.
+  - Zamítnutí (code 1) vždy ukáže vzdělávací dialog s cestou do
+    nastavení iPhone — iOS po zamítnutí svůj dotaz už nikdy
+    nezopakuje, dialog je jediná cesta k povolení.
+  - Startovní clona „Zjišťuji tvou polohu…“ je v template zpátky
+    (Dave výslovně žádal); skryje se prvním renderem dat.
+  - Špendlík dál neblokuje (nápověda u vyhledávání, kolo 16);
+    ruční volba obce zastaví čekajícího GPS pozorovatele.
+  - Změny kola 16 zůstávají: práh 1 km bez přenačtení, slévání
+    měření layoutu (FIT_COALESCE_MS), ukládání poslední lokality.
+
+  - Testy: 136/136 (dva přepsané kolo 16/17, jeden nový kolo 17:
+    watchPosition fallback, 15 s/75 s, hint po 10 s, vzdělávací
+    dialog, geoWatchStop v pouzij i v pick); browser fixture zase
+    zavírá startovní dialog. Build index.html 497 525 znaků.
