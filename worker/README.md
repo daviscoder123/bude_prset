@@ -33,6 +33,8 @@ Záznamy se ukládají do KV pod `raw/{YYYYMMDDHH}:{mm}`, TTL 14 dní.
 | `GET /om/v1/ensemble?<params>` | proxy na ensemble-api (TTL 15 min) |
 | `GET /chmi/img?u=<path>` | ČHMÚ radarový PNG přes proxy (CORS `*`, whitelist) |
 | `GET /chmi/fct?base=YYYYMMDD.HHMM&lead=10..60` | ČHMÚ předpověď z TAR archivu |
+| `GET /rv/maps` | passthrough maps.json z api.rainviewer.com (kolo 13) |
+| `GET /rv/img?u=<path>` | passthrough radarové dlaždice z tilecache.rainviewer.com (kolo 13) |
 | `GET /healthz` | diagnostika (proxy + kolektor + chmi) |
 | `GET /analysis` | HTML dashboard: náhled + download JSON |
 | `GET /analysis/page?h=YYYYMMDDHH` | JSON: všech 12 dílků dané hodiny |
@@ -155,3 +157,36 @@ Dashboard `/analysis` umí hodinu/den stáhnout jako JSON soubor.
 Logika výpočtu verdiktů zůstává v klientovi (testovaná, kalibrovaná).
 Worker je tenký a nahraditelný — jeho výpadek klient přežije přímým
 fallbackem na Open-Meteo (nouzové cesty v `load()` jsou vždy přímé).
+
+## Část 4: RainViewer passthrough (kolo 13)
+
+Měřený důvod: na některých mobilních sítích přímé dotazy prohlížeče na
+cizí domény (api./tilecache.rainviewer.com, aviationweather.gov) padají
+i tehdy, když tentýž server z jiné sítě odpovídá 200 — zatímco všechno,
+co putuje přes tento Worker na Cloudflare, jede. Appka proto radarové
+dlaždice a maps.json načítá primárně přímo (CDN, rychlé), a teprve po
+selhání přímé cesty zkouší:
+
+- **`GET /rv/maps`** — passthrough
+  `https://api.rainviewer.com/public/weather-maps.json`, cache 60 s.
+- **`GET /rv/img?u=<path>`** — passthrough dlaždice z
+  `https://tilecache.rainviewer.com`, cache 3600 s (snímek pod
+  neměnným hashem se nemění). Whitelist přijímá PŘESNĚ tvar, který
+  posílá appka (`rvTile`), tedy
+  `/v2/radar/<hash>/256/<z>/<x>/<y>/<schéma>/<smooth>_<sníh>.png` —
+  nic jiného (maska pokrytí, jiné velikosti, cesta ven) Worker
+  neprotáhne, není to otevřená png proxy.
+
+### Nasazení kola 13 (v příkazové řádce)
+
+```bash
+npx wrangler deploy      # z kořene repa, čte worker/wrangler.jsonc
+```
+
+Ověření: `<URL>/healthz` → v `endpoints` přibude `"rv":["/rv/maps","/rv/img"]`;
+dále `curl <URL>/rv/maps` vrátí maps.json a
+`curl "<URL>/rv/img?u=%2Fv2%2Fradar%2F<hash>%2F256%2F7%2F69%2F43%2F0%2F0_1.png"`
+vrátí image/png (hash vemte z `/rv/maps`, pole `radar.past[].path`).
+
+Bez nasazení kola 13 appka funguje jako dřív: `/rv/*` vrátí 404,
+fallback se vzdá a verdikt drží pozemní pravda (kolo 12c).

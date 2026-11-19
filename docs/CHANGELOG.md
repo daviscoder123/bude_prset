@@ -334,3 +334,36 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
     - **Mobilní verdikt rozlišuje potvrzovatele** (stanice /
       radar / český radar / počet nezávislích) i
       v whenState.chmiSolo.
+  - **(kolo 13) Radar má druhou nohu přes Worker; řádek ČHMÚ v
+    seznamu modelů rušen.** Dave (19. 11. 12:52, mobil): „Radar
+    nejede a taky nechápu, proč má ČHMÚ radar kolonku v seznamu
+    modelů." Měření: api.rainviewer.com i dlaždice z tohoto stroje
+    zdravé (200/818 B za 0,09 s; kompozit 200), ČHMÚ opendata a
+    Worker také (now PNG 200/27 986 B, legenda 200/985 B), LKPR
+    191130Z -RA BKN043, ČHMÚ nad Prahou zelené echo (0,160,0),
+    kompozit nad Prahou průhledný — radar na Daveově mobilu ale
+    celý den „Radar se nepodařilo načíst." (radarState „error").
+    Vyšlo najevo, že přímé dotazy na cizí domény z jeho mobilní
+    sítě opakovaně padají (dnes i aviationweather.gov), zatímco
+    všechno přes Worker na Cloudflare jede. Dvě změny:
+    - **Pojistka radaru přes Worker:** po selhání přímé maps.json
+      se zkouší `/rv/maps`, po selhání přímé dlaždice `/rv/img`
+      (nové endpointy workeru, passthrough s CORS `*`, úzký
+      whitelist tvaru dlaždice; appka se ptá nejdřív přímo —
+      CDN zůstává primární nohou). Maps fallback posouvá offline
+      zálohu na poslední místo (nový parametr cachedJson
+      `noOffline`), aby týdny starý seznam snímků nepřebil živý
+      dotaz. Maska pokrytí zůstává přímá (její selhání verdikt
+      nechytá). Bez nasazeného workeru se nic nemění: `/rv/*`
+      vrátí 404 a appka zůstává u starého chování, verdikt drží
+      pozemní pravda z kola 12c.
+    - **Řádek ČHMÚ v tabulce modelů odstraněn** (Dave: radar
+      není model, sloupec mezi předpověďmi matlaje). Národní
+      radar dál hlasuje: chmiPotvrzuje v „prší právě teď",
+      chmiSolo v kompasu, svědek v groundTruthWitnesses; jen už
+      není vidět jako kolonka v tabulce.
+    - Testy: 124/124 (nové: dvě nohy maps.json včetně pořadí
+      dotazů a offline zálohy na posledním místě; proxy URL jen
+      pro rainviewer dlaždice; strukturální pojistky zrušené
+      renderChmiRow i zachovalého hlasování ČHMÚ; worker:
+      passthrough maps i tiles, whitelist 400, šíření 404).
