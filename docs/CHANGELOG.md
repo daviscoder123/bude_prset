@@ -310,3 +310,27 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
       (zkusím znovu)") — mlčící svědek už nepřipadá za „neprší".
       Kompas tím získává druhého nezávislého svědka pro verdikt
       „Právě nad tebou prší." i když METAR na mobilu nedo-jede.
+  - **(kolo 12c) Výpadek kompozitu nezastaví výpověď pozorování.** Dave
+    (19. 11. 12:33, mobil): „Teď ČHMÚ nejede vůbec" — Kompozit
+    RainViewer na výpadkovém mobilním připojení nesedl (zdroj
+    přitom změřeno 11:34 UTC zdravý: mapa 200/818 B, dlaždice
+    200/39 693 B za 0,09 s), ČHMÚ už mezitím po opravě 12b hlasoval
+    („nezávislá potvrzení: 1 · zdroj ČHMÚ"), ale kompas ukázal jen
+    „Radar se nepodařilo načíst." a verdikt zůstal „nepotvrzeno".
+    Tři léky:
+    - **Chybová větev kompasu mluví pravdou:** radarState „error" +
+      svědek na zemi (stanice kola 8v, nebo ČHMÚ ≤ 45 min, nově
+      společní funkcí groundTruthWitnesses) → verdikt „Právě nad
+      tebou prší." s vysvětlením, že kompozit se nepodařilo načíst
+      a že se zkusí znovu sám. Chyba jednoho zdroje není mlčení
+      o dešti.
+    - **ČHMÚ potvrzuje „prší právě teď" samo:** čerstvé ECHO
+      PseudoCAPPI nad obcí (≤ 45 min) stačí jako samostatné
+      potvrzení, stejně jako stanice (kolo 8v) a kompozit
+      (kolo 8x). Při příležitosti opraven i skrytý pád: větev
+      verdiktu dřív četla radarState.ageMin bez kontroly nuly —
+      s ČHMÚ jako samostatným potvrzením mohla recomputeWhen
+      spadnout úplně.
+    - **Mobilní verdikt rozlišuje potvrzovatele** (stanice /
+      radar / český radar / počet nezávislích) i
+      v whenState.chmiSolo.

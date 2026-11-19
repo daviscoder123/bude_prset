@@ -142,7 +142,7 @@ test('render rejects old generation or unregistered forecast without touching DO
 });
 test('model-only current and native/interpolated minutely signals cannot confirm observed rain',()=>{
   const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
-  const c=context(['recomputeWhen','stanicePotvrzujeSelf'],{
+  const c=context(['recomputeWhen','stanicePotvrzujeSelf','chmiNowWet'],{
     $:id=>nodes[id],reqId:1,cur:{},radarState:null,stormMotion:null,
     altNowcast:[{t:Date.now()/1000,mmh:0.4}],modelCurrent:{mmh:0.4,code:61},
     native15:true,obsMetar:null,chmiState:null,metnoNow:null,regioNowcast:null,satState:null,
@@ -165,7 +165,7 @@ test('model-only current and native/interpolated minutely signals cannot confirm
 });
 test('radar plus METAR still confirms rain; model intensity and labels stay out of verified data',()=>{
   const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
-  const c=context(['recomputeWhen','stanicePotvrzujeSelf','saneMm','cap'],{
+  const c=context(['recomputeWhen','stanicePotvrzujeSelf','chmiNowWet','saneMm','cap'],{
     $:id=>nodes[id],reqId:1,cur:{},radarState:{nowMm:1},radarTimeline:null,stormMotion:null,
     altNowcast:[{t:Date.now()/1000,mmh:20}],modelCurrent:{mmh:40,code:61},
     native15:true,obsMetar:{wx:'RA',name:'Test station',km:1},chmiState:null,
@@ -187,7 +187,7 @@ test('radar-detected approaching rain sets "soon" state and renders the mobile p
   const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
   let soloCalls=0;
   const verdicts=[];
-  const c=context(['recomputeWhen','stanicePotvrzujeSelf','saneMm','cap','locKeyOf','verdictProb','verdictProbSrc'],{
+  const c=context(['recomputeWhen','stanicePotvrzujeSelf','chmiNowWet','saneMm','cap','locKeyOf','verdictProb','verdictProbSrc'],{
     $:id=>nodes[id],modelState:{},whenState:null,
     cur:{lat:50.1,lon:15.3,cc:'CZ'},
     radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
@@ -1017,4 +1017,44 @@ test('kolo 12b: výpadek stanice i ČHMÚ se pojmenuje u zdrojů',()=>{
   assert.ok(bad.includes('stanice nedostupná (zkusím znovu)'),'stanice se neumlčí');
   assert.ok(bad.includes('český radar nedostupný (zkusím znovu)'),'ČHMÚ se neumlčí');
   assert.ok(bad.includes('zkusím znovu'),'retry slib je součástí hlášky');
+});
+
+/* Kolo 12c: výpadek kompozitu nezastaví výpověď pozorování. Dave
+   (19. 11. 12:33, mobil): kompozit RainViewer na výpadkovém
+   připojení nesedl, ČHMÚ hlásil ECHO nad obcí u -RA — kompas ale
+   ukázal jen „Radar se nepodařilo načíst." a panel zůstal
+   „nepotvrzeno". Nově: chyba kompozitu vypovídá o kompozitu,
+   o dešti vypovídají svědci na zemi (kompas + verdikt). */
+test('kolo 12c: kompas neumlčí pravdu, když kompozit spadl',()=>{
+  const ig=script.indexOf('gtErr');   /* uvnitř chybové větve, ne v komentáři */
+  assert.notEqual(ig,-1,'chybí chybová větev kompasu');
+  const seg=script.slice(ig-900,ig+2200);
+  assert.ok(seg.includes('Právě nad tebou prší.'),'verdikt z pozorování i v chybové větvi');
+  assert.ok(seg.includes('groundTruthWitnesses()'),'společní svědci s větví „kompozit mlčí“');
+  assert.ok(seg.includes('kompozit nedostupný'),'selhání kompozitu se přizná u zdroje');
+});
+test('kolo 12c: ČHMÚ potvrzuje „prší právě teď“ samo (čerstvé ECHO)',()=>{
+  const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
+  const c=context(['recomputeWhen','stanicePotvrzujeSelf','chmiNowWet','saneMm','cap'],{
+    $:id=>nodes[id],reqId:1,cur:{},radarState:null,radarTimeline:null,stormMotion:null,
+    altNowcast:[{t:Date.now()/1000,mmh:0}],modelCurrent:{mmh:0,code:0},
+    native15:true,obsMetar:null,
+    chmiState:{nowWet:true,nowOrd:0.25,ageMin:7,steps:[],first:null,scale:12},
+    metnoNow:null,regioNowcast:null,satState:null,modelState:{},whenState:null,
+    setTimeout:()=>{},fitPanels:()=>{},
+    radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
+    THRESH_OBS:0.2,MAX_SANE_MMH:500,
+    chmiFirstEchoMin:()=>null,chmiSaysDry:()=>false,
+    buildBlendTimeline:()=>[],wmoType:()=>({t:'déšť',i:'test'}),
+    sourceCaveat:()=>'',renderSolo:()=>{},renderRainEnd:()=>{},estimateRainEnd:()=>null,fmtMM:String
+  });
+  c.recomputeWhen();
+  assert.equal(c.whenState.mode,'wet','čerstvé ECHO ČHMÚ potvrzuje samo');
+  assert.ok(c.whenState.votes.includes('ČHMÚ'),'ČHMÚ je ve zdrojích verdiktu');
+  assert.equal(c.whenState.mmh,0.1,'bez mm/h zdroje zůstává poctivých 0,1 mm/h');
+  /* starý snímek ČHMŮ už „právě teď“ nedokládá */
+  c.chmiState={nowWet:true,nowOrd:0.25,ageMin:50,steps:[],first:null,scale:12};
+  c.whenState=null;
+  c.recomputeWhen();
+  assert.notEqual(c.whenState.mode,'wet','ECHO starší 45 min samo nepotvrzuje');
 });
