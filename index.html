@@ -4108,7 +4108,112 @@ function metarTrend(raw){
   var wx = (tail.match(/[-+]?(?:VC)?(?:SH|TS|FZ|DZ|RA|SN|GR|GS|PL|SG|IC|UP)+/g) || []).join(" ");
   return {kind: m[1], precip: metarHasPrecip(wx), wx: wx};
 }
+/* KOLO 12: Pravidla kola 8v („stanice potvrzuje prší právě teď sama")
+   vytažená do funkce, protože je od kola 12 potřebuje i radarový
+   kompas (renderCompassBase): kompozit nad obcí mlčí, ale pozemní
+   senzor déšť změřil — kompas musí říkat pravdu z pozorování, ne
+   geometrii kompozitu. Jeden zdroj pravidel = žádný rozchod mezi
+   panelem Kdy a kompasem. */
+function stanicePotvrzujeSelf(){
+  if(!obsMetar || obsMetar === "error" || !metarHasPrecip(obsMetar.wx)) return false;
+  var konvektivni = /SH|TS/.test(obsMetar.wx.toUpperCase());
+  var cerstve = (obsMetar.ageMin == null || obsMetar.ageMin <= 60);
+  var km = (typeof obsMetar.km === "number") ? obsMetar.km : null;
+  if(km == null) return false;
+  var modSign = false;   /* vzdálenější stanice stačí se souhlasem modelu */
+  var altSeries = (altNowcast && altNowcast !== "error") ? altNowcast : null;
+  if(altSeries && altSeries.length){
+    for(var si = 0; si < Math.min(2, altSeries.length); si++){
+      if(altSeries[si].mmh != null && altSeries[si].mmh >= 0.1){ modSign = true; break; }
+    }
+  }
+  if(modelCurrent && modelCurrent !== "error"
+     && modelCurrent.mmh != null && modelCurrent.mmh >= 0.1) modSign = true;
+  return !!((cerstve && km <= (konvektivni ? 12 : 25)) || (modSign && km <= 60));
+}
+/* KOLO 12: Národní radar ČHMÚ (PseudoCAPPI 2 km, 1 km na pixel) má nad
+   obcí echo? Měřený případ (19. 11. 2026, Praha): celý výřez ±7 px
+   zelené (slabý déšť), zatímco globální kompozit RainViewer u toho
+   viděl sucho. Pro kompas to platí jen s čerstvým snímkem (do 45 min
+   — publikace ČHMŮ bývá pár minut pozadu, déle už jistota klesá). */
+function chmiNowWet(){
+  return !!(chmiState && chmiState !== "off" && chmiState !== "error" && chmiState.nowWet
+            && (chmiState.ageMin == null || chmiState.ageMin <= 45));
+}
 var modelState = null;   /* {times:[Date], consensus:[int], N, perHourMax:[mm]} */
+
+/* ================= KOLO 12: POZEMNÍ PRAVDA SE NESMÍ ZTRATIT =================
+   Dave (19. 11., mobil): „Právě prší. Proč to radar nevidí?" — venku
+   mrholí déšť (LKPR 191030Z -RA), národní radar ČHMÚ má nad Prahou
+   zelené echo v celém výřezu 1 km/px, ale kompas řekl „Tě mine" a
+   panel Kdy hlásil „nezávislé potvrzení: 0". Příčina nebyla v logice
+   (ta stanici i ČHMÚ počítá), ale v tom, že jediné výpadkové připojení
+   na mobilu umlčelo oba pozemní zdroje stejně jako dřív
+   radar (kolo 11): METAR i ČHMÚ se načítají jednou a jednorázová
+   chyba je zhasne až do ručního obnovení. Lék je stejný jako u radaru:
+   automatický dotah. Od kola 12 proto METAR běží ve vlastní funkci
+   loadMetar() s retry (scheduleMetarRetry) a ČHMÚ si po chybě také
+   dotahuje (scheduleChmiRetry). A kompas se učil mluvit pravdu:
+   renderCompassBase používá stanicePotvrzujeSelf()/chmiNowWet(),
+   takže „Tě mine" už nikdy nepopře déšť, který právě padá. */
+var bpMetarRetryT = null;          /* běžící METAR dotah — max jeden */
+var METAR_RETRY_DELAYS = [20000, 60000];   /* dva pokusy: +20 s, +60 s */
+function scheduleMetarRetry(lat, lon, myId, attempt){
+  if(attempt >= METAR_RETRY_DELAYS.length) return;   /* víc než dvě dotahy nikdy */
+  if(bpMetarRetryT != null) return;                  /* jeden už běží */
+  bpMetarRetryT = setTimeout(function(){
+    bpMetarRetryT = null;
+    /* mezitím dorazilo plutné pozorování = pokus netřeba */
+    if(typeof obsMetar !== "undefined" && obsMetar && obsMetar !== "error") return;
+    if(isStale(myId)) return;                    /* mezitím se změnila lokální */
+    loadMetar(lat, lon, myId, attempt+1);
+  }, METAR_RETRY_DELAYS[attempt]);
+}
+/* zdroj 4: METAR — reálný senzor srážek na nejbližší letecké stanici
+   (do ~100 km). Vytaženo z load(), aby po výpadku API nebo sítě šlo
+   dotáhnout (aviationweather.gov občas odpoví prázdně či neodpoví
+   vůbec; měřeno 19. 11.: totéž URL o chvíli později 200 s daty). */
+function loadMetar(lat, lon, myId, attempt){
+  attempt = attempt || 0;
+  cachedJson("https://aviationweather.gov/api/data/metar?format=json&hours=2&bbox="
+    + metarBbox(lat, lon), 600000)
+    .then(function(arr){
+      if(isStale(myId)) return;
+      if(!arr || !arr.length){
+        obsMetar = "error"; recomputeWhen();
+        scheduleMetarRetry(lat, lon, myId, attempt);
+        return;
+      }
+      /* Bere se nejbližší stanice, KTERÁ UMÍ HLÁSIT POČASÍ. Bližší bóje
+         se přeskočí — je lepší mít pravdu z letiště o 60 km dál než
+         ticho z bóje o 8 km blíž. */
+      var best = null, bestD = 1e9, preskoceno = 0;
+      arr.forEach(function(o){
+        if(o.lat == null || o.lon == null) return;
+        var dd = distKm(lat, lon, o.lat, o.lon);
+        var age = o.obsTime ? (Date.now()/1000 - o.obsTime) : 9999;
+        if(dd > 120 || age >= 5400) return;
+        if(!staniceHlasiPocasi(o)){ preskoceno++; return; }
+        if(dd < bestD){ bestD = dd; best = o; }
+      });
+      metarPreskoceno = preskoceno;
+      if(!best){
+        obsMetar = "error"; recomputeWhen();
+        scheduleMetarRetry(lat, lon, myId, attempt);
+        return;
+      }
+      obsMetar = {wx: best.wxString || "", name: best.name || best.icaoId || "stanice",
+                  km: Math.round(bestD), raw: best.rawOb || "",
+                  ageMin: Math.max(0, Math.round((Date.now()/1000 - (best.obsTime || 0))/60))};
+      satVerifyAgainstMetar();      /* družice si tímhle buduje (nebo kazí) důvěru */
+      recomputeWhen();
+    })
+    .catch(function(){
+      if(isStale(myId)) return;
+      obsMetar = "error"; recomputeWhen();
+      scheduleMetarRetry(lat, lon, myId, attempt);
+    });
+}
 
 /* ================= KOLO 11: RADAR SE NESMÍ ZTRATIT BEZE SLOVA =================
    Dave (18. 11., mobil): kompas i radarová větev na prvotním načtení
@@ -4303,33 +4408,11 @@ function loadRadar(lat, lon, myId, attempt){
       recomputeWhen();
     });
 
-  /* zdroj 4: METAR — reálný senzor srážek na nejbližší letecké stanici (do ~100 km) */
-  cachedJson("https://aviationweather.gov/api/data/metar?format=json&hours=2&bbox="
-    + metarBbox(lat, lon), 600000)
-    .then(function(arr){
-      if(isStale(myId)) return;
-      if(!arr || !arr.length){ obsMetar = "error"; recomputeWhen(); return; }
-      /* Bere se nejbližší stanice, KTERÁ UMÍ HLÁSIT POČASÍ. Bližší bóje
-         se přeskočí — je lepší mít pravdu z letiště o 60 km dál než
-         ticho z bóje o 8 km blíž. */
-      var best = null, bestD = 1e9, preskoceno = 0;
-      arr.forEach(function(o){
-        if(o.lat == null || o.lon == null) return;
-        var dd = distKm(lat, lon, o.lat, o.lon);
-        var age = o.obsTime ? (Date.now()/1000 - o.obsTime) : 9999;
-        if(dd > 120 || age >= 5400) return;
-        if(!staniceHlasiPocasi(o)){ preskoceno++; return; }
-        if(dd < bestD){ bestD = dd; best = o; }
-      });
-      metarPreskoceno = preskoceno;
-      if(!best){ obsMetar = "error"; recomputeWhen(); return; }
-      obsMetar = {wx: best.wxString || "", name: best.name || best.icaoId || "stanice",
-                  km: Math.round(bestD), raw: best.rawOb || "",
-                  ageMin: Math.max(0, Math.round((Date.now()/1000 - (best.obsTime || 0))/60))};
-      satVerifyAgainstMetar();      /* družice si tímhle buduje (nebo kazí) důvěru */
-      recomputeWhen();
-    })
-    .catch(function(){ if(isStale(myId)) return; obsMetar = "error"; recomputeWhen(); });
+  /* zdroj 4: METAR — reálný senzor srážek na nejbližší letecké stanici
+     (do ~100 km). Od kola 12 ve vlastní loadMetar() s automatickým
+     dotahem po výpadku — právě pozorování je nejdůležitější hlas
+     „prší právě teď“ a jednorázová odpověď API ho nesmí zhasnout. */
+  loadMetar(lat, lon, myId, 0);
 
   /* 3×3 mřížka bodů kolem obce (~3 km rozestup) — přeháňky jsou lokální,
      jeden bod je snadno mine. Bereme medián a maximum z devíti bodů. */
@@ -5067,6 +5150,39 @@ function renderCompassBase(){
         + " " + (tipx + dye*2.4).toFixed(1) + "," + (tipy + dxe*2.4).toFixed(1)
         + '" fill="#A8E4FF"/>';
     }
+  }
+  /* KOLO 12: POZEMNÍ PRAVDA NAD KOMPÓZITEM. Měřený případ (19. 11. 2026,
+     Praha): kompozit RainViewer nad Prahou nevidí nic (slabý déšť pod
+     jeho prahem), LKPR hlásí -RA a ČHMÚ PseudoCAPPI má nad Prahou zelené
+     echo v každém pixelu — a kompas přesto tvrdil „Tě mine", ačkoliv
+     venku prší. Kompas je panel radaru, ale jeho verdikt uživatel čte
+     jako „co se děje se mnou právě teď". Když kompozit nad obcí mlčí
+     a nezávislé pozemní měření (stanice METAR dle pravidel kola 8v
+     v stanicePotvrzujeSelf, nebo národní radar ČHMÚ v chmiNowWet)
+     hlásí srážky, verdikt řekne pravdu z pozorování a geometrii
+     kompozitu zařadí do vedlejší věty. Rozpor se nezamlčí — je
+     vyslovený slovy, stejně jako rekonciliace s radarovou osou níž. */
+  if(!viaSat && (C.state === "miss" || C.state === "standing" || C.state === "empty")
+     && (C.vMm == null || (typeof C.vMm === "number" && C.vMm < 0.1))
+     && (stanicePotvrzujeSelf() || chmiNowWet())){
+    var pravda = [];
+    if(stanicePotvrzujeSelf())
+      pravda.push("stanice " + obsMetar.name + " (" + obsMetar.km + " km) hlásí srážky"
+                + (obsMetar.wx ? " (kód " + obsMetar.wx + ")" : ""));
+    if(chmiNowWet())
+      pravda.push("národní radar ČHMÚ (1 km na pixel, snímek " + chmiState.ageMin
+                + " min) má nad tebou echo");
+    verd = "Právě nad tebou prší."; cls = "hit";
+    expl = "Kompozit RainViewer nad tebou nevidí nic — takhle slabý déšť se pod"
+         + " jeho práhem ztrácí. Ale " + pravda.join(" a ") + "."
+         + (C.state === "empty"
+            ? " V okruhu ~" + C.reachKm + " km kompozit nevidí ani jiné echo."
+            : (C.state === "miss"
+               ? " Silnější echo kompozitu (" + C.distKm + " km " + C.bearingFrom
+               + ") tě mine (" + C.missKm + " km " + C.missBearing + ")."
+               : " Jedno výraznější echo kompozitu (" + C.distKm + " km "
+               + C.bearingFrom + ") tam dál stojí."));
+    src += " · kompozit mlčí, pravdu říká pozorování";
   }
   svg += '</svg>';
   el.innerHTML = '<div class="label">' + (viaSat ? "Satelit" : "Radar") + '</div>' + svg
@@ -5939,7 +6055,24 @@ function chmiReadPatch(patch){
   return {wet:wet, ord: seen ? ord : 0, pixels:seen};
 }
 
-function loadChmi(lat, lon, myId){
+/* KOLO 12: ČHMÚ po chybě dotahuje samo (viz METAR výše) — národní radar
+   je druhá noha pozemní pravdy a jednorázová výpadková odpověď workeru
+   ani opendata nesmí umlčet modul až do ručního obnovení. */
+var bpChmiRetryT = null;
+var CHMI_RETRY_DELAYS = [20000, 60000];   /* dva pokusy: +20 s, +60 s */
+function scheduleChmiRetry(lat, lon, myId, attempt){
+  if(attempt >= CHMI_RETRY_DELAYS.length) return;   /* víc než dvě dotahy nikdy */
+  if(bpChmiRetryT != null) return;                  /* jeden už běží */
+  bpChmiRetryT = setTimeout(function(){
+    bpChmiRetryT = null;
+    if(typeof chmiState !== "undefined" && chmiState && chmiState !== "error") return;
+    if(isStale(myId)) return;                    /* mezitím se změnila lokální */
+    loadChmi(lat, lon, myId, attempt+1);
+  }, CHMI_RETRY_DELAYS[attempt]);
+}
+
+function loadChmi(lat, lon, myId, attempt){
+  attempt = attempt || 0;
   chmiState = null; chmiNote = "";
   if(!chmiInRange(lat, lon)){
     chmiState = "off";
@@ -5969,6 +6102,7 @@ function loadChmi(lat, lon, myId){
         chmiState = "error";
         if(!chmiNote) chmiNote = "žádný čerstvý snímek";
         recomputeWhen();
+        scheduleChmiRetry(lat, lon, myId, attempt);
         return;
       }
       /* Předpovědní sada se počítá ze stejného času jako poslední snímek. */
@@ -8551,10 +8685,6 @@ function recomputeWhen(){
          (sousední 15min okna, ne jen aktuální — slabý déšť spadne mezi
          mřížky zrovna kolem půlky okna). */
   var staniceWet = !!(obsMetar && obsMetar !== "error" && metarHasPrecip(obsMetar.wx));
-  var staniceKm = (staniceWet && typeof obsMetar.km === "number") ? obsMetar.km : null;
-  var staniceKonvektivni = !!(staniceWet && /SH|TS/.test(obsMetar.wx.toUpperCase()));
-  var staniceCerstve = !!(staniceWet
-                          && (obsMetar.ageMin == null || obsMetar.ageMin <= 60));
   var modSign = false;
   if(altSeries && altSeries.length){
     for(var si2 = 0; si2 < Math.min(2, altSeries.length); si2++){
@@ -8563,10 +8693,10 @@ function recomputeWhen(){
   }
   if(modelCurrent && modelCurrent !== "error"
      && modelCurrent.mmh != null && modelCurrent.mmh >= 0.1) modSign = true;
-  var stanicePotvrzuje = !!(staniceWet
-    && ((staniceCerstve && staniceKm != null
-         && staniceKm <= (staniceKonvektivni ? 12 : 25))
-        || (modSign && staniceKm != null && staniceKm <= 60)));
+  /* KOLO 12: samotné pravidlo potvrzení žije ve funkci
+     stanicePotvrzujeSelf() — používá ho i radarový kompas, aby panel Kdy
+     a kompas nikdy neříkaly dvě různé věci o jednom dešti. */
+  var stanicePotvrzuje = stanicePotvrzujeSelf();
 
   /* ---- RADAR JAKO POTVRZENÍ SAMA (kolo 8x) ----
      Radar je měření nad lokalitou, ne predikce — a stejně jako stanice

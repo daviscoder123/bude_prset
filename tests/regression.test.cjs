@@ -142,7 +142,7 @@ test('render rejects old generation or unregistered forecast without touching DO
 });
 test('model-only current and native/interpolated minutely signals cannot confirm observed rain',()=>{
   const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
-  const c=context(['recomputeWhen'],{
+  const c=context(['recomputeWhen','stanicePotvrzujeSelf'],{
     $:id=>nodes[id],reqId:1,cur:{},radarState:null,stormMotion:null,
     altNowcast:[{t:Date.now()/1000,mmh:0.4}],modelCurrent:{mmh:0.4,code:61},
     native15:true,obsMetar:null,chmiState:null,metnoNow:null,regioNowcast:null,satState:null,
@@ -165,7 +165,7 @@ test('model-only current and native/interpolated minutely signals cannot confirm
 });
 test('radar plus METAR still confirms rain; model intensity and labels stay out of verified data',()=>{
   const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
-  const c=context(['recomputeWhen','saneMm','cap'],{
+  const c=context(['recomputeWhen','stanicePotvrzujeSelf','saneMm','cap'],{
     $:id=>nodes[id],reqId:1,cur:{},radarState:{nowMm:1},radarTimeline:null,stormMotion:null,
     altNowcast:[{t:Date.now()/1000,mmh:20}],modelCurrent:{mmh:40,code:61},
     native15:true,obsMetar:{wx:'RA',name:'Test station',km:1},chmiState:null,
@@ -187,7 +187,7 @@ test('radar-detected approaching rain sets "soon" state and renders the mobile p
   const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
   let soloCalls=0;
   const verdicts=[];
-  const c=context(['recomputeWhen','saneMm','cap','locKeyOf','verdictProb','verdictProbSrc'],{
+  const c=context(['recomputeWhen','stanicePotvrzujeSelf','saneMm','cap','locKeyOf','verdictProb','verdictProbSrc'],{
     $:id=>nodes[id],modelState:{},whenState:null,
     cur:{lat:50.1,lon:15.3,cc:'CZ'},
     radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
@@ -904,4 +904,81 @@ test('kolo 11: výpadek radaru je vidět, nezmizí tiše',()=>{
   const seg=script.slice(ir,ir+2200);
   assert.ok(seg.includes('Radar se nepodařilo načíst'),'výplň kompasu místo tichého zmizení');
   assert.ok(seg.includes('radarState === "error" && !C'),'jen když není co kreslit (satelit může dodat)');
+});
+
+/* Kolo 12: pozemní pravda se nesmí ztratit, ani zůstat bez hlasu.
+   Dave 19. 11. 11:56 (mobil): „Právě prší. Proč to radar nevidí?"
+   Měřeno: LKPR 191030Z -RA, ČHMÚ PseudoCAPPI nad Prahou zelené echo
+   v celém výřezu 1 km/px, kompozit RainViewer sucho — a kompas řekl
+   „Tě mine", panel Kdy „nezávislé potvrzení: 0", protože jednorázový
+   výpadek umlčel METAR i ČHMÚ bez dotahu. Fix = retry pozemních
+   zdrojů + kompas říká pravdu z pozorování, když kompozit mlčí. */
+test('kolo 12: stanicePotvrzujeSelf — pravidla kola 8v v jedné funkci',()=>{
+  const c=context(['stanicePotvrzujeSelf','metarHasPrecip'],{obsMetar:null,altNowcast:null,modelCurrent:null});
+  const wet={wx:'-RA',name:'LKPR',km:11,ageMin:29,raw:''};
+  c.obsMetar=wet;
+  assert.equal(c.stanicePotvrzujeSelf(),true,'blízká čerstvá stanice stačí sama');
+  c.obsMetar={...wet,km:30};
+  assert.equal(c.stanicePotvrzujeSelf(),false,'30 km bez souhlasu modelu nestačí');
+  c.modelCurrent={mmh:0.4};
+  assert.equal(c.stanicePotvrzujeSelf(),true,'30 km se souhlasem modelu ano');
+  c.modelCurrent=null;
+  c.obsMetar={...wet,km:11,wx:''};
+  assert.equal(c.stanicePotvrzujeSelf(),false,'suchá stanice nikdy');
+  c.obsMetar={...wet,km:11,ageMin:70};
+  assert.equal(c.stanicePotvrzujeSelf(),false,'staré pozorování samo nestačí');
+  c.obsMetar={...wet,km:11,ageMin:70};
+  c.modelCurrent={mmh:0.4};
+  assert.equal(c.stanicePotvrzujeSelf(),true,'starší blízká stanice se souhlasem modelu ano (kolo 8v)');
+  c.obsMetar='error';
+  assert.equal(c.stanicePotvrzujeSelf(),false,'error nikdy');
+});
+test('kolo 12: chmiNowWet jen s čerstvým echem nad tebou',()=>{
+  const c=context(['chmiNowWet'],{chmiState:null});
+  c.chmiState={nowWet:true,ageMin:7};
+  assert.equal(c.chmiNowWet(),true);
+  c.chmiState={nowWet:true,ageMin:50};
+  assert.equal(c.chmiNowWet(),false,'starý snímek se do právě-teď nepočítá');
+  c.chmiState={nowWet:false,ageMin:7};
+  assert.equal(c.chmiNowWet(),false,'suchý ČHMÚ nemluví');
+  c.chmiState='error';  assert.equal(c.chmiNowWet(),false);
+  c.chmiState='off';    assert.equal(c.chmiNowWet(),false);
+  c.chmiState=null;     assert.equal(c.chmiNowWet(),false);
+});
+test('kolo 12: kompas nezmění pravdu o dešti za geometrii kompozitu',()=>{
+  const ir=script.indexOf('function renderCompassBase');
+  assert.notEqual(ir,-1,'chybí renderCompassBase');
+  const seg=script.slice(ir,ir+15000);
+  assert.ok(seg.includes('Právě nad tebou prší.'),
+    'verdikt z pozorování');
+  assert.ok(seg.includes('stanicePotvrzujeSelf()'),'pravidla stanice z kola 8v');
+  assert.ok(seg.includes('chmiNowWet()'),'národní radar jako druhý svědek');
+  assert.ok(seg.includes('kompozit mlčí'),'rozpor se neumlčí');
+  assert.ok(/C\.state === "miss" \|\| C\.state === "standing" \|\| C\.state === "empty"/.test(seg),
+    'pouze když kompozit nad tebou mlčí');
+});
+test('kolo 12: METAR má dotah po výpadku (loadMetar)',()=>{
+  assert.ok(script.includes('function loadMetar'),'METAR ve vlastní funkci');
+  const lm=fn('loadMetar');
+  const paths=(lm.match(/scheduleMetarRetry\(lat, lon, myId, attempt\);/g)||[]).length;
+  assert.ok(paths>=3,'tři chybové cesty (prázdná odpověď, žádná stanice, síť) dotahují, mám '+paths);
+  const lr=fn('loadRadar');
+  assert.ok(lr.includes('loadMetar(lat, lon, myId, 0)'),'loadRadar spouští loadMetar');
+  assert.ok(!lr.includes('aviationweather.gov'),'inline dotaz pryč z loadRadar');
+  const sr=fn('scheduleMetarRetry');
+  assert.ok(sr.includes('attempt >= METAR_RETRY_DELAYS.length'),'strop dvou dotahů');
+  assert.ok(sr.includes('obsMetar && obsMetar !== "error"'),'mezitím vyřešeno = pokus netřeba');
+});
+test('kolo 12: ČHMÚ po chybě dotahuje samo',()=>{
+  const lc=fn('loadChmi');
+  assert.ok(lc.includes('scheduleChmiRetry(lat, lon, myId, attempt);'),'error branch dotahuje');
+  assert.ok(script.includes('CHMI_RETRY_DELAYS = [20000, 60000]'),'dotahy: +20 s a +60 s');
+  const lr=fn('loadRadar');
+  assert.ok(lr.includes('loadChmi(lat, lon, myId)'),'loadRadar dále spouští ČHMÚ');
+  assert.ok(fn('scheduleChmiRetry').includes('attempt >= CHMI_RETRY_DELAYS.length'),'strop dvou dotahů');
+});
+test('kolo 12: panel Kdy i kompas čtou táž pravidla potvrzení stanicí',()=>{
+  const rw=fn('recomputeWhen');
+  assert.ok(rw.includes('stanicePotvrzujeSelf()'),'verdikt používá sdílenou funkci');
+  assert.ok(!rw.includes('staniceCerstve &&'),'inline kopie pravidel pryč');
 });
