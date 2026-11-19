@@ -338,6 +338,13 @@ html.compact .compass .ct .expl{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--f
 html.compact .compass .ct .src{font-size:calc(clamp(8px,2.2vw,9px)*var(--fit,1))}
 .compass .label{flex:0 0 100%;font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .compass svg{flex:none}
+/* Kolo 14 (Dave): minimalistický přepínač kompozit / ČHMÚ vpravo nahoře
+   v panelu radar. Mono kapitálky a tenký rámeček jako zbytek panelu;
+   zobrazí se jen pro lokality v pokrytí českého radaru (jinak ho render
+   vůbec nevykreslí). Klik přepíná data, design zůstává. */
+.compass{position:relative}
+.compass .radSwitch{position:absolute;top:clamp(6px,1.2vh,10px);right:clamp(6px,1.4vw,12px);background:transparent;border:1px solid var(--line);border-radius:8px;padding:3px 8px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);cursor:pointer}
+.compass .radSwitch:active{color:var(--text);border-color:var(--text)}
 .compass .ct{min-width:0;flex:1}
 .compass .ct .verd{font-weight:800;font-size:clamp(11px,1.65vh,14px);letter-spacing:-.01em}
 .compass .ct .verd.hit{color:var(--rain)}

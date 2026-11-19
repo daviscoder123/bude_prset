@@ -1129,3 +1129,65 @@ test('kolo 13: strukturální pojistky radaru i zrušeného řádku ČHMÚ',()=>
     'hlasování ČHMÚ ve verdiktu zůstává');
   assert.ok(!fn('loadChmi').includes('renderChmiRow'),'loadChmi už řádek nekreslí');
 });
+
+/* ===== Kolo 14: přepínač kompozit / ČHMÚ v panelu radar =====
+   Dave 19. 11. 13:14: „minimalistické tlačítko vpravo v rohu v panelu
+   radar na přepnutí na radar ČHMÚ a při opětovném kliknutí přepnutí
+   zpět. Pouze při lokaci česká republika. Stejný design. Jiná data."
+   Pohled ČHMÚ kreslí tentýž cifernák i CSS třídy, ale obsahem je
+   snímek národního radaru (1 km/px) + COTREC; trajektorii nezná,
+   takže ji nekreslí ani nekecá. */
+test('kolo 14: tlačítko ČHMÚ jen v pokrytí národního radaru',()=>{
+  const c=context(['chmiCompassReady','chmiCompassSwitchHtml','chmiInRange'],{
+    CHMI_DATA:{lonMin:11.267,lonMax:19.624,latMin:48.047,latMax:51.458},
+    cur:{lat:50.08,lon:14.44},
+    chmiState:{nowWet:true,nowOrd:0.4,ageMin:6,steps:[],first:null},
+    chmiCompassOn:false
+  });
+  assert.equal(c.chmiCompassReady(),true,'v ČR se zdravým ČHMÚ');
+  assert.ok(c.chmiCompassSwitchHtml().includes('>ČHMÚ<'),'nabízí přepnutí');
+  c.chmiCompassOn=true;
+  assert.ok(c.chmiCompassSwitchHtml().includes('>KOMPOZIT<'),'po přepnutí nabízí návrat');
+  c.cur={lat:52.52,lon:13.40};
+  assert.equal(c.chmiCompassReady(),false,'Berlin je mimo pokrytí');
+  assert.equal(c.chmiCompassSwitchHtml(),'','mimo ČR se tlačítko nekreslí');
+  c.cur={lat:50.08,lon:14.44}; c.chmiState='error';
+  assert.equal(c.chmiCompassReady(),false,'výpadek ČHMÚ = bez tlačítka');
+  c.chmiState=null;
+  assert.equal(c.chmiCompassReady(),false,'bez dat ČHMÚ = bez tlačítka');
+});
+test('kolo 14: pohled ČHMÚ v panelu — stejný design, data národního radaru',()=>{
+  const c=context(['renderChmiCompass','chmiCompassSwitchHtml','chmiCompassReady','chmiInRange','chmiCompassIntensityTxt'],{
+    CHMI_DATA:{lonMin:11.267,lonMax:19.624,latMin:48.047,latMax:51.458},
+    cur:{lat:50.08,lon:14.44},chmiCompassOn:true,
+    chmiState:{nowWet:true,nowOrd:0.4,ageMin:6,steps:[],first:null}
+  });
+  const el={hidden:true,innerHTML:''};
+  c.renderChmiCompass(el);
+  assert.equal(el.hidden,false,'panel se ukáže');
+  assert.ok(el.innerHTML.includes('id="radSwitch"'),'tlačítko návratu je přítomno');
+  assert.ok(el.innerHTML.includes('>KOMPOZIT<'),'nabízí návrat na kompozit');
+  assert.ok(el.innerHTML.includes('Právě nad tebou.'),'echo nad tebou mluví verdiktem');
+  assert.ok(el.innerHTML.includes('class="verd hit"'),'stejná třída hit jako kompozit');
+  assert.ok(el.innerHTML.includes('1 km/px') && el.innerHTML.includes('snímek 6 min'),'zdroj uvádí parametry ČHMÚ');
+  assert.ok(el.innerHTML.includes('radar ČHMÚ'),'src pojmenovává národní radar');
+  assert.ok(!el.innerHTML.includes('Prolétne'),'bez trajektorie — COTREC směr buněk nezná');
+  c.chmiState={nowWet:false,nowOrd:0,ageMin:9,
+    steps:[{dt:10,wet:false},{dt:20,wet:false},{dt:30,wet:true},{dt:40,wet:true}],
+    first:{dt:30,ord:0.4}};
+  const el2={hidden:true,innerHTML:''};
+  c.renderChmiCompass(el2);
+  assert.ok(el2.innerHTML.includes('Nad tebou nic.'),'sucho se hlásí přímo');
+  assert.ok(el2.innerHTML.includes('za ~<b>30 min</b>'),'COTREC hlásí první echo');
+  assert.ok(el2.innerHTML.includes('class="verd miss"'));
+});
+test('kolo 14: strukturální — pohled ČHMÚ visí před kompozitovými větvemi',()=>{
+  const rcb=fn('renderCompassBase');
+  assert.ok(rcb.includes('chmiCompassOn && chmiCompassReady()'),'přepnutý pohled se kreslí první');
+  assert.ok(rcb.includes('renderChmiCompass(el); return;'),'a vrací se dřív, než se rozhoduje o kompozitu');
+  assert.ok((rcb.match(/chmiCompassSwitchHtml\(\)/g)||[]).length>=3,
+    'kompozitové větve (chyba, svědci, normál) nesou tlačítko');
+  assert.ok(fn('resetForecastState').includes('chmiCompassOn = false'),
+    'nová lokalita začíná na kompozitu');
+  assert.ok(script.includes('id === "radSwitch"'),'klik na tlačítko přepíná pohled');
+});
