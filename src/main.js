@@ -3432,6 +3432,22 @@ function chmiNowWet(){
   return !!(chmiState && chmiState !== "off" && chmiState !== "error" && chmiState.nowWet
             && (chmiState.ageMin == null || chmiState.ageMin <= 45));
 }
+/* KOLO 12c: svědci pozemní pravdy pro kompas, společní pro stav
+   „kompozit mlčí" (kolo 12) i „kompozit se nepodařilo načíst" (kolo 12c).
+   Měřený případ (19. 11. 12:33, mobil): kompozit RainViewer spadl na
+   výpadkovém připojení, ČHMÚ mezitím hlásil ECHO nad obcí — a kompas
+   místo pravdy ukazoval jen „Radar se nepodařilo načíst." Pozorování
+   na zemi musí promluvit VŽDY, ne jen když kompozit dojede. */
+function groundTruthWitnesses(){
+  var w = [];
+  if(stanicePotvrzujeSelf())
+    w.push("stanice " + obsMetar.name + " (" + obsMetar.km + " km) hlásí srážky"
+         + (obsMetar.wx ? " (kód " + obsMetar.wx + ")" : ""));
+  if(chmiNowWet())
+    w.push("národní radar ČHMÚ (1 km na pixel, snímek " + chmiState.ageMin
+         + " min) má nad tebou echo");
+  return w;
+}
 var modelState = null;   /* {times:[Date], consensus:[int], N, perHourMax:[mm]} */
 
 /* ================= KOLO 12: POZEMNÍ PRAVDA SE NESMÍ ZTRATIT =================
@@ -4320,6 +4336,25 @@ function renderCompassBase(){
       + '<div class="verd">Radar se nepodařilo načíst.</div>'
       + '<div class="expl">Síť nebo API zrovna nespolupracuje, takže kompas nemám z čeho kreslit. Zkusím to znovu sám; zatím platí modely, satelit a minutacast.</div>'
       + '</div>';
+    /* KOLO 12c: výpadek kompozitu není důvod zatajit, že prší. Dave
+       (19. 11. 12:33): kompozit na výpadkovém mobilním připojení
+       nesedl, ČHMÚ hlásil ECHO nad obcí a kompas místo pravdu ukázal
+       jen hlášku o selhání. Když pozemní svědci (stanice/ČHMÚ)
+       srážky potvrzují, verdikt řekne pravdu a selhání kompozitu
+       přizná jako dovětek — selhání jednoho zdroje nezastaví
+       výpověď ostatních. */
+    var gtErr = groundTruthWitnesses();
+    if(gtErr.length){
+      el.innerHTML = '<div class="label">Radar</div>'
+        + '<div class="ct">'
+        + '<div class="verd hit">Právě nad tebou prší.</div>'
+        + '<div class="expl">Pozemní pozorování srážky potvrzuje: ' + gtErr.join(" a ")
+        + '. Kompozit RainViewer se právě nepodařilo načíst (výpadek'
+        + ' sítě, zkusím to znovu sám) — verdikt teď stojí na měření,'
+        + ' které na místě dopadlo na zem.</div>'
+        + '<div class="src">pravda z pozorování · kompozit nedostupný (zkusím znovu)</div>'
+        + '</div>';
+    }
     return;
   }
   if(!C){ el.hidden = true; el.innerHTML = ""; return; }
@@ -4457,13 +4492,7 @@ function renderCompassBase(){
   if(!viaSat && (C.state === "miss" || C.state === "standing" || C.state === "empty")
      && (C.vMm == null || (typeof C.vMm === "number" && C.vMm < 0.1))
      && (stanicePotvrzujeSelf() || chmiNowWet())){
-    var pravda = [];
-    if(stanicePotvrzujeSelf())
-      pravda.push("stanice " + obsMetar.name + " (" + obsMetar.km + " km) hlásí srážky"
-                + (obsMetar.wx ? " (kód " + obsMetar.wx + ")" : ""));
-    if(chmiNowWet())
-      pravda.push("národní radar ČHMÚ (1 km na pixel, snímek " + chmiState.ageMin
-                + " min) má nad tebou echo");
+    var pravda = groundTruthWitnesses();   /* KOLO 12c: společný svědek s chybovou větví */
     verd = "Právě nad tebou prší."; cls = "hit";
     expl = "Kompozit RainViewer nad tebou nevidí nic — takhle slabý déšť se pod"
          + " jeho práhem ztrácí. Ale " + pravda.join(" a ") + "."
@@ -6146,7 +6175,9 @@ function renderSolo(){
                       ? "potvrzeno stanicí — pozemní měření"
                       : W.radarSolo
                         ? "potvrzeno radarem — měření nad tebou"
-                        : "potvrzeno <b>" + W.indep + "</b> nezávislými zdroji") + ".";
+                        : W.chmiSolo
+                          ? "potvrzeno českým radarem — ECHO nad tebou"
+                          : "potvrzeno <b>" + W.indep + "</b> nezávislými zdroji") + ".";
 
     var zbyva = null, konecTxt = "";
     if(W.end && !W.end.beyond && W.end.min != null){
@@ -8015,6 +8046,16 @@ function recomputeWhen(){
     && radarNow != null && radarNow >= 1.0
     && (radarState.ageMin == null || radarState.ageMin <= 15)
     && (radarState.nowMmArea == null || radarState.nowMmArea >= 0.1));
+  /* ---- ČHMÚ JAKO POTVRZENÍ SAMA (kolo 12c) ----
+     Národní radar je stejně pozemní měření jako stanice: PseudoCAPPI
+     2 km na mřížce 1×1 km, jiný instrument, jiné zpracování i kontrola
+     kvality než globální kompozit. Měřený případ (19. 11. ~12:33,
+     mobil): kompozit RainViewer nedojel (výpadek sítě), METAR také
+     ne — jediným hlasem pravdy zůstal ČHMÚ s ECHO nad obcí u -RA.
+     Potvrzuje samo jen s čerstvým snímkem (do 45 min, jako kompas
+     v chmiNowWet); do intenzity nezasahuje (ord je pořadí ve škále,
+     ne mm/h). */
+  var chmiPotvrzuje = chmiNowWet();
 
   /* ---- VÝŠKA PAPRSKU RADARU (proč radar říká sucho, ač stanice prší) ----
      Radarový paprsek se od antény zvedá nad obzor a s rostoucí vzdáleností
@@ -8088,8 +8129,9 @@ function recomputeWhen(){
     }
   }
 
-  /* ---- PRŠÍ PRÁVĚ TEĎ (potvrzeno ≥2 zdroji, nebo blízkou stanicí) ---- */
-  if(indepVotes >= 2 || stanicePotvrzuje || radarPotvrzuje){
+  /* ---- PRŠÍ PRÁVĚ TEĎ (potvrzeno ≥2 zdroji, blízkou stanicí
+     nebo čerstvým národním radarem ČHMÚ) ---- */
+  if(indepVotes >= 2 || stanicePotvrzuje || radarPotvrzuje || chmiPotvrzuje){
     /* Verdikt jen ze stanice: intenzitu neznámá žádný mm/h zdroj, kategorie
        METARu dá aspoň hrubý odhad (-RA ≈ 0,3 mm/h) — poctivější než nic. */
     if(!mmhVals.length){
@@ -8126,9 +8168,13 @@ function recomputeWhen(){
           : (stanicePotvrzuje
               ? " Potvrzuje stanice — pozemní měření"
                 + (modSign ? ", se souhlasem modelu." : " blízko tebe.")
-              : " Potvrzuje radar — měření přímo nad tebou"
-                + (radarState.ageMin != null
-                    ? ", snímek před " + Math.round(radarState.ageMin) + " min." : ".")))
+              : (radarPotvrzuje
+                  ? " Potvrzuje radar — měření přímo nad tebou"
+                    + (radarState && radarState.ageMin != null
+                        ? ", snímek před " + Math.round(radarState.ageMin) + " min." : ".")
+                  : " Potvrzuje český radar ČHMÚ — čerstvé ECHO nad tebou."
+                    + (chmiState && chmiState.ageMin != null
+                        ? " Snímek před " + chmiState.ageMin + " min." : ""))))   /* KOLO 12c: větev dřív předpokládala radarPotvrzuje a četla radarState.ageMin bez kontroly — s ČHMÚ jako samostatným potvrzením může radarState být null (ještě se načítá) nebo „error“ (výpadek), to nesmí shodit verdikt */
       + trendPhrase
       + beamNote + blitzNote();
     var observedVotes = votes.filter(function(v){ return v.indexOf("model") < 0; });
@@ -8137,6 +8183,7 @@ function recomputeWhen(){
     whenState = {mode:"wet", mmh:med, type:typeGuess, votes:observedVotes, indep:indepVotes,
                  staniceSolo:(indepVotes < 2 && stanicePotvrzuje),
                  radarSolo:(indepVotes < 2 && radarPotvrzuje),
+                 chmiSolo:(indepVotes < 2 && chmiPotvrzuje),
                  end: estimateRainEnd(now, 0, blendTimeline), trend:trendPhrase,
                  station:stationNote, now:now};
     renderSolo();
