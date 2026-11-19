@@ -4296,7 +4296,11 @@ var modelState = null;   /* {times:[Date], consensus:[int], N, perHourMax:[mm]} 
 var bpMetarRetryT = null;          /* běžící METAR dotah — max jeden */
 var METAR_RETRY_DELAYS = [20000, 60000];   /* dva pokusy: +20 s, +60 s */
 function scheduleMetarRetry(lat, lon, myId, attempt){
-  if(attempt >= METAR_RETRY_DELAYS.length){ gtSettle("stanice"); return; }   /* víc než dvě dotahy nikdy */
+  /* kolo 15b: známá chyba končí „ověřuji“ hned — verdikt nečeká na zdroj,
+     který už odpověděl. Dotahy běží potichu; uspějí-li (měřeno 19. 11.:
+     totéž URL o chvíli později 200), settle při úspěchu překreslí verdikt. */
+  if(gtPendingHas("stanice")){ gtSettle("stanice"); recomputeWhen(); }
+  if(attempt >= METAR_RETRY_DELAYS.length) return;   /* víc než dvě dotahy nikdy */
   if(bpMetarRetryT != null) return;                  /* jeden už běží */
   bpMetarRetryT = setTimeout(function(){
     bpMetarRetryT = null;
@@ -4312,7 +4316,7 @@ function scheduleMetarRetry(lat, lon, myId, attempt){
    vůbec; měřeno 19. 11.: totéž URL o chvíli později 200 s daty). */
 function loadMetar(lat, lon, myId, attempt){
   attempt = attempt || 0;
-  gtStart("stanice");   /* kolo 15 */
+  if(attempt === 0) gtStart("stanice");   /* kolo 15: stanice měří → verdikt neříká „nepotvrzeno“. Kolo 15b: jen první pokus; dotahy verdikt nebrzdí */
   cachedJson("https://aviationweather.gov/api/data/metar?format=json&hours=2&bbox="
     + metarBbox(lat, lon), 600000)
     .then(function(arr){
@@ -4367,8 +4371,17 @@ function loadMetar(lat, lon, myId, attempt){
 var bpRadarRetryT = null;          /* běžící dotah — max jeden na appku */
 var RV_RETRY_DELAYS = [20000, 60000];   /* dva pokusy: +20 s, +60 s */
 function scheduleRadarRetry(lat, lon, myId, attempt){
-  if(attempt >= RV_RETRY_DELAYS.length){ gtSettle("radar"); return; }   /* víc než dvě dotahy nikdy — a registr „měřím“ končí */
+  /* kolo 15b: známá chyba končí „ověřuji“ hned — dotahy běží potichu */
+  if(gtPendingHas("radar")){ gtSettle("radar"); renderCompass(); recomputeWhen(); }
+  if(attempt >= RV_RETRY_DELAYS.length) return;   /* víc než dvě dotahy nikdy */
   if(bpRadarRetryT != null) return;              /* jeden už běží */
+  /* kolo 15b (vysvětlení): bez tohoto settle by verdikt i kompas věřily,
+     že kompozit měří, přestože síť už odpověděla chybou — na pomalém
+     mobilu pak „Ověřuji“ viselo 20 s i déle. Settle překreslí kompas
+     (pryč skeleton) a verdikt spočítá znovu; další pokusy registr už
+     neotevírají (kolo 11 retry nesmí verdict vracet na „ověřuji“).
+     Uspěje-li dotah, recomputeWhen při settle po úspěchu verdikt
+     překreslí sám — měřeno 19. 11.: totéž URL odpovídá o chvíli 200. */
   bpRadarRetryT = setTimeout(function(){
     bpRadarRetryT = null;
     if(typeof radarState !== "undefined" && radarState !== "error") return; /* mezitím vyřešeno */
@@ -4380,6 +4393,7 @@ function scheduleRadarRetry(lat, lon, myId, attempt){
 function loadRadar(lat, lon, myId, attempt){
   if(myId == null) myId = reqId;
   attempt = attempt || 0;
+  if(attempt === 0) gtStart("radar");   /* kolo 15: kompozit běží → verdikt neříká „nepotvrzeno“. Kolo 15b: registr drží jen první pokus — dotahy (kolo 11) nesmí verdikt na „ověřuji“ vracet znovu a znovu */
   radarState = null;
   radarCoverage = null;
   rvNowcast = null;
@@ -4390,7 +4404,6 @@ function loadRadar(lat, lon, myId, attempt){
   stormMotion = null;
   radarTimeline = null; radarTrendRate = null;
   radarCompass = null; imergCompass = null; radarField = null; renderCompass();
-  gtStart("radar");      /* kolo 15: kompozit běží → verdikt neříká „nepotvrzeno“ */
   gridNowcast = null;
 
   /* blízkost velké vodní plochy — vlastnost místa, klidně z paměti opakovaně */
@@ -6497,7 +6510,10 @@ function compassFieldSvg(cells, reachKm, forChmi){
 var bpChmiRetryT = null;
 var CHMI_RETRY_DELAYS = [20000, 60000];   /* dva pokusy: +20 s, +60 s */
 function scheduleChmiRetry(lat, lon, myId, attempt){
-  if(attempt >= CHMI_RETRY_DELAYS.length){ gtSettle("chmi"); return; }   /* víc než dvě dotahy nikdy */
+  /* kolo 15b: známá chyba končí „ověřuji“ hned — viz scheduleRadarRetry.
+     Kompas se překreslí (může mít ČHMÚ pole), verdikt spočítá znovu. */
+  if(gtPendingHas("chmi")){ gtSettle("chmi"); renderCompass(); recomputeWhen(); }
+  if(attempt >= CHMI_RETRY_DELAYS.length) return;   /* víc než dvě dotahy nikdy */
   if(bpChmiRetryT != null) return;                  /* jeden už běží */
   bpChmiRetryT = setTimeout(function(){
     bpChmiRetryT = null;
@@ -6510,7 +6526,7 @@ function scheduleChmiRetry(lat, lon, myId, attempt){
 function loadChmi(lat, lon, myId, attempt){
   attempt = attempt || 0;
   chmiState = null; chmiNote = "";
-  gtStart("chmi");   /* kolo 15 */
+  if(attempt === 0) gtStart("chmi");   /* kolo 15: ČHMÚ měří. Kolo 15b: jen první pokus; dotahy verdikt nebrzdí */
   if(!chmiInRange(lat, lon)){
     chmiState = "off";
     chmiNote = "mimo dosah českého radaru";
