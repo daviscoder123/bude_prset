@@ -254,3 +254,35 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
       (scheduleRadarRetry, strop dvou, přerušeno při úspěchu
       nebo změně lokality). Přechodné selhání se tedy spraví
       samo do minuty, bez zásahu uživatele.
+  - **(kolo 12) Pozemní pravda se nesmí ztratit, ani zůstat bez hlasu.**
+    Dave (19. 11. 11:56, mobil): „Právě prší. Proč to radar nevidí?"
+    Měřeno: METAR LKPR 191030Z hlásí -RA (slabý déšť nad Prahou),
+    národní radar ČHMÚ PseudoCAPPI 2 km má nad Prahou zelené echo
+    v celém výřezu (1 km na pixel, snímek 5 min starý), globální
+    kompozit RainViewer nad Prahou sucho (všech 49 px výřezu bez
+    echa, nejsilnější pole jinde 60–250 km) — a kompas řekl
+    „Tě mine", panel Kdy hlásil „nezávislé potvrzení: 0".
+    Tři příčiny, tři léky:
+    - **Kompas znal jen kompozit:** verdikt „Tě mine"/„V dosahu nic"
+      se odvozoval čistě z geometrie globálního kompozitu, který
+      slabý déšť pod svým prahem nevidí. Nově: když kompozit nad
+      obcí mlčí (miss/standing/empty, nad obcí 0) a pozemní
+      pozorování hlásí srážky (stanice dle pravidel kola 8v
+      ve stanicePotvrzujeSelf, nebo ČHMÚ v chmiNowWet ≤ 45 min),
+      kompas říká „Právě nad tebou prší." a rozpor vyslovuje:
+      „Kompozit RainViewer nad tebou nevidí nic — ... Ale stanice
+      LKPR (12 km) hlásí srážky (kód -RA) a národní radar ČHMÚ
+      (1 km na pixel) má nad tebou echo." Geometrie kompozitu
+      zůstává jako vedlejší věta, rozpor se neumlčí.
+    - **Pravidla potvrzení stanicí teď žijí jednou** (funkce
+      stanicePotvrzujeSelf) — panel Kdy i kompas čtou tentýž
+      kód, takže o jednom dešti nikdy neřeknou dvě různé věci.
+    - **Výpadek umlčel pozemní zdroje navždy:** METAR i ČHMÚ se
+      načítaly jednorázově (METAR přímo v loadRadar) a jediná
+      výpadková odpověď je zhasla až do ručního obnovení — dnes
+      se k tomu přidalo i „2 z 8 modelů neodpověděly", tedy
+      kolísavá mobilní síť. Nově METAR běží ve vlastní
+      loadMetar() s dotahem +20 s/+60 s (scheduleMetarRetry,
+      strop dvou, přerušeno při úspěchu) a ČHMÚ po chybě
+      dotahuje samo (scheduleChmiRetry stejným vzorem jako
+      radar v kole 11).
