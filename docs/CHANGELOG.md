@@ -437,3 +437,31 @@ přesnost se doložila zpětným testem na sběrači dat, kde to šlo.
       dosah, poloha; strukturálně: „Měřím radar…" v panelu, pole
       v obou pohledech, „Verdikt · ověřuji" v mobilním panelu,
       cache lokality v load/init).
+
+## Kolo 15b — „Ověřuji“ končí známou chybou, ne až za 20 s (19. 11.)
+
+  CI kola 15 odhalil vadu samotného registru: když pozorovací zdroj
+  odpověděl chybou (síť výpadek), registr „měřím“ zůstal otevřený
+  až do vyčerpání obou dotahů (+20 s, +60 s — celkem ~80 s). Na
+  pomalém mobilu i v testech tedy verdikt osmdesát sekund tvrdil
+  „Ověřuji“, přestože síť už dávno odpověděla; mobilní layout
+  v stavu checking je navíc o řádek vyšší, takže fitGuard škáloval
+  fonty pod přípustnou mez (0,78 na 393 px). Lék: registr drží jen
+  první pokus měření — známá chyba ho zavře hned (se spočtením
+  verdiktu a překreslením kompasu; skeleton „Měřím radar…“ ustoupí
+  stavu chyby), další dotahy (kolo 11/12) běží potichu a nesmí
+  verdikt na „ověřuji“ vracet znovu a znovu. Uspěje-li pozdější
+  dotah, recomputeWhen při úspěchu verdikt sám překreslí — měřeno
+  19. 11.: totéž URL odpovídá o chvíli později 200.
+
+  - scheduleRadarRetry/scheduleMetarRetry/scheduleChmiRetry: settle
+    na vstupu při známé chybě (gtPendingHas → gtSettle → recompute,
+    radar/ČHMÚ navíc renderCompass), strop dvou dotahů beze změny.
+  - loadRadar/loadMetar/loadChmi: gtStart jen při prvním pokusu
+    (attempt 0), retry nikdy registr neotevře (žádné blikání
+    maybe ⇄ checking).
+  - Testy beze změny požadavků: 132/132 regression+worker, build
+    index.html 491 484 znaků; oba selhané CI browser testy padly jen
+    na umělém setrvání registru po chybě (stav „checking" místo
+    „maybe", vyšší layout 393 px), takže tvrzení testů zůstala
+    beze změny a oprava je v aplikaci.
