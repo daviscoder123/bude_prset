@@ -982,3 +982,39 @@ test('kolo 12: panel Kdy i kompas čtou táž pravidla potvrzení stanicí',()=>
   assert.ok(rw.includes('stanicePotvrzujeSelf()'),'verdikt používá sdílenou funkci');
   assert.ok(!rw.includes('staniceCerstve &&'),'inline kopie pravidel pryč');
 });
+
+/* Kolo 12b: ČHMÚ modul v produkci mlčel — Worker žádá CELU cestu
+   (CHMI_PATH_RE v worker.mjs), aplikace posílala „/composite/…“ bez
+   prefixu /meteorology/weather/radar a dostávala 400 na každém snímku
+   i legendě: chmiState „error“, žádný hlas, žádný řádek v tabulce,
+   žádný druhý svědek pro kompas. Měřeno 19. 11. 12:22: krátká cesta
+   400, celá cesta 200 (now 25 464 B, legenda 985 B, fct 25 650 B). */
+test('kolo 12b: ČHMÚ obrázky jdou přes worker s CELOU cestou',()=>{
+  const c=context(['chmiProxyImg','chmiUrlNow','chmiStamp'],{
+    BP_PROXY:'https://bude-prset-proxy.example.workers.dev',
+    CHMI_BASE:'https://opendata.chmi.cz/meteorology/weather/radar'});
+  const u=c.chmiUrlNow(Date.UTC(2026,10,19,11,10,0));
+  assert.ok(u.startsWith('https://bude-prset-proxy.example.workers.dev/chmi/img?u='),
+    'přes worker');
+  assert.ok(u.includes(encodeURIComponent('/meteorology/weather/radar/composite/pseudocappi2km/png/')),
+    'u nese celou cestu včetně prefixu, jinak Worker vrátí 400');
+  assert.ok(u.includes('pacz2gmaps3.z_cappi020.20261119.1110.0.png'),'stamp');
+  const scl=c.chmiProxyImg('/scl/scl-dbz-mmh.png');
+  assert.ok(scl.includes(encodeURIComponent('/meteorology/weather/radar/scl/')),
+    'legenda nese taky celou cestu');
+  // bez proxy se nic nemění: přímé URL už prefix má
+  c.BP_PROXY='';
+  assert.equal(c.chmiProxyImg('/composite/x.png'),
+    'https://opendata.chmi.cz/meteorology/weather/radar/composite/x.png');
+});
+test('kolo 12b: výpadek stanice i ČHMÚ se pojmenuje u zdrojů',()=>{
+  const c=context(['sourceCaveat'],{
+    radarCoverage:'full',radarState:null,obsMetar:null,chmiState:null,native15:true});
+  const ok=c.sourceCaveat();
+  assert.equal(ok,'','zdravé zdroje = žádná poznámka');
+  c.obsMetar='error'; c.chmiState='error';
+  const bad=c.sourceCaveat();
+  assert.ok(bad.includes('stanice nedostupná (zkusím znovu)'),'stanice se neumlčí');
+  assert.ok(bad.includes('český radar nedostupný (zkusím znovu)'),'ČHMÚ se neumlčí');
+  assert.ok(bad.includes('zkusím znovu'),'retry slib je součástí hlášky');
+});
