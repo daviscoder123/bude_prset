@@ -672,6 +672,42 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 25 — radar ČHMÚ v pohledu a plynulost všude (20. 11., Dave po zeleném startu)
+
+Dave: „Tak a teď tam zase doděj ten ČHMÚ radar, jak jsme to měli
+předtím naplánované. Zároveň chci, aby všechny pohyby v appce byly
+plynulé a ne aby to skákalo. I úvodní načítání. Moderní app."
+
+Radar ČHMÚ: plán z kola 15 konečně dopadl. Aplikace si od kola 15
+čte národní snímek ČHMÚ (PseudoCAPPI 2 km, 1 km na pixel, výřez
+±48 km) a počítá z něj pole — ale nakreslené nikdy nebylo, protože
+kolo 22 na Daveův požadavek sundalo rozklikávací tlačítko a s ním
+i kreslení. Kolo 25 kreslí čerstvé pole ČHMÚ do JEDINÉHO pohledu
+výrazně přes jemný kompozit RainViewer (výraznější alfa, modř
+podle pozice v oficiální škále); kompozit zůstává jemným pozadím,
+takže obraz nezmizí za hranicí českého radaru. Zdrojový řádek
+přiznává „pole radaru ČHMÚ 1×1 km, snímek X min". Rozklikávací
+tlačítko se nevrací: přepínání pohledů bylo samo o sobě skokem.
+
+Plynulost (bez skoků):
+1. Clona: přechod opacity/visibility 0,35 s místo display:none/grid.
+   Statické HTML startuje s viditelnou clonou — úvodní snímek je
+   na obrazovce od prvního rámu, zavření i otevření se rozplývá.
+2. Panely kompas, „za hodinu"/„do konce dne" i offline lišta
+   vplouvají jemnou animací riseIn (0,35–0,45 s, respektuje
+   prefers-reduced-motion).
+3. Překreslení: kompas se překresluje po každém měření, ale stejný
+   obsah se už nezapisuje (htmlIfChanged) — žádné probliknutí textu
+   ani SVG, když se nic nezměnilo.
+4. Nová verze aplikace (service worker): dřív okamžitý reload
+   způsobil skok „starý web → nový web" uprostřed čtení. Reload
+   nyní čeká, až aplikace půjde do pozadí; po návratu běží nová
+   verze a nikdy pod rukama neskočila.
+
+Badge v25; service worker v11 (bump vynutí aktualizaci i u
+nainstalované PWA). 153/153 node testů (regresní 99, worker 54),
++ 1 nový browser test plynulosti v CI. Build 508 301 B.
+
 ## Kolo 24 — pravá příčina nalezena: rychlý start zabíjel celý skript (21. 11.)
 
 Dave 21. 11. 13:28, snímek obrazovky (v23): „Start se nepovedl —
