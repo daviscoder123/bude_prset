@@ -1153,7 +1153,7 @@ test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
     'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
   assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
     'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
-  assert.ok(html.includes('>v24<'),'aktuální verze: v24');
+  assert.ok(html.includes('>v25<'),'aktuální verze: v25');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
@@ -1603,7 +1603,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v24<'),'aktuální verze: v24');
+  assert.ok(html.includes('>v25<'),'aktuální verze: v25');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1653,7 +1653,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v24<'),'aktuální verze: v24');
+  assert.ok(html.includes('>v25<'),'aktuální verze: v25');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
@@ -1772,7 +1772,7 @@ test('kolo 23: pojistka proti visícímu dotazu na oprávnění (3 s)',()=>{
     'havárie init() se vypíše na clonu, ne němá smrt skriptu');
   assert.ok(script.includes('geoPermTxt()'),
     'nápovědy clony nesou stav oprávnění (diagnostika z mobilu)');
-  assert.ok(html.includes('>v24<'),'aktuální verze: v24');
+  assert.ok(html.includes('>v25<'),'aktuální verze: v25');
 });
 
 test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spustí žádost',async()=>{
@@ -1824,5 +1824,39 @@ test('kolo 24: start aplikace — init() až po všech deklaracích, load() null
     'init() běží až po deklaraci vyhledávacího pole (na konci skriptu)');
   assert.ok(script.slice(initCall).includes('catch'),
     'pojistka havárie z kola 23 (chyba na clonu) zůstává');
-  assert.ok(html.includes('>v24<'),'aktuální verze: v24');
+  assert.ok(html.includes('>v25<'),'aktuální verze: v25');
+});
+
+test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
+  /* Dave 20. 11. večer chtěl radar ČHMÚ zpět; kolo 22 správně rušilo
+     rozklikávací tlačítko (přepínání pohledu = skok v rozhraní), ale
+     plán z kola 15 nikdy nedopadl: pole ČHMÚ se počítá (chmiState.field,
+     1 km na pixel, ±48 km) a nevykresluje se. Kolo 25 ho kreslí do
+     JEDINÉHO pohledu výrazně přes jemný kompozit. Plynulost: clona se
+     rozplývá (opacity/visibility místo display), panely vplouvají
+     (@keyframes riseIn), překreslení stejným obsahem se zahazuje
+     (htmlIfChanged) a nová verze SW se nasazuje, jen když aplikace
+     jde do pozadí (žádný skok starý→nový web za chodu). */
+  const rc=fn('renderCompassBase');
+  assert.ok(rc.includes('compassFieldSvg(chmiCells, C.reachKm, true)'),
+    'čerstvé pole ČHMÚ se kreslí výrazně (forChmi=true) přes jemný kompozit');
+  assert.ok(rc.includes('chmiState.field'),
+    'kompas čte čerstvé pole ČHMÚ připravené od kola 15 (chmiState.field)');
+  assert.ok(rc.includes('pole radaru ČHMÚ 1×1 km'),
+    'zdrojový řádek kompasu přiznává národní radar, když kreslí jeho pole');
+  assert.ok(rc.includes('htmlIfChanged(el,'),
+    'kompas se překresluje přes guard — stejný obsah neproblikává');
+  const hic=fn('htmlIfChanged');
+  assert.ok(hic.includes('el.innerHTML === html'),
+    'guard porovnává obsah před zápisem');
+  const cc=script.indexOf('controllerchange');
+  assert.ok(cc>-1 && script.slice(cc,cc+900).includes('visibilitychange'),
+    'nová verze SW se nasadí na pozadí aplikace, ne skokem za chodu');
+  assert.ok(html.includes('#status.show{opacity:1;visibility:visible;pointer-events:auto'),
+    'clona se rozplývá (opacity/visibility), neskáče (display)');
+  assert.ok(html.includes('id="status" class="show"'),
+    'statické HTML startuje s viditelnou clonou — úvod bez bliknutí');
+  assert.ok(html.includes('@keyframes riseIn') && html.includes('.compass{animation:riseIn'),
+    'panely vplouvají animací riseIn');
+  assert.ok(html.includes('>v25<'),'aktuální verze: v25');
 });

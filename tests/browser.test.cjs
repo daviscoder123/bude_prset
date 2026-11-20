@@ -544,3 +544,38 @@ test('kolo 24: rychlý start z uložené lokality (Daveův telefon) nesmí zabí
     assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
   }finally{await ctx.close();}
 });
+
+test('kolo 25: plynulost — clona se rozplývá, kompas vpluje, ne skáče',async()=>{
+  /* Kolo 25: clona decentně mizí (opacity/visibility), ne skokem
+     display:none/grid; panely vplují animací riseIn. Tady se to
+     ověřuje na vypočtených stylech v ostrém prohlížeči. */
+  const {ctx,p,errors}=await fixture();
+  try{
+    /* Clona mizí PLYNULE (0,35 s přechod) — počkat, než dojde na
+       koncový stav visibility:hidden; hned po kliknutí by byla
+       ještě uprostřed mizejícího přechodu. */
+    await p.waitForTimeout(500);
+    const st=await p.evaluate(()=>{
+      const s=document.getElementById('status');
+      const cs=getComputedStyle(s);
+      return {display:cs.display,trans:cs.transitionProperty,
+              vis:cs.visibility,pe:cs.pointerEvents};
+    });
+    assert.equal(st.display,'grid',
+      'clona zůstává v mřížce (přechody opacity/visibility, žádné display skoky)');
+    assert.match(st.trans,/opacity/,'clona přechází opacitou, ne skokem');
+    assert.equal(st.vis,'hidden','zavřená clona je neviditelná');
+    assert.equal(st.pe,'none','zavřená clona nepřijímá kliknutí');
+    await search(p,'Praha');
+    await ready(p,'Praha');
+    const an=await p.evaluate(()=>{
+      const c=document.getElementById('compass');
+      const cs=getComputedStyle(c);
+      return {name:cs.animationName,fill:cs.animationFillMode,hidden:c.hidden,shown:!c.hidden};
+    });
+    assert.equal(an.shown,true,'kompas je vidět');
+    assert.equal(an.name,'riseIn','kompas vpluje animací riseIn');
+    assert.equal(an.fill,'both','animace drží koncový stav');
+    assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
+  }finally{await ctx.close();}
+});

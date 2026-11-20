@@ -896,6 +896,14 @@ function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
   return c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;";
 }); }
+/* KOLO 25: plynulost. Panely se překreslují po každém měření; stejný
+   obsah se nesmí zapsat znovu, to by v rozhraní probliklo (skok textu,
+   přebliknutí SVG). Vracejí se jen true, když se opravdu zapsalo. */
+function htmlIfChanged(el, html){
+  if(!el || el.innerHTML === html) return false;
+  el.innerHTML = html;
+  return true;
+}
 var cur = null, debounceT = null, selIdx = -1, suggData = [], lastQuery = "";
 /* ===== OFFLINE STAV =====
    Panely hlásí chyby každý zvlášť, ale uživatel potřebuje vědět jednu
@@ -2807,7 +2815,19 @@ if("serviceWorker" in navigator && (location.protocol === "https:" || location.h
   navigator.serviceWorker.addEventListener("controllerchange", function(){
     if(!swHadController || swRefreshing) return;
     swRefreshing = true;
-    location.reload();
+    /* KOLO 25: žádný skok za chodu aplikace. Dřív se tady vzal
+       location.reload() okamžitě — uživatel uprostřed čtení viděl, jak
+       stará stránka skočí do nové. Nová verze se nasadí jemně: reload
+       až ve chvíli, kdy aplikace odchází do pozadí (Dave PWA zavře
+       švihem, telefon přepne). Při návratu už běží nová verze a
+       nikdy pod rukama neskočila. Nová verze se neztratí: reload se
+       jen odkládá do chvíle, kdy je aplikace stejně neviditelná. */
+    if(document.hidden){ location.reload(); return; }
+    document.addEventListener("visibilitychange", function onVis(){
+      if(!document.hidden) return;
+      document.removeEventListener("visibilitychange", onVis);
+      location.reload();
+    });
   });
   window.addEventListener("load", function(){
     navigator.serviceWorker.register("sw.js").then(function(reg){
@@ -4756,27 +4776,35 @@ function renderCompassBase(){
       /* padá dál společným kódem níže (viaSat) */
     } else {
       el.hidden = false;
-      el.innerHTML = '<div class="label">Radar</div>'
+      htmlIfChanged(el, '<div class="label">Radar</div>'
         + '<div class="ct">'
         + '<div class="verd">Radar sem nedosahuje.</div>'
         + '<div class="expl">Nejbližší radary tě nezahlédnou, takže okolí nemám z čeho kreslit. O vyhlídce řeknou jen modely dole v tabulce.</div>'
-        + '</div>';
+        + '</div>');
       return;
     }
   }
   var viaSat = (radarCoverage === "none" && imergCompass) && !radarCompass;
   var C = viaSat ? imergCompass : radarCompass;
+  /* KOLO 25: čerstvé pole národního radaru ČHMÚ (1 km na pixel, výřez
+     ±48 km, uložené v chmiState.field od kola 15). Kreslí se VÝRAZNĚ
+     přes kompozit jako primární produkt pohledu; globální kompozit
+     zůstává jemným pozadím, takže obraz nezmizí za hranicí českého
+     radaru. Rozklikávací tlačítko se nevrací (kolo 22) — jediný pohled
+     bez přepínání je zároveň pohyb bez skoků. */
+  var chmiCells = (chmiState && chmiState !== "off" && chmiState !== "error"
+                   && chmiState.field && chmiState.field.length) ? chmiState.field : null;
   /* KOLO 11: selhání radaru NESMÍ být tiché. Dřív kompas prostě zmizel
      a Dave (18. 11.) musel hádat, jestli „radar nic nevidí“, nebo
      „radar spadl“. Teď je na místě kompasu vidět, co se stalo —
      a že se to zkusí znovu samo. */
   if(radarState === "error" && !C){
     el.hidden = false;
-    el.innerHTML = '<div class="label">Radar</div>'
+    htmlIfChanged(el, '<div class="label">Radar</div>'
       + '<div class="ct">'
       + '<div class="verd">Radar se nepodařilo načíst.</div>'
       + '<div class="expl">Síť nebo API zrovna nespolupracuje, takže kompas nemám z čeho kreslit. Zkusím to znovu sám; zatím platí modely, satelit a minutacast.</div>'
-      + '</div>';
+      + '</div>');
     /* KOLO 12c: výpadek kompozitu není důvod zatajit, že prší. Dave
        (19. 11. 12:33): kompozit na výpadkovém mobilním připojení
        nesedl, ČHMÚ hlásil ECHO nad obcí a kompas místo pravdu ukázal
@@ -4786,7 +4814,7 @@ function renderCompassBase(){
        výpověď ostatních. */
     var gtErr = groundTruthWitnesses();
     if(gtErr.length){
-      el.innerHTML = '<div class="label">Radar</div>'
+      htmlIfChanged(el, '<div class="label">Radar</div>'
         + '<div class="ct">'
         + '<div class="verd hit">Právě nad tebou prší.</div>'
         + '<div class="expl">Pozemní pozorování srážky potvrzuje: ' + gtErr.join(" a ")
@@ -4794,7 +4822,7 @@ function renderCompassBase(){
         + ' sítě, zkusím to znovu sám) — verdikt teď stojí na měření,'
         + ' které na místě dopadlo na zem.</div>'
         + '<div class="src">pravda z pozorování · kompozit nedostupný (zkusím znovu)</div>'
-        + '</div>';
+        + '</div>');
     }
     return;
   }
@@ -4805,7 +4833,7 @@ function renderCompassBase(){
   if(!C){
     if(gtPendingHas("radar")){
       el.hidden = false;
-      el.innerHTML = '<div class="label">Radar</div>'
+      htmlIfChanged(el, '<div class="label">Radar</div>'
         + '<svg viewBox="0 0 100 100" width="clamp(86px,15vh,120px)" height="clamp(86px,15vh,120px)" aria-hidden="true">'
         + '<circle cx="50" cy="50" r="46" fill="rgba(255,255,255,.03)" stroke="rgba(255,255,255,.25)" stroke-width=".8"/>'
         + '<circle cx="50" cy="50" r="15.3" fill="none" stroke="rgba(255,255,255,.14)" stroke-width=".7"/>'
@@ -4815,7 +4843,7 @@ function renderCompassBase(){
         + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF"/></svg>'
         + '<div class="ct"><div class="verd">Měřím radar…</div>'
         + '<div class="expl">Skládám snímek kompozitu kolem tebe (přibližně desítky kB). Chvíli to trvá, panel se sám doplní.</div>'
-        + '<div class="src">načítám měření…</div></div>';
+        + '<div class="src">načítám měření…</div></div>');
       return;
     }
     el.hidden = true; el.innerHTML = ""; return;
@@ -4841,6 +4869,12 @@ function renderCompassBase(){
     svg += compassFieldSvg(radarField, C.reachKm, false)
          + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF" stroke="rgba(255,255,255,.6)" stroke-width=".6"/>';
   }
+  /* KOLO 25: pole ČHMÚ nad kompozit — výraznější alfa (forChmi=true),
+     tečka pozice se kreslí znovu, ať zůstane čitelná nad poli. */
+  if(!viaSat && chmiCells){
+    svg += compassFieldSvg(chmiCells, C.reachKm, true)
+         + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF" stroke="rgba(255,255,255,.6)" stroke-width=".6"/>';
+  }
   var verd = "", expl = "", cls = "";
   var snowTxt = C.snow ? " (sníh)" : "";
   var src = viaSat
@@ -4850,6 +4884,8 @@ function renderCompassBase(){
   if(!viaSat && radarState && radarState !== "error" && radarState.ageMin != null) src += " · snímek " + Math.round(radarState.ageMin) + " min";
   if(C.motionSrc === "drift") src += " · pohyb z dráhy buňky";
   if(C.motionSrc === "field7") src += " · pohyb z jemného zoomu (0,8 km/px)";
+  if(!viaSat && chmiCells && chmiState.ageMin != null)
+    src += " · pole radaru ČHMÚ 1×1 km, snímek " + chmiState.ageMin + " min";
   /* REKONCILIACE: když geometrie říká „mine/stojí“, ale vlastní radarová
      osa (advekce + růst pole) práh překročí, spor se nezamlčí — přiletá
      jiná (nová) buňka, ne ta naměřená. Přesně ten rozpor z pravého
@@ -4974,10 +5010,13 @@ function renderCompassBase(){
     src += " · kompozit mlčí, pravdu říká pozorování";
   }
   svg += '</svg>';
-  el.innerHTML = '<div class="label">' + (viaSat ? "Satelit" : "Radar") + '</div>' + svg
+  /* KOLO 25: stejný obsah se nepřepisuje (guard proti probliknutí);
+   změna přijde, až když se něco doopravdy změnilo. */
+  htmlIfChanged(el,
+    '<div class="label">' + (viaSat ? "Satelit" : "Radar") + '</div>' + svg
     + '<div class="ct"><div class="verd ' + cls + '">' + verd + '</div>'
     + '<div class="expl">' + expl + '</div>'
-    + '<div class="src">' + src + '</div></div>';
+    + '<div class="src">' + src + '</div></div>');
   el.hidden = false;
 }
 /* Vícesnímkový odhad rychlosti postupu srážek — medián z několika párů
