@@ -672,6 +672,48 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 29 — nepřesné informace: široké rozpětí jako časy, ne nemožné minuty (21. 11.)
+
+Dave (mobil, Líšeň, panel Kdy hlásil „za 115–254 min“): „Nejsem
+spokojen s tím, že mi apka říká tak nepřesné informace. Najdi cesty,
+jak to zlepšit. Rozsah deště 100 minut je nemožný.“ Dva problémy
+v jedné hlášce: (a) minutová přesnost u odhadu tři hodiny dopředu
+neexistuje — okno 139 min vypadalo jako hádání, ne jako odhad;
+(b) dvojsmysl — „za 115–254 min“ se dalo číst jako déšť od 115. do
+254. minuty („rozsah deště“), což přesně Dave vytýká.
+
+Řešení, tři pravidla čtení odhadu:
+- Okno širší než 45 min nebo sahající za 90. minutu se hlásí jako
+  časy dne: „mezi 18:55 a 21:35“. V Daveově případě by panel tedy
+  řekl „mezi 18:55 a 21:35“ místo „za 115–254 min“.
+- Jediný odhad dál než 90 min bez rozptylu se hlásí jako „kolem
+  19:15“, s upřímným dodatkem „přibližně 2 h 55 min ode teď“.
+- Minuty zůstávají jen tam, kde mají význam: odhady do 90 min
+  („za 23 min“, „za 15–35 min“).
+
+Příčina rozpětí se taky přestala zahálčet: rozpočet nejistoty
+(variance budget, kolo 8z3) nese vrchní složku a panel ji vyjmenuje.
+Při neshodě zdrojů (Daveův případ: 15min model ~115 min, ensemble
+~254 min) text řekne „zdroje se na čase rozcházejí (115–254 min)“,
+místo staré generické věty o nepravidelném postupu pole. Ta přijde,
+jen když ji počítá příčinou: pohyb pole (rozptyl rychlosti),
+neshoda snímků radarové řady, nebo přeháňky.
+
+Mobilní solo panel mluví tentýmž jazykem (časy u širokých oken,
+„kolem 19:15“ u vzdálených odhadů), dodatek „mezi X. a Y. minutou“
+se u časového okna neduplikuje a šance do konce okna se u dávného
+horizontu taky hlásí časem („šance 44 % do 21:35“). Zdrojová řádka
+u dávného odhadu už neslibuje „horizont 60 min“; říká „čas z pohybu
+srážkového pole“.
+
+Rozptyl samotný zůstal poctivý: dřívější rozpočet v kvadrátech
+(kolo 8z3) se nezměnil, jen se k němu přidala knihovna složek,
+která rozhoduje o textu. Jedna složka se do rozpočtu započítává
+jednou jako c4 (přeháňkové σ 0,35), žádná se nesčítá hromadně.
+
+Verze v rohu: v29; service worker v15. Testy: 157/157 (regrese 103:
++1 strukturní test kola 29; worker 54). Build 518 418 B.
+
 ## Kolo 28 — přepínač radaru se ukáže hned, když dorazí ČHMÚ (21. 11.)
 
 Dave (mobil): „Na mobilu se po prvním otevření nezobrazí možnost

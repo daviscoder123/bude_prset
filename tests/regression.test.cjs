@@ -1157,7 +1157,7 @@ test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
     'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
   assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
     'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
-  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
+  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
@@ -1607,7 +1607,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
+  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1657,7 +1657,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
+  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
@@ -1776,7 +1776,7 @@ test('kolo 23: pojistka proti visícímu dotazu na oprávnění (3 s)',()=>{
     'havárie init() se vypíše na clonu, ne němá smrt skriptu');
   assert.ok(script.includes('geoPermTxt()'),
     'nápovědy clony nesou stav oprávnění (diagnostika z mobilu)');
-  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
+  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
 });
 
 test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spustí žádost',async()=>{
@@ -1828,7 +1828,7 @@ test('kolo 24: start aplikace — init() až po všech deklaracích, load() null
     'init() běží až po deklaraci vyhledávacího pole (na konci skriptu)');
   assert.ok(script.slice(initCall).includes('catch'),
     'pojistka havárie z kola 23 (chyba na clonu) zůstává');
-  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
+  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
 });
 
 test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
@@ -1862,7 +1862,7 @@ test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
     'statické HTML startuje s viditelnou clonou — úvod bez bliknutí');
   assert.ok(html.includes('@keyframes riseIn') && html.includes('.compass{animation:riseIn'),
     'panely vplouvají animací riseIn');
-  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
+  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
 });
 
 test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit/ČHMÚ',()=>{
@@ -1893,8 +1893,8 @@ test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit
     'volba pohledu se pamatuje v localStorage, nikam se neposílá');
   assert.ok(script.includes('function humanDur('),
     'lidský formát trvání existuje jako sdílený pomocník');
-  assert.ok(html.includes('.radseg') && html.includes('>v28<'),
-    'CSS segmentu je v šabloně, verze v28');
+  assert.ok(html.includes('.radseg') && html.includes('>v29<'),
+    'CSS segmentu je v šabloně, verze v29');
 });
 
 test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
@@ -1920,7 +1920,7 @@ test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
   assert.ok(rc.includes('Odsud déšť nečekej') && rc.includes('Intenzitu dopředu neodhadnu')
     && rc.includes('skoro stojí'),
     'vysvětlení v úzkém panelu jsou zkrácená (málo místa = kratší text)');
-  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
+  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
 });
 
 test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start mobilu)',()=>{
@@ -1941,5 +1941,34 @@ test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start 
   const rc=fn('renderCompassBase');
   assert.ok(rc.includes('radViewCur === "chmu" && chmiReady && chmiCells'),
     'zdroj tvrdí ČHMÚ jen tehdy, když kompas opravdu kreslí jeho pole (jinak kompozit)');
-  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
+  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
+});
+
+test('kolo 29: široké rozpětí se hlásí jako časy dne, příčina se jmenuje',()=>{
+  /* Dave (21. 11., mobil Líšeň, „za 115–254 min“): „rozsah deště
+     100 minut je nemožný.“ Dva problémy v jednom: (a) minutová
+     přesnost, která u tří hodin neexistuje, (b) dvojsmysl — „za
+     115–254 min“ se dalo číst jako déšť OD 115. DO 254. minuty.
+     Kolo 29: okno širší než 45 min nebo sahající za 90. minutu
+     se hlásí jako ČASY dne („mezi 18:55 a 21:35“), jediný vzdálený
+     odhad jako „kolem 19:15“; minuty zůstávají jen do 90 min.
+     A rozpočet nejistoty teď nese PŘÍČINU: při neshodě zdrojů
+     panel řekne konkrétní časy zdrojů, ne starou generickou větu. */
+  const rw=fn('recomputeWhen');
+  assert.ok(rw.includes('mezi " + fmtHr(clockLo) + " a " + fmtHr(clockHi)'),
+    'hlavní řešení: široké okno jako časové rozpětí dne, ne nemožné minuty');
+  assert.ok(rw.includes('kolem " + fmtHr(new Date(now + mins*60000))'),
+    'jediný odhad dál než 90 min hlásí čas dne („kolem 19:15“)');
+  assert.ok(rw.includes('sigWhy') && rw.includes('zdroje se na čase rozcházejí ('),
+    'text rozpětí jmenuje pravou příčinu podle rozpočtu nejistoty (i s časy zdrojů)');
+  assert.ok(rw.includes('prehan")') === false || rw.includes('přeháňky se načasují nejhůř'),
+    'věta o přeháňkách zůstává lidská');
+  assert.ok(rw.includes('" · čas z pohybu srážkového pole"'),
+    'zdrojová řádka u dávného odhadu neslibuje „horizont 60 min“');
+  const rs=fn('renderSolo');
+  assert.ok(rs.includes('winBig') && rs.includes('mezi " + fmtHr(new Date(W.now + W.lo*60000))'),
+    'mobilní solo panel mluví tentýmž jazykem (časy, ne „za 2 h 44 min“)');
+  assert.ok(rs.includes('if(!winBig && W.lo != null'),
+    'dodatek „mezi X. a Y. minutou“ se u časového okna neduplikuje');
+  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
 });

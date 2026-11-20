@@ -739,7 +739,7 @@ html.compact table{border-spacing:1.5px}
 
 <div id="offlineBar">Jsi offline — zobrazená data můžou být stará</div>
 <div id="status" class="show"><div><span class="pulse">●</span><br>Zjišťuji tvou polohu…</div></div>
-<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v28</div>
+<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v29</div>
 
 <script>
 "use strict";
@@ -7708,16 +7708,25 @@ function renderSolo(){
     var snihSoon = !!(W.type && /sněž|sníh|sněh/i.test(W.type.t));
     pill.textContent = snihSoon ? "Verdikt · sníh se blíží" : "Verdikt · déšť se blíží";
     var m = Math.round(W.etaMin == null ? 30 : W.etaMin);
+    /* KOLO 29: tentýž jazyk jako panel Kdy — okno širší než 45 min
+       nebo za 90. minutou se hlásí jako časy dne, ne minuty
+       (Dave: „rozsah deště 100 minut je nemožný“). */
+    var winBig = (W.mode !== "later" && W.lo != null && W.hi != null
+                  && ((W.hi - W.lo) > 45 || W.hi > 90));
     big.innerHTML = m <= 0 ? "Každou chvíli"
+      : winBig ? "mezi " + fmtHr(new Date(W.now + W.lo*60000))
+                + " a " + fmtHr(new Date(W.now + W.hi*60000))
       : m < 60 ? (W.mode === "later" ? "od " + fmtHr(W.at) : "za " + m + " min")
       : (W.mode === "later" ? "od " + fmtHr(W.at) + " <small>(" + humanDur(m) + ")</small>"
-         : "za " + Math.floor(m/60) + " h " + (m%60 ? (m%60)+" min" : ""));
+         : (m > 90 ? "kolem " + fmtHr(new Date(W.now + m*60000))
+            : "za " + Math.floor(m/60) + " h " + (m%60 ? (m%60)+" min" : "")));
     if(word) word.textContent = W.mmh == null ? "Slabé srážky"
       : snihSoon
         ? (W.mmh >= 4 ? "Vydatné sněžení" : W.mmh >= 1 ? "Mírné sněžení" : "Slabé sněžení")
         : (W.mmh >= 4 ? "Vydatný déšť" : W.mmh >= 1 ? "Mírný déšť" : "Slabý déšť");
     var rozp = "";
-    if(W.lo != null && W.hi != null && (W.hi - W.lo) >= 5) rozp = " · mezi " + W.lo + ". a " + W.hi + ". minutou";
+    if(!winBig && W.lo != null && W.hi != null && (W.hi - W.lo) >= 5)
+      rozp = " · mezi " + W.lo + ". a " + W.hi + ". minutou";
     var cmhSoon = snihSoon && W.mmh != null ? snowCmFromMm(W.mmh) : null;
     sub.innerHTML = (W.mmh != null
         ? (snihSoon
@@ -7735,7 +7744,13 @@ function renderSolo(){
        žádné Open-Meteo), zůstane staré procento přes 8h okno. */
     var sance = arrivalProbPct(W.lo, W.hi);
     if(sance != null){
-      fx.push("<span>šance <b>" + sance + " %</b> do " + (W.hi != null ? W.hi : 60) + " min</span>");
+      /* Kolo 29: „do 254 min“ plyne stejně špatně jako okno v minutách —
+         u dávného konce se řekne čas dne, u blízkého minuty. */
+      var hiTxt = (W.hi != null && W.now != null)
+        ? ((W.hi - (W.lo != null ? W.lo : 0) > 45 || W.hi > 90)
+             ? fmtHr(new Date(W.now + W.hi*60000)) : W.hi + " min")
+        : "60 min";
+      fx.push("<span>šance <b>" + sance + " %</b> do " + hiTxt + "</span>");
       if(V && V.jePravdepodobnost)
         fx.push("<span>pravděpodobnost <b>" + V.prob + " %</b> do " + HOURS + " h</span>");
     } else if(V && V.jePravdepodobnost){
@@ -9819,19 +9834,24 @@ function recomputeWhen(){
        lineárně, ale slaběji. Výsledné σ pak ohraničí pás ~p10–p90
        jako t/(1+σ) až t·(1+σ) — jednou, ne vrstveně. */
     var sig2 = 0;
+    /* KOLO 29: kromě součtu si rozpočet pamatuje, kterou složkou
+       nejistota vznikla — text panelu pak řekne PRAVÝ důvod rozpětí
+       (neshoda zdrojů vs. pohyb pole vs. radarová řada vs. přeháňky),
+       ne vždy tatáž generickou větu. */
+    var c1v = 0, c2v = 0, c3v = 0, c4v = 0;
     /* 1) nejistota rychlosti pole: t = d/v, takže relativní rozptyl času
            je roven relativnímu rozptylu rychlosti. */
     if(stormMotion && stormMotion.spreadKmh != null && stormMotion.speedKmh > 5
        && stormMotion.samples >= 2){
       var v = stormMotion.speedKmh, sv = Math.min(stormMotion.spreadKmh, v*0.7);
       var relV = sv / Math.max(v, 1);
-      sig2 += relV*relV;
+      sig2 += relV*relV; c1v = relV*relV;
     }
     /* 2) neshoda zdrojů na čase příchodu: když radar říká 12 a model 40,
            je pravda "12 až 40" — polovina rozpětí vůči mediánu je σ. */
     if(arr && arr.n >= 2 && (arr.hi - arr.lo) >= 5){
       var relA = Math.min(0.6, (arr.hi - arr.lo) / (2*Math.max(arr.min, 5)));
-      sig2 += relA*relA;
+      sig2 += relA*relA; c2v = relA*relA;
     }
     /* 3) time-lagged ensemble radaru: když se osm posunutých snímků
            neshodne na síle, nemusí se shodnout ani na čase. Dřívější
@@ -9844,13 +9864,14 @@ function recomputeWhen(){
       });
       if(blizky && blizky.spread > 0.05 && blizky.mmh > 0){
         var relE = Math.min(0.6, blizky.spread / Math.max(0.05, blizky.mmh));
-        if(relE > 0.15){ var rE = relE*0.40; sig2 += rE*rE; }
+        if(relE > 0.15){ var rE = relE*0.40; sig2 += rE*rE; c3v = rE*rE; }
       }
     }
     /* 4) přeháňky: malá buňka se může o pár kilometrů minout a to je
            pár minut. Fixní σ 0,35 (dřívější ×0,75/×1,35 byl právě
            klasický dvojnásobný součet — tady vstupuje jednou). */
-    if(precipMix && precipMix.showerFrac > 0.6){ sig2 += 0.35*0.35; }
+    if(precipMix && precipMix.showerFrac > 0.6){ sig2 += 0.35*0.35; c4v = 0.35*0.35; }
+
     var lo = null, hi = null;
     if(sig2 > 0){
       var sig = Math.min(1.2, Math.sqrt(sig2));   /* strop: rozpětí max ~2,2× */
@@ -9858,6 +9879,21 @@ function recomputeWhen(){
       hi = Math.round(mins*(1 + sig));
     }
     var wide = (lo != null && hi != null && hi - lo >= 3 && lo >= 1);
+    /* KOLO 29 (Dave, mobil Líšeň, „za 115–254 min“: „rozsah deště
+       100 minut je nemožný“): rozpětí je počítané poctivě z rozpočtu
+       nejistoty, ale V MINUTÁCH se už nesmí ukázat, když je široké —
+       ta přesnost neexistuje a navíc se „za 115–254 min“ nechalo
+       číst jako rozsah deště (déšť od 115. do 254. minuty),
+       přesně Daveova výhrada. Okno širší než 45 min nebo sahající
+       za 90. minutu se hlásí jako ČASY dne: „mezi 18:55 a 21:35“.
+       Jediný odhad dál než 90 min se hlásí jako „kolem 19:15“,
+       minutové zůstávají jen odhady do 90 min. */
+    var sigWhy = (c2v >= c1v && c2v >= c3v && c2v >= c4v) ? "neshoda"
+               : (c1v >= c3v && c1v >= c4v) ? "pohyb"
+               : (c3v >= c4v) ? "radar" : "prehan";
+    var clockWin = !!(wide && (hi - lo > 45 || hi > 90));
+    var clockLo = lo != null ? new Date(now + lo*60000) : null;
+    var clockHi = hi != null ? new Date(now + hi*60000) : null;
 
     /* Kolo 8z fix (screenshot „za 137–304 min“): blend umí odhadnout
        příchod pole i za 60. minutu — extrapoluje jeho pohyb. Label
@@ -9869,13 +9905,27 @@ function recomputeWhen(){
         : "Kdy začne pršet v horizontu 60 min";
 
     big.className = "big";
-    big.innerHTML = wide
-      ? "za " + lo + "–" + hi + " <small>min</small>"
-      : "za " + mins + " <small>min</small>";
+    if(clockWin){
+      big.innerHTML = "mezi " + fmtHr(clockLo) + " a " + fmtHr(clockHi);
+    } else if(wide){
+      big.innerHTML = "za " + lo + "–" + hi + " <small>min</small>";
+    } else if(mins > 90){
+      big.innerHTML = "kolem " + fmtHr(new Date(now + mins*60000));
+    } else {
+      big.innerHTML = "za " + mins + " <small>min</small>";
+    }
     sub.innerHTML = (tp ? cap(tp.t) : "Srážky") + " ~<b>" + fmtMM(estMm) + " mm/h</b>"
       + (agree >= 2 ? " · shoda " + agree + " zdrojů" : " · zatím jen jeden zdroj, ber s rezervou")
-      + (wide ? " · srážkové pole postupuje nepravidelně, proto rozpětí" : "") + "."
-      + stationNote + blitzNote();
+      + (wide
+         ? (sigWhy === "neshoda"
+            ? (arr ? " · zdroje se na čase rozcházejí ("
+                    + arr.lo + "–" + arr.hi + " min)" : " · zdroje se na čase rozcházejí")
+            : sigWhy === "pohyb" ? " · pole postupuje nepravidelně, proto okno"
+            : sigWhy === "radar" ? " · snímky radaru se neshodují na síle, proto okno"
+            : " · přeháňky se načasují nejhůř, proto okno")
+         : "")
+      + (!wide && mins > 90 ? " · přibližně " + humanDur(mins) + " ode teď" : "")
+      + "." + stationNote + blitzNote();
     /* Když národní radar do hodiny nic nevidí, ale míchanka déšť hlásí,
        je to spor dvou dobrých zdrojů. Appka ho nezamlčí a nerozhodne
        silou — jen otevře rozpětí a řekne to. */
@@ -9884,7 +9934,9 @@ function recomputeWhen(){
     if(chmiUsed) partsTxt.push("ČHMÚ");
     srcEl.textContent = "zdroj: " + partsTxt.join(" + ")
       + (chmiUsed ? " · čas podle národního radaru" : "")
-      + " · rozlišení 5 min, horizont 60 min" + sourceCaveat();
+      + (clockWin || mins > 90
+         ? " · čas z pohybu srážkového pole"
+         : " · rozlišení 5 min, horizont 60 min") + sourceCaveat();
     if(chmiDisagrees){
       sub.innerHTML += " Český radar ale v příští hodině nad tímhle místem"
                      + " žádné echo nemá — ber to jako slabší signál.";
