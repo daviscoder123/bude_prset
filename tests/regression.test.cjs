@@ -150,7 +150,7 @@ test('model-only current and native/interpolated minutely signals cannot confirm
     modelState:{},whenState:null,THRESH_OBS:0.2,setTimeout:()=>{},fitPanels:()=>{},
     /* Kolo 15: registr běžících pozorování — v tomhle testu už vše
        dořeklo, proto „měřím ještě“ nezahlazuje větve maybe/wet. */
-    gtAnyPending:()=>false,gtPendingLabels:()=>[],
+    gtPendingObs:()=>[],gtPendingNc:()=>[],
     radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
     buildBlendTimeline:()=>[],wmoType:()=>({t:'déšť'}),sourceCaveat:()=>'',renderSolo:()=>{}
   });
@@ -1044,7 +1044,7 @@ test('kolo 12c: ČHMÚ potvrzuje „prší právě teď“ samo (čerstvé ECHO)
     native15:true,obsMetar:null,
     chmiState:{nowWet:true,nowOrd:0.25,ageMin:7,steps:[],first:null,scale:12},
     metnoNow:null,regioNowcast:null,satState:null,modelState:{},whenState:null,
-    gtAnyPending:()=>false,gtPendingLabels:()=>[],   /* kolo 15 */
+    gtPendingObs:()=>[],gtPendingNc:()=>[],   /* kolo 15 */
     setTimeout:()=>{},fitPanels:()=>{},
     radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
     THRESH_OBS:0.2,MAX_SANE_MMH:500,
@@ -1157,14 +1157,14 @@ test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
     'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
   assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
     'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
-  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
+  assert.ok(html.includes('>v30<'),'aktuální verze: v30');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
 
 test('kolo 15: registr běžících pozorování — start, settle, štítky, pojistný čas',()=>{
-  const c=context(['gtStart','gtSettle','gtPendingLabels','gtAnyPending','gtPendingHas','gtPrune'],
-    {gtPending:{},GT_MAX_PENDING_MS:90000,
+  const c=context(['gtStart','gtSettle','gtPendingLabels','gtAnyPending','gtPendingHas','gtPrune','gtNetArm'],
+    {gtPending:{},gtNetTimer:null,GT_MAX_PENDING_MS:90000,
      GT_LABELS:{radar:'radarový kompozit',stanice:'stanice',chmi:'radar ČHMÚ',
                 metno:'met.no nowcast',regio:'regionální nowcast',
                 wms:'DWD RADVOR/KNMI',sat:'družice',eum:'Meteosat'}});
@@ -1190,7 +1190,7 @@ test('kolo 15: modelové hlasy + měření běží → verdikt „ověřuji“, 
     native15:true,obsMetar:null,chmiState:null,metnoNow:null,regioNowcast:null,satState:null,
     modelState:{},whenState:null,THRESH_OBS:0.2,setTimeout:()=>{},fitPanels:()=>{},
     /* továrna na „něco měří“: radar i stanice ještě nedošly */
-    gtAnyPending:()=>true,gtPendingLabels:()=>['radarový kompozit','stanice'],
+    gtPendingObs:()=>['radarový kompozit','stanice'],gtPendingNc:()=>[],
     radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
     buildBlendTimeline:()=>[],wmoType:()=>({t:'déšť'}),sourceCaveat:()=>'',renderSolo:()=>{}
   });
@@ -1199,6 +1199,7 @@ test('kolo 15: modelové hlasy + měření běží → verdikt „ověřuji“, 
     'běžící pozorování brzdí předčasné „nepotvrzeno“');
   assert.ok(c.whenState.votes.length>=1,'modelové signály se neztratí');
   assert.deepEqual(c.whenState.pending,['radarový kompozit','stanice'],'nádech čeká na konkrétní zdroje');
+  assert.deepEqual(c.whenState.pendingNc,[],'nowcasty se hlásí odděleně a neblokují');
   assert.match(nodes.whenBig.innerHTML,/Ověřuji/);
   assert.match(nodes.whenSub.innerHTML,/ještě měří/);
   assert.match(nodes.whenSrc.textContent,/^ověřuji · čekám na: radarový kompozit, stanice/);
@@ -1607,7 +1608,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
+  assert.ok(html.includes('>v30<'),'aktuální verze: v30');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1657,7 +1658,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
+  assert.ok(html.includes('>v30<'),'aktuální verze: v30');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
@@ -1776,7 +1777,7 @@ test('kolo 23: pojistka proti visícímu dotazu na oprávnění (3 s)',()=>{
     'havárie init() se vypíše na clonu, ne němá smrt skriptu');
   assert.ok(script.includes('geoPermTxt()'),
     'nápovědy clony nesou stav oprávnění (diagnostika z mobilu)');
-  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
+  assert.ok(html.includes('>v30<'),'aktuální verze: v30');
 });
 
 test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spustí žádost',async()=>{
@@ -1828,7 +1829,7 @@ test('kolo 24: start aplikace — init() až po všech deklaracích, load() null
     'init() běží až po deklaraci vyhledávacího pole (na konci skriptu)');
   assert.ok(script.slice(initCall).includes('catch'),
     'pojistka havárie z kola 23 (chyba na clonu) zůstává');
-  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
+  assert.ok(html.includes('>v30<'),'aktuální verze: v30');
 });
 
 test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
@@ -1862,7 +1863,7 @@ test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
     'statické HTML startuje s viditelnou clonou — úvod bez bliknutí');
   assert.ok(html.includes('@keyframes riseIn') && html.includes('.compass{animation:riseIn'),
     'panely vplouvají animací riseIn');
-  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
+  assert.ok(html.includes('>v30<'),'aktuální verze: v30');
 });
 
 test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit/ČHMÚ',()=>{
@@ -1893,8 +1894,8 @@ test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit
     'volba pohledu se pamatuje v localStorage, nikam se neposílá');
   assert.ok(script.includes('function humanDur('),
     'lidský formát trvání existuje jako sdílený pomocník');
-  assert.ok(html.includes('.radseg') && html.includes('>v29<'),
-    'CSS segmentu je v šabloně, verze v29');
+  assert.ok(html.includes('.radseg') && html.includes('>v30<'),
+    'CSS segmentu je v šabloně, verze v30');
 });
 
 test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
@@ -1920,7 +1921,7 @@ test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
   assert.ok(rc.includes('Odsud déšť nečekej') && rc.includes('Intenzitu dopředu neodhadnu')
     && rc.includes('skoro stojí'),
     'vysvětlení v úzkém panelu jsou zkrácená (málo místa = kratší text)');
-  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
+  assert.ok(html.includes('>v30<'),'aktuální verze: v30');
 });
 
 test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start mobilu)',()=>{
@@ -1941,7 +1942,7 @@ test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start 
   const rc=fn('renderCompassBase');
   assert.ok(rc.includes('radViewCur === "chmu" && chmiReady && chmiCells'),
     'zdroj tvrdí ČHMÚ jen tehdy, když kompas opravdu kreslí jeho pole (jinak kompozit)');
-  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
+  assert.ok(html.includes('>v30<'),'aktuální verze: v30');
 });
 
 test('kolo 29: široké rozpětí se hlásí jako časy dne, příčina se jmenuje',()=>{
@@ -1970,5 +1971,73 @@ test('kolo 29: široké rozpětí se hlásí jako časy dne, příčina se jmenu
     'mobilní solo panel mluví tentýmž jazykem (časy, ne „za 2 h 44 min“)');
   assert.ok(rs.includes('if(!winBig && W.lo != null'),
     'dodatek „mezi X. a Y. minutou“ se u časového okna neduplikuje');
-  assert.ok(html.includes('>v29<'),'aktuální verze: v29');
+  assert.ok(html.includes('>v30<'),'aktuální verze: v30');
+});
+
+/* ==================== KOLO 30: VERDIKT ČEKÁ JEN NA POZOROVÁNÍ ==================== */
+
+test('kolo 30: registr má zvlášť pozorování a zvlášť nowcasty (DWD/KNMI neblokuje)',()=>{
+  /* Dave (20. 11., mobil, Líšeň 15:26): verdikt visel v „ověřuji“
+     kvůli jedinému rozpracovanému nowcastu DWD RADVOR/KNMI a text
+     přitom tvrdil, že „pozemní pozorování měří“. Nowcast je model
+     provozovatele sítě, ne měření, verdikt ho nesmí čekat. */
+  const c=context(['gtPendingObs','gtPendingNc','gtPrune'],{
+    gtPending:{},gtNetTimer:null,GT_MAX_PENDING_MS:90000,setTimeout:()=>{},
+    recomputeWhen:()=>{},
+    GT_LABELS:{radar:'radarový kompozit',stanice:'stanice',chmi:'radar ČHMÚ',
+               metno:'met.no nowcast',regio:'regionální nowcast',
+               wms:'DWD RADVOR/KNMI',sat:'družice',eum:'Meteosat'},
+    GT_OBS:{radar:1,stanice:1,chmi:1}});
+  assert.equal(c.gtPendingObs().join('|'),'','prázdný registr = nic neblokuje');
+  c.gtPending.wms = Date.now();                    /* Daveův případ: visí jen nowcast */
+  assert.equal(c.gtPendingObs().join('|'),'',
+    'nowcast DWD/KNMI není pozorování → verdikt na něj nečeká');
+  assert.equal(c.gtPendingNc().join('|'),'DWD RADVOR/KNMI','nowcast jde do vlastního štítku');
+  c.gtPending.chmi = Date.now() - 100000;          /* prošlé pozorování pročistí pojistka */
+  assert.equal(c.gtPendingObs().join('|'),'','prošlý záznam neblokuje (pojistka 90 s)');
+  assert.equal(c.gtPendingNc().join('|'),'DWD RADVOR/KNMI');
+  c.gtPending.chmi = Date.now();
+  assert.equal(c.gtPendingObs().join('|'),'radar ČHMÚ','živé pozorování blokuje');
+  c.gtPending.stanice = Date.now();
+  assert.equal(c.gtPendingObs().sort().join('|'),'radar ČHMÚ|stanice',
+    'čeká se na všechna živá pozorování najednou');
+});
+
+test('kolo 30: rozpracovaný nowcast nedrží verdikt v „ověřuji“ (Dave, 20. 11. 15:26)',()=>{
+  const nodes=new Proxy({}, {get:(o,k)=>o[k]||(o[k]={style:{}})});
+  const c=context(['recomputeWhen','stanicePotvrzujeSelf','chmiNowWet'],{
+    $:id=>nodes[id],reqId:1,cur:{},radarState:null,stormMotion:null,
+    altNowcast:[{t:Date.now()/1000,mmh:0.4}],modelCurrent:{mmh:0.4,code:61},
+    native15:true,obsMetar:null,chmiState:null,metnoNow:null,regioNowcast:null,satState:null,
+    modelState:{},whenState:null,THRESH_OBS:0.2,setTimeout:()=>{},fitPanels:()=>{},
+    /* radar i stanice dávno dořekly; jediný visící zdroj je nowcast
+       DWD RADVOR/KNMI → checking nemá nastat, verdikt padne hned */
+    gtPendingObs:()=>[],gtPendingNc:()=>['DWD RADVOR/KNMI'],
+    radarCoverage:'full',blitzMaybeStart:()=>{},blitzNote:()=>'',
+    buildBlendTimeline:()=>[],wmoType:()=>({t:'déšť'}),sourceCaveat:()=>'',renderSolo:()=>{}
+  });
+  c.recomputeWhen();
+  assert.equal(c.whenState.mode,'maybe',
+    'nowcast neblokuje verdikt — padne „Možná kape“, ne věčné „ověřuji“');
+  assert.ok(c.whenState.votes.length>=1,'modelové signály se neztratí');
+});
+
+test('kolo 30: strukturální — čekání na pozorování, pojistná překreslovačka',()=>{
+  const rw=fn('recomputeWhen');
+  assert.ok(rw.includes('gtPendingObs().length'),
+    '„ověřuji“ čeká jen na POZOROVACÍ zdroje (radar, stanice, ČHMÚ)');
+  assert.ok(!rw.includes('gtAnyPending()'),
+    'blokování verdiktu celým registrem (i nowcasty) je pryč');
+  assert.ok(rw.includes('pendingNc:pendNc'),'nowcasty cestují do whenState odděleně');
+  const rs=fn('renderSolo');
+  assert.ok(rs.includes('verdikt na něj nečeká'),
+    'mobilní panel vysvětluje, že nowcast verdikt nebrzdí');
+  assert.ok(!rs.includes('Radar, stanice i ČHMÚ ještě měří'),
+    'pevná fráze o měření (i když měřil jen nowcast) je pryč');
+  assert.ok(script.includes('gtNetArm') && script.includes('GT_MAX_PENDING_MS + 2000'),
+    'pojistný časovač po 90 s překreslí visící „ověřuji“ sám');
+  assert.ok(script.includes('var GT_OBS'),
+    'množina pozorovacích klíčů je pojmenovaná');
+  const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
+  assert.ok(swSrc.includes('bude-prset-v16'),'service worker bump v16');
 });
