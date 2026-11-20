@@ -25,7 +25,7 @@ before(async()=>{
   browser=await chromium.launch({headless:true,channel:process.env.BP_BROWSER_CHANNEL||'chromium'});
 });
 after(async()=>{await browser?.close();await new Promise(r=>server?.close(r));});
-async function fixture(timezone='America/Los_Angeles',width=1280,height=900){
+async function fixture(timezone='America/Los_Angeles',width=1280,height=900,savedPlace=null){
   const ctx=await browser.newContext({timezoneId:timezone,viewport:{width,height},serviceWorkers:'block'});
   const p=await ctx.newPage(), errors=[];
   p.on('pageerror',e=>errors.push(e.message));
@@ -83,7 +83,21 @@ async function fixture(timezone='America/Los_Angeles',width=1280,height=900){
       return json({address:{city:'Praha',country_code:'cz'}});
     return route.fulfill({status:503,json:{error:'Unavailable in deterministic test'}});
   });
+  // Kolo 24: volitelná uložená lokalita (bpPlace_v1) reprodukuje Daveův
+  // telefon — rychlý start z localStorage ještě před první navigací.
+  // Starý kód (init() volaný v půlce skriptu, od kola 15) na tomhle
+  // startu padal na `input.value = place.name` (TypeError, „Start se
+  // nepovedl“) a celý skript dál byl mrtvý: žádná data, žádná geolokace.
+  if(savedPlace) await p.addInitScript(place=>{
+    localStorage.setItem('bpPlace_v1',JSON.stringify(place));
+  },savedPlace);
   await p.goto(base,{waitUntil:'domcontentloaded'});
+  if(savedPlace){
+    /* S uloženou lokalitou tlačítková clona (kolo 21) nedorazí — data
+       jedou hned z rychlého startu. Clonu proto nezavíráme a čekáme
+       rovnou na data (dělá až test, který fixture takto použije). */
+    return {ctx,p,errors,control,epoch};
+  }
   // Kolo 21: automatická žádost o polohu už na startu neletí (WebKit ji
   // umí spolknout a clona pak visí, viz src/main.js kolo 18/21). Čerstvý
   // kontext bez rozhodnutého oprávnění uvidí tlačítkovou clonu (btnGeoTry);
@@ -508,3 +522,25 @@ test('model without data gets a note under the table (kolo 8f)',async()=>{
   }finally{await ctx.close();}
 });
 
+
+test('kolo 24: rychlý start z uložené lokality (Daveův telefon) nesmí zabít skript',async()=>{
+  /* Reprodukce snímku z 21. 11. (v23): „Start se nepovedl — chyba:
+     undefined is not an object (evaluating 'input.value =
+     place.name')“. Kontext startuje S uloženou lokalitou (bpPlace_v1,
+     jako Daveův iPhone každé ráno). Starý kód tady padal (init()
+     volaný uprostřed vyhodnocování skriptu → load() → zápis do
+     `var input` deklarovaného až níž): lastJ nikdy nedorazilo a
+     geolokace se nikdy nezeptala. Nový kód (kolo 24) načte data
+     z uložené lokality a skript zůstane naživu. */
+  const saved={lat:50.08,lon:14.42,cc:'CZ',name:'Praha',t:Date.now()};
+  const {ctx,p,errors}=await fixture('Europe/Prague',375,812,saved);
+  try{
+    await ready(p,'Praha');   /* data dorazila → skript žije */
+    const splash=await p.locator('#status').innerText();
+    assert.ok(!splash.includes('Start se nepovedl'),
+      'clona nesmí hlásit havárii startu: "'+splash.slice(0,120)+'"');
+    assert.ok(await p.locator('#locInput').inputValue()==='Praha',
+      'pole obce se předvyplní z uložené lokality');
+    assert.deepEqual(errors,[],'page errors: '+errors.join(' | '));
+  }finally{await ctx.close();}
+});

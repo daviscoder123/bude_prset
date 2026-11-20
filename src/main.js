@@ -1987,20 +1987,14 @@ function fmtHrHead(d){ return NARROW.matches ? String(+placeParts(d).hour) : fmt
 /* ================= START ================= */
 var curFromGeo = false;
 var manualPickAt = 0;      /* kdy si uživatel naposledy ručně vybral obec */
-/* KOLO 23: pojistka havárie startu. Kdyby cokoliv v init() na mobilu
-   vyhodilo výjimku, skript by se na tom místě zastavil a clona by
-   zůstala statická navěky (badge je statické HTML, takže vypovídá
-   jen o souboru, ne o běžícím kódu). Výjimka se teď neumlčí, ale
-   napíše se NA CLONU — další hlášení z mobilu tak řekne přesnou
-   příčinu, místo „beze změny“. */
-try{
-  init();
-}catch(e){
-  try{
-    status("Start se nepovedl — chyba: " + (e && e.message ? e.message : e)
-      + "<br><span style=\"font-size:11px\">Clonu zavřeš klepnutím do pozadí; aplikaci lze zachránit ručním výběrem obce ve vyhledávání.</span>");
-  }catch(e2){}
-}
+/* KOLO 24: samotné spuštění init() je NA KONCI SOUBORU. Volání tady
+   (původně od kola 15) dělalo toto: init() → rychlý start z uložené
+   lokality → load() během vyhodnocování skriptu → `input.value = …`
+   nad `var input`, které je deklarované až o 450 řádků níž a v tu
+   chvíli ještě undefined → TypeError, který zabil CELÝ skript. Na
+   mobilu to vypadalo jako „nežádá mě to o polohu“, protože mrtvý
+   skript nikdy nedojede k navigator.geolocation. Detailně viz
+   komentář KOLO 24 dole u startu. */
 function init(){
   /* KOLO 15: okamžitý start z poslední lokality. Na prvním načtení
      appka čekala na GPS fix a teprv potom začala stahovat data —
@@ -2713,7 +2707,9 @@ function load(place, silent){
   THRESH = threshFor(place.lat);   /* v tropech vyšší — viz threshFor() */
   lastFetch = Date.now();
   if(!silent) status("Stahuji předpovědi modelů…");
-  input.value = place.name;
+  var inp = $("locInput");  /* KOLO 24: null pojistka — element dohledáme
+     přímo, ať load() nikdy nezávisí na pořadí deklarací (var input) */
+  if(inp) inp.value = place.name;
   $("coords").textContent = place.lat.toFixed(3)+"° / "+place.lon.toFixed(3)+"°";
 
   var allModels = pickModels(place.cc, place.lat, place.lon);
@@ -9165,4 +9161,31 @@ function recomputeWhen(){
                    agT, Math.max(0.05, Math.min(0.98, agP)), "agree");
   }
   renderSolo();
+}
+
+/* ================= START (kolo 24) ================= */
+/* KOLO 24: start aplikace patří SEM, na úplný konec skriptu. Když
+   init() běžel dřív (původní volání cca o 7 000 řádků výš, od
+   kola 15), rychlý start z uložené lokality zavolal load() na
+   položinicializovaném skriptu: `var input = $("locInput")` i další
+   deklarace ještě neproběhly a jediný zápis do takové proměnné
+   vyhodil TypeError, který zabil celý skript od místa volání dál.
+   Na iPhonu pak clona hlásila „Start se nepovedl — chyba: undefined
+   is not an object (evaluating 'input.value = place.name')“ (Dave,
+   snímek z 21. 11., v23) a dál byl celý zbytek skriptu mrtvý:
+   nikdy se nedotázal na polohu a nikdo na první pohled nevěděl proč.
+   Node testy to nechytily, protože load() nikdy nezkoušely běhat;
+   browser fixture startovala bez uložené lokality, takže rychlá
+   cesta do testů vůbec nedorazila. Tady dole už jsou všechny
+   deklarace i posluchače připravené — init() jako syntakticky
+   poslední příkaz souboru nemá šanci šlápnout na nedefinovaný
+   symbol. Pojistka havárie (kolo 23) zůstává: kdyby init() přesto
+   vyhodil výjimku, napíše se přesná chyba na clonu. */
+try{
+  init();
+}catch(e){
+  try{
+    status("Start se nepovedl — chyba: " + (e && e.message ? e.message : e)
+      + "<br><span style=\"font-size:11px\">Clonu zavřeš klepnutím do pozadí; aplikaci lze zachránit ručním výběrem obce ve vyhledávání.</span>");
+  }catch(e2){}
 }
