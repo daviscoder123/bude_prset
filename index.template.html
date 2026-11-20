@@ -315,7 +315,15 @@ html.compact .ensrow{font-size:9px;margin-top:4px}
 .when .until b{color:var(--rain)}
 
 /* ---------- RADAROVÝ KOMPAS ---------- */
-.compass{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(8px,1.4vh,14px);display:flex;flex-wrap:wrap;gap:clamp(8px,1vw,14px);align-items:center;overflow:hidden}
+/* KOLO 27 (Dave, PC Líšeň, snímek: „nesedí ty věci do těch polí…
+   radar vždy vycentrovat, případně zmenšit“): starý desktopový flex s
+   wrapem stavěl cifernák a text vedle sebe; v úzkém panelu (aside měří
+   jen 210–310 px) dostal sloupec textu zbylých ~60–90 px a vysvětlení
+   se lámalo slovo od slova. Nově panel vede do sloupce jako na mobilu
+   (kolo 8w fix4): label s přepínačem v jedné řádce nahoře, cifernák
+   vždy centrovaný (menší, ať text níž zbyde místo), vysvětlení a
+   zdroj přes celou šířku pod ním — nikdy vedle. */
+.compass{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(8px,1.4vh,14px);display:block;overflow:hidden;overflow-wrap:anywhere;hyphens:auto}
 .compass[hidden]{display:none}
 /* KOLO 25: panely vplouvají, ne vyskočí. Animace proběhne vždy, když se
    element objeví (display none → flex restartuje animaci) — při
@@ -343,9 +351,9 @@ html.compact .compass .ct{flex:none}
 html.compact .compass .ct .verd{font-size:calc(clamp(11.5px,3.2vw,13px)*var(--fit,1))}
 html.compact .compass .ct .expl{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--fit,1))}
 html.compact .compass .ct .src{font-size:calc(clamp(8px,2.2vw,9px)*var(--fit,1))}
-.compass .label{flex:0 0 100%;font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-.compass svg{flex:none}
-.compass .ct{min-width:0;flex:1}
+.compass .label{display:flex;align-items:center;gap:8px;width:100%;font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.compass svg{display:block;width:clamp(78px,10vh,102px);height:clamp(78px,10vh,102px);margin:6px auto 8px}
+.compass .ct{width:100%;min-width:0}
 .compass .ct .verd{font-weight:800;font-size:clamp(11px,1.65vh,14px);letter-spacing:-.01em}
 .compass .ct .verd.hit{color:var(--rain)}
 .compass .ct .verd.miss{color:var(--nat)}
@@ -384,7 +392,7 @@ footer{display:flex;justify-content:space-between;align-items:center;font-family
 /* KOLO 26: přepínač pohledu radaru (Kompozit / ČHMÚ) v panelu Radar.
    Malý segment vedle labelu; aktivní tlačítko dešťová modř, přechody
    0,2 s (plynulost z kola 25 platí dál). */
-.radseg{display:inline-flex;gap:2px;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:7px;padding:2px;margin-left:8px;vertical-align:middle}
+.radseg{display:inline-flex;gap:2px;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:7px;padding:2px;margin-left:auto;vertical-align:middle}
 .radseg button{background:none;border:none;color:var(--muted);font-family:var(--sans);font-weight:700;font-size:clamp(8px,1.2vh,9.5px);padding:3px 9px;border-radius:5px;cursor:pointer;opacity:.75;transition:background .2s,color .2s,opacity .2s}
 .radseg button.on{background:var(--rain-deep);color:#fff;opacity:1}
 .radseg button:not(.on):hover{color:var(--text)}
@@ -731,7 +739,7 @@ html.compact table{border-spacing:1.5px}
 
 <div id="offlineBar">Jsi offline — zobrazená data můžou být stará</div>
 <div id="status" class="show"><div><span class="pulse">●</span><br>Zjišťuji tvou polohu…</div></div>
-<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v26</div>
+<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v27</div>
 
 <script>/*__BP_MAIN__*/</script>
 </body>

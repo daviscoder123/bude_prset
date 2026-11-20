@@ -672,6 +672,36 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 27 — panel Radar vede do sloupce, cifernák vždy vycentrovaný (21. 11.)
+
+Dave (snímek PC verze, Líšeň): „Všimni si, jak je to rozpadlé. Nesedí
+ty věci do těch polí. Tohle je zásadní problém. Když je málo místa,
+tak se musí text zkrátit. A radar vždy vycentrovat, případně zmenšit.
+Vyřešit. Apka musí vypadat dobře.“ Snímek zachytil desktopový flex s
+wrapem: cifernák a vysvětlení vedle sebe, ale panel Radar má jen
+210–310 px, takže textu zbylo ~60–90 px a věty se lámaly slovo od
+slova („Tě / mine. / Proletne / 21 km JV / od tebe, / nejbližší / …“).
+
+Panel Radar nyní vede do sloupce jako na mobilu (kolo 8w fix4):
+label s přepínačem Kompozit/ČHMÚ v jedné řádce nahoře (segment je
+uvnitř labelu, přitisknutý k pravému okraji margin-left:auto — dřív
+zabíral vlastní řádek), cifernák centrovaný margin auto a zmenšený
+(86–120 px → 78–102 px, 10 vh, ať textu níž zbyde místo), verdikt,
+vysvětlení a zdroj přes celou šířku panelu pod ním. Zalamování
+bezpečné (overflow-wrap:anywhere + hyphens:auto), nic nepřeteče.
+
+Málo místa = kratší text: vysvětlení radaru se zkrátila („Z tohohle
+echa u tebe déšť nečekám“ → „Odsud déšť nečekej“, „Intenzitu takhle
+daleko dopředu už neumím odhadnout“ → „Intenzitu dopředu
+neodhadnu“, „se prakticky nepohybuje“ → „skoro stojí“, „nejbližší
+průlet za“ → „nejbližší za“, „u tebe to odezní“ → „odezní“,
+„neumím odhadnout“ zkráceno, rekonciliace „nejspíš se staví nová
+buňka nad tebou“ → „nejspíš nová buňka nad tebou“). Informace
+zůstávají, jen se věty vešly do šířky panelu.
+
+Verze v rohu: v27; service worker v13. Testy: 155/155 (regrese 101:
++1 strukturní test kola 27; worker 54 nezměněn). Build 514 649 B.
+
 ## Kolo 26 — panel Kdy říká čas od modelů, přepínač Kompozit/ČHMÚ (21. 11.)
 
 Dave (snímek PC verze, Jihlava): „Tohle mě vytáčí. Je tam 89 procent,
