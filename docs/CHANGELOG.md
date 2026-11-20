@@ -672,6 +672,28 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 28 — přepínač radaru se ukáže hned, když dorazí ČHMÚ (21. 11.)
+
+Dave (mobil): „Na mobilu se po prvním otevření nezobrazí možnost
+přepnout radar. Až po vyhledání lokality jiné.“ Příčina: rychlý start
+z uložené lokality má radarové dlaždice v cache service workeru, takže
+kompas se vykreslí téměř hned; ČHMÚ jede vlastním workerem a data
+doručí později. Když dorazila, kód zavolal jen přepočet verdiktu
+(recomputeWhen), ale nikoli překreslení kompasu — přepínač Kompozit/
+ČHMÚ se tedy objevil až při nejbližším překreslení z jiné příležitosti
+(hledání jiné lokality přeložilo celý řetězec). loadChmi nyní po
+dosazení chmiState překreslí kompas okamžitě, stejně jako to už dělala
+chybová větv (scheduleChmiRetry).
+
+Ještě jedna poctivostní oprava ve stejném panelu: zdrojový řádek
+tvrdí „radar ČHMÚ · PseudoCAPPI 2 km…“ jen tehdy, když kompas
+opravdu kreslí pole ČHMÚ (chmiCells). S prázdným polem (sucho) nebo
+s polem pod práhem kreslení klesá na kompozit a řádka přiznává
+kompozit — dřív mohla lhát o tom, co uživatel vidí.
+
+Verze v rohu: v28; service worker v14. Testy: 156/156 (regrese 102:
++1 strukturní test kola 28; worker 54). Build 515 531 B.
+
 ## Kolo 27 — panel Radar vede do sloupce, cifernák vždy vycentrovaný (21. 11.)
 
 Dave (snímek PC verze, Líšeň): „Všimni si, jak je to rozpadlé. Nesedí
