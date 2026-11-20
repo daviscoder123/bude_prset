@@ -4869,6 +4869,11 @@ function wireRadSeg(el){
    srážky pod prahem echa → verdikt to přizná, nechá vypadat, že
    u uživatele nic není. Vrací {cls, verd, expl} nebo null. */
 function chmiNarrative(cells){
+  /* KOLO 32 (Dave, 20. 11.: „ať popíše, co vidí na radaru — uživatelsky
+     přívětivě“): věta pod verdiktem mluví běžnou češtinou — co padá,
+     kde je a kdy dorazí k tobě. Žargon (echo, COTREC osa, provozovatel
+     sítě) zůstává jen v src řádku a v komentářích, v uživatelském
+     textu ho není. Logika z kola 31 se nemění, jen znění vět. */
   var S = chmiState;
   if(!S || S === "off" || S === "error" || !cells || !cells.length) return null;
   /* Pojmenování intenzity jen z ověřené legendy; jinak se přidá nic. */
@@ -4884,41 +4889,42 @@ function chmiNarrative(cells){
     if(!best || d < best.d) best = {d:d, e:c.e, n:c.n, o:c.o};
   }
   best.d = Math.max(1, Math.round(best.d));
-  var bestTxt = sil(best.o) + "echo <b>" + best.d + " km "
+  var bestTxt = sil(best.o) + "srážky <b>" + best.d + " km "
     + smer8(best.e, best.n) + "</b> od tebe";
-  /* Echo přímo nad tebou: hit; COTREC řekne, jak dlouho vydrží. */
+  /* Prší právě nad tebou: hit; déšť vydrží, nebo brzy skončí. */
   if(S.nowWet){
     var odchod = (S.steps && S.steps.length && !S.steps[0].wet) ? S.steps[0].dt : null;
     return { cls:"hit", verd:"Právě nad tebou.",
-      expl:sil(S.nowOrd) + "echo radaru ČHMÚ je přímo nad tebou"
+      expl:"Radar nad tebou vidí " + (sil(S.nowOrd) || "") + "srážky"
         + (odchod != null
-           ? ", COTREC čeká jeho konec za ~<b>" + odchod + " min</b>."
+           ? " a jeho předpověď říká, že přestanou asi za <b>" + odchod + " min</b>."
            : (S.steps && S.steps.length
-              ? ", COTREC ho drží nad tebou celou další hodinu." : ".")) };
+              ? " a jeho předpověď je nad tebou drží nejméně další hodinu." : ".")) };
   }
   /* Kolo 12 i v tomhle pohledu: stanice měří, radar nevidí → pravda
      z pozorování, ne „nic u tebe“. */
   if(stanicePotvrzujeSelf()){
     return { cls:"hit", verd:"Nad tebou mrholí.",
-      expl:"Stanice měří slabé srážky, které se pod práh echa radaru"
-         + " ČHMÚ ztrácí; jeho nejbližší " + bestTxt + "." };
+      expl:"Stanice u tebe naměřila tak slabé srážky, že je radar"
+         + " ještě nezachytí. Jeho nejbližší " + bestTxt + "." };
   }
-  /* COTREC čeká srážky u tebe → příchod z osy provozovatele sítě. */
+  /* Předpověď čeká srážky u tebe → příchod z extrapolace radaru. */
   if(S.first){
     return { cls:"hit", verd:"Přiletí k tobě.",
-      expl:"Nejbližší " + bestTxt + "; COTREC národního radaru čeká"
-         + " srážky u tebe za ~<b>" + S.first.dt + " min</b>." };
+      expl:"Nejbližší " + bestTxt + "; podle předpovědi radaru"
+         + " dorazí k tobě asi za <b>" + S.first.dt + " min</b>." };
   }
-  /* Kroky jsou, ale žádný mokrý: národní radar na hodinu mlčí. */
+  /* Kroky jsou, ale žádný mokrý: radar na hodinu o dešti u tebe
+     neví → žádný slib. */
   if(S.steps && S.steps.length){
     return { cls:"miss", verd:"Nic do hodiny.",
-      expl:"Nejbližší " + bestTxt + ", ale COTREC do +60 min srážky"
-         + " u tebe nečeká. Odsud déšť nečekej." };
+      expl:"Nejbližší " + bestTxt + ", ale podle předpovědi se"
+         + " k tobě do hodiny nedostanou. Odsud déšť nečekej." };
   }
   /* Bez extrapolace se slibovat čas nedá. */
-  return { cls:"miss", verd:"Echo v dosahu.",
-    expl:"Nejbližší " + bestTxt + "; bez COTREC kroků ale odhad"
-       + " příchodu u tebe nedám." };
+  return { cls:"miss", verd:"Srážky v dohledu.",
+    expl:"Nejbližší " + bestTxt + "; bez předpovědi ale odhad"
+       + " příchodu k tobě nedám." };
 }
 function renderCompassBase(){
   var el = document.getElementById("compass");
@@ -5185,7 +5191,7 @@ function renderCompassBase(){
     var n31 = chmiNarrative(chmiCells);
     if(n31){
       verd = n31.verd; expl = n31.expl; cls = n31.cls;
-      src += " · popisek z tohoto radaru (pole 1×1 km + COTREC)";
+      src += " · popisek z tohoto radaru";
     }
   }
   svg += '</svg>';
