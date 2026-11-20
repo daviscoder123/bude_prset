@@ -2601,7 +2601,6 @@ function resetForecastState(){
   waterState = null; atmoState = null; stormRisk = null; probSeries = null;
   ensState = null; ensNote = "";
   chmiState = null; chmiNote = "";
-  chmiCompassOn = false;   /* kolo 14: nová lokalita začíná na kompozitu */
   regioNowcast = null; regioName = ""; regioNote = "";
   metnoNow = null; metnoNowNote = "";
   wmsncState = null; wmsncNote = ""; wmsncSrc = null;
@@ -4678,104 +4677,6 @@ function compassMmAt(dtMin, fallback){
   return dtMin > tl[tl.length-1].dt ? null : fallback; /* za dvě hodiny radar nevidí */
 }
 
-/* ===== KOLO 14: přepínač kompozit / ČHMÚ v panelu radar =====
-   Dave (19. 11. 13:14): „minimalistické tlačítko vpravo v rohu v panelu
-   radar na přepnutí na radar ČHMÚ a při opětovném kliknutí přepnutí
-   zpět. Pouze při lokaci česká republika. Stejný design. Jiná data."
-   Měřeno 19. 11.: národní radar je pro „právě teď, tady" citlivější
-   (zelené echo 0,160,0 nad Prahou, kde kompozit neviděl nic; LKPR
-   hlásil -RA), ale jeho snímek neříká směr jednotlivých buněk --
-   COTREC kroky jsou jen „mokré/suché" vzorky na pevném bodě. Pohled
-   ČHMÚ proto NEKRESLÍ trajektorii ani ETA: stejné SVG ciferníky a
-   CSS třídy (.label/.ct/.verd/.expl/.src), ale obsahem je aktuální
-   snímek nad tebou + verdikt z něj + COTREC „kdy čekat echo".
-   Tlačítko se zobrazí, jen když je lokalita v pokrytí ČHMÚ
-   (chmiInRange, ~ČR) a modul má živá data (chmiState objekt);
-   všude jinde panel zůstává beze změny. */
-var chmiCompassOn = false;
-function chmiCompassReady(){
-  return !!(cur && typeof cur.lat === "number" && typeof cur.lon === "number"
-    && chmiInRange(cur.lat, cur.lon)
-    && chmiState && typeof chmiState === "object");
-}
-function chmiCompassSwitchHtml(){
-  if(!chmiCompassReady()) return "";
-  return '<button class="radSwitch" id="radSwitch" title="Přepnout radar">'
-       + (chmiCompassOn ? "KOMPOZIT" : "ČHMÚ") + "</button>";
-}
-function chmiCompassIntensityTxt(ord){
-  if(ord == null) return "echo";
-  return ord >= 0.66 ? "silnější echo" : (ord >= 0.33 ? "středně silné echo" : "slabé echo");
-}
-function renderChmiCompass(el){
-  var s = chmiState;
-  /* KOLO 15: ciferník se neztrácí — kruh, prstence, sever. Nově je
-     ale pozadí SKUTEČNÝM polem srážek: výřez ±48 km ze snímku PseudoCAPPI
-     (1 km na pixel) se rozloží na bloky a vykreslí ve stejném designu,
-     který dřív zastupovala jediná elipsa ve středu. Kompas tak konečně
-     vypadá jako národní radar, ne jako zástupné schéma. */
-  var REACH = CHMI_FIELD_KM, RE = 46;
-  var chmiRings = "";
-  [25, 50].forEach(function(km){
-    if(km < REACH) chmiRings += '<circle cx="50" cy="50" r="' + (km/REACH*RE).toFixed(1)
-      + '" fill="none" stroke="rgba(255,255,255,.14)" stroke-width=".7"/>';
-  });
-  var svg = '<svg viewBox="0 0 100 100" width="clamp(86px,15vh,120px)" height="clamp(86px,15vh,120px)" aria-hidden="true">'
-    + '<circle cx="50" cy="50" r="46" fill="rgba(255,255,255,.03)" stroke="rgba(255,255,255,.25)" stroke-width=".8"/>'
-    + chmiRings
-    + '<text x="50" y="9.5" text-anchor="middle" font-size="7" fill="rgba(255,255,255,.6)">S</text>'
-    + '<line x1="45" y1="50" x2="47" y2="50" stroke="#A8E4FF" stroke-width="1"/>'
-    + '<line x1="53" y1="50" x2="55" y2="50" stroke="#A8E4FF" stroke-width="1"/>';
-  var fieldSvg = (s.field && s.field.length) ? compassFieldSvg(s.field, REACH, true) : "";
-  if(fieldSvg) svg += fieldSvg;
-  var verd = "", expl = "", cls = "";
-  if(s.nowWet){
-    var ord = (s.nowOrd != null) ? s.nowOrd : 0.5;
-    var a = (0.18 + 0.45*Math.min(1, ord)).toFixed(2);
-    if(!fieldSvg){
-      /* Fallback: pole se nepodařilo vyčíst — elipsa ve středu jako
-         v minulém kole, ať pohled nikdy nezevšední. */
-      svg += '<ellipse cx="50" cy="50" rx="' + (3 + 9*ord).toFixed(1) + '" ry="' + (3 + 9*ord).toFixed(1)
-        + '" fill="rgba(168,228,255,' + a + ')" stroke="rgba(168,228,255,.85)" stroke-width=".8"/>';
-    }
-    verd = "Právě nad tebou."; cls = "hit";
-    expl = "Národní radar ČHMÚ vidí nad tebou " + chmiCompassIntensityTxt(ord)
-         + ". Snímek před " + s.ageMin + " min, rozlišení 1 km na pixel — takhle slabý déšť"
-         + " kompozit často nezahlídne, ČHMÚ ano."
-         + (fieldSvg ? " Kolem tebe je vykreslené reálné pole do ~" + REACH + " km." : "");
-  } else {
-    verd = "Nad tebou nic."; cls = "miss";
-    if(s.first && s.first.dt != null){
-      expl = "Nad tebou je sucho. Extrapolace ČHMÚ (COTREC) ale čeká první echo"
-           + " za ~<b>" + s.first.dt + " min</b>.";
-    } else if(s.steps && s.steps.length >= 4){
-      expl = "Nad tebou je sucho a COTREC nečeká echo ani v následující hodině.";
-    } else {
-      expl = "Nad tebou je sucho.";
-    }
-    if(s.field && s.field.length === 0) expl += " V okruhu ~" + REACH + " km ČHMÚ nevidí žádné echo.";
-  }
-  svg += '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF" stroke="rgba(255,255,255,.6)" stroke-width=".6"/></svg>';
-  var src = "radar ČHMÚ · PseudoCAPPI 2 km · 1 km/px · snímek " + s.ageMin
-          + " min · dohled ~" + REACH + " km · bez trajektorie";
-  el.innerHTML = chmiCompassSwitchHtml()
-    + '<div class="label">Radar</div>' + svg
-    + '<div class="ct"><div class="verd ' + cls + '">' + verd + '</div>'
-    + '<div class="expl">' + expl + '</div>'
-    + '<div class="src">' + src + '</div></div>';
-  el.hidden = false;
-}
-/* Jeden delegovaný listener na panelu: innerHTML kompasu se překresluje
-   při každém recompute, tlačítko se v něm rodí znovu — klik proto
-   chytá jeden handler na neměnném rodiči (#compass je statický prvek
-   šablony), ne stále nové návěšiny. */
-(function(){
-  var elc = (typeof document !== "undefined") ? document.getElementById("compass") : null;
-  if(elc) elc.addEventListener("click", function(ev){
-    var t = ev && ev.target;
-    if(t && t.id === "radSwitch"){ chmiCompassOn = !chmiCompassOn; renderCompass(); }
-  });
-})();
 function renderCompass(){
   try{ renderCompassBase(); }
   finally{
@@ -4790,10 +4691,6 @@ function renderCompass(){
 function renderCompassBase(){
   var el = document.getElementById("compass");
   if(!el) return;
-  /* KOLO 14: přepnutý pohled na národní radar se kreslí NEJDŘÍV,
-     nezávisle na stavu kompozitu (i když kompozit padl, ČHMÚ pohled
-     funguje — tlačítko je na to právě pojistka). Návrat klikem. */
-  if(chmiCompassOn && chmiCompassReady()){ renderChmiCompass(el); return; }
   if(radarCoverage === "none"){
     /* ⑫: kde radar nedosahuje, kreslí kompas satelit GPM IMERG —
        hrubý (10 km) a opožděný (hodiny), ale poctivý: měření, ne model.
@@ -4818,8 +4715,7 @@ function renderCompassBase(){
      a že se to zkusí znovu samo. */
   if(radarState === "error" && !C){
     el.hidden = false;
-    el.innerHTML = chmiCompassSwitchHtml()   /* kolo 14: i v výpadku kompozitu jde přepnout na ČHMÚ */
-      + '<div class="label">Radar</div>'
+    el.innerHTML = '<div class="label">Radar</div>'
       + '<div class="ct">'
       + '<div class="verd">Radar se nepodařilo načíst.</div>'
       + '<div class="expl">Síť nebo API zrovna nespolupracuje, takže kompas nemám z čeho kreslit. Zkusím to znovu sám; zatím platí modely, satelit a minutacast.</div>'
@@ -4833,8 +4729,7 @@ function renderCompassBase(){
        výpověď ostatních. */
     var gtErr = groundTruthWitnesses();
     if(gtErr.length){
-      el.innerHTML = chmiCompassSwitchHtml()   /* kolo 14: tlačítko i tady */
-        + '<div class="label">Radar</div>'
+      el.innerHTML = '<div class="label">Radar</div>'
         + '<div class="ct">'
         + '<div class="verd hit">Právě nad tebou prší.</div>'
         + '<div class="expl">Pozemní pozorování srážky potvrzuje: ' + gtErr.join(" a ")
@@ -4853,8 +4748,7 @@ function renderCompassBase(){
   if(!C){
     if(gtPendingHas("radar")){
       el.hidden = false;
-      el.innerHTML = chmiCompassSwitchHtml()
-        + '<div class="label">Radar</div>'
+      el.innerHTML = '<div class="label">Radar</div>'
         + '<svg viewBox="0 0 100 100" width="clamp(86px,15vh,120px)" height="clamp(86px,15vh,120px)" aria-hidden="true">'
         + '<circle cx="50" cy="50" r="46" fill="rgba(255,255,255,.03)" stroke="rgba(255,255,255,.25)" stroke-width=".8"/>'
         + '<circle cx="50" cy="50" r="15.3" fill="none" stroke="rgba(255,255,255,.14)" stroke-width=".7"/>'
@@ -5023,8 +4917,7 @@ function renderCompassBase(){
     src += " · kompozit mlčí, pravdu říká pozorování";
   }
   svg += '</svg>';
-  el.innerHTML = chmiCompassSwitchHtml()   /* kolo 14: v ČR přepne panel na národní radar */
-    + '<div class="label">' + (viaSat ? "Satelit" : "Radar") + '</div>' + svg
+  el.innerHTML = '<div class="label">' + (viaSat ? "Satelit" : "Radar") + '</div>' + svg
     + '<div class="ct"><div class="verd ' + cls + '">' + verd + '</div>'
     + '<div class="expl">' + expl + '</div>'
     + '<div class="src">' + src + '</div></div>';

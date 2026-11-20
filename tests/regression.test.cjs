@@ -1131,68 +1131,29 @@ test('kolo 13: strukturální pojistky radaru i zrušeného řádku ČHMÚ',()=>
     'hlasování ČHMÚ ve verdiktu zůstává');
   assert.ok(!fn('loadChmi').includes('renderChmiRow'),'loadChmi už řádek nekreslí');
 });
-
-/* ===== Kolo 14: přepínač kompozit / ČHMÚ v panelu radar =====
-   Dave 19. 11. 13:14: „minimalistické tlačítko vpravo v rohu v panelu
-   radar na přepnutí na radar ČHMÚ a při opětovném kliknutí přepnutí
-   zpět. Pouze při lokaci česká republika. Stejný design. Jiná data."
-   Pohled ČHMÚ kreslí tentýž cifernák i CSS třídy, ale obsahem je
-   snímek národního radaru (1 km/px) + COTREC; trajektorii nezná,
-   takže ji nekreslí ani nekecá. */
-test('kolo 14: tlačítko ČHMÚ jen v pokrytí národního radaru',()=>{
-  const c=context(['chmiCompassReady','chmiCompassSwitchHtml','chmiInRange'],{
-    CHMI_DATA:{lonMin:11.267,lonMax:19.624,latMin:48.047,latMax:51.458},
-    cur:{lat:50.08,lon:14.44},
-    chmiState:{nowWet:true,nowOrd:0.4,ageMin:6,steps:[],first:null},
-    chmiCompassOn:false
-  });
-  assert.equal(c.chmiCompassReady(),true,'v ČR se zdravým ČHMÚ');
-  assert.ok(c.chmiCompassSwitchHtml().includes('>ČHMÚ<'),'nabízí přepnutí');
-  c.chmiCompassOn=true;
-  assert.ok(c.chmiCompassSwitchHtml().includes('>KOMPOZIT<'),'po přepnutí nabízí návrat');
-  c.cur={lat:52.52,lon:13.40};
-  assert.equal(c.chmiCompassReady(),false,'Berlin je mimo pokrytí');
-  assert.equal(c.chmiCompassSwitchHtml(),'','mimo ČR se tlačítko nekreslí');
-  c.cur={lat:50.08,lon:14.44}; c.chmiState='error';
-  assert.equal(c.chmiCompassReady(),false,'výpadek ČHMÚ = bez tlačítka');
-  c.chmiState=null;
-  assert.equal(c.chmiCompassReady(),false,'bez dat ČHMÚ = bez tlačítka');
-});
-test('kolo 14: pohled ČHMÚ v panelu — stejný design, data národního radaru',()=>{
-  const c=context(['renderChmiCompass','chmiCompassSwitchHtml','chmiCompassReady','chmiInRange','chmiCompassIntensityTxt'],{
-    CHMI_DATA:{lonMin:11.267,lonMax:19.624,latMin:48.047,latMax:51.458},
-    cur:{lat:50.08,lon:14.44},chmiCompassOn:true,
-    CHMI_FIELD_KM:48,compassFieldSvg:()=>'' ,   /* kolo 15: jednotkovélinky pro kreslení pole */
-    chmiState:{nowWet:true,nowOrd:0.4,ageMin:6,steps:[],first:null}
-  });
-  const el={hidden:true,innerHTML:''};
-  c.renderChmiCompass(el);
-  assert.equal(el.hidden,false,'panel se ukáže');
-  assert.ok(el.innerHTML.includes('id="radSwitch"'),'tlačítko návratu je přítomno');
-  assert.ok(el.innerHTML.includes('>KOMPOZIT<'),'nabízí návrat na kompozit');
-  assert.ok(el.innerHTML.includes('Právě nad tebou.'),'echo nad tebou mluví verdiktem');
-  assert.ok(el.innerHTML.includes('class="verd hit"'),'stejná třída hit jako kompozit');
-  assert.ok(el.innerHTML.includes('1 km/px') && el.innerHTML.includes('snímek 6 min'),'zdroj uvádí parametry ČHMÚ');
-  assert.ok(el.innerHTML.includes('radar ČHMÚ'),'src pojmenovává národní radar');
-  assert.ok(!el.innerHTML.includes('Prolétne'),'bez trajektorie — COTREC směr buněk nezná');
-  c.chmiState={nowWet:false,nowOrd:0,ageMin:9,
-    steps:[{dt:10,wet:false},{dt:20,wet:false},{dt:30,wet:true},{dt:40,wet:true}],
-    first:{dt:30,ord:0.4}};
-  const el2={hidden:true,innerHTML:''};
-  c.renderChmiCompass(el2);
-  assert.ok(el2.innerHTML.includes('Nad tebou nic.'),'sucho se hlásí přímo');
-  assert.ok(el2.innerHTML.includes('za ~<b>30 min</b>'),'COTREC hlásí první echo');
-  assert.ok(el2.innerHTML.includes('class="verd miss"'));
-});
-test('kolo 14: strukturální — pohled ČHMÚ visí před kompozitovými větvemi',()=>{
+/* ===== KOLO 22: rozklikávací radar ČHMÚ pryč — panel jako v době,
+   kdy appka podle Dave fungovala =====
+   Dave (20. 11.): „Co kdybys vrátil kód do doby, kdy to fungovalo.
+   Tedy kdy nebyl radar ČHMÚ rozklikávací.“ Kolo 14 tehdy přidalo
+   tlačítko na přepnutí kompozit/ČHMÚ; kolo 22 ho cíleně ruší a panel
+   radar se vrací do podoby z doby před ním (jediný pohled: kompozit
+   RainViewer, mimo dosah satelit). Geolokační opravy kol 15–21
+   zůstávají — plné vrácení by oživilo chyby, které Dave sám hlásil
+   v kolech 16–18 („nenačítají se věci“, „nejede zjišťování polohy“).
+   Hlasování ČHMÚ ve verdiktu (kolo 12) zůstává: jde o data na
+   pozadí, ne o rozklikávací panel. */
+test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
+  assert.ok(!script.includes('radSwitch'),'žádné tlačítko přepínače radaru');
+  assert.ok(!script.includes('chmiCompassOn') && !script.includes('chmiCompassReady')
+    && !script.includes('chmiCompassSwitchHtml') && !script.includes('renderChmiCompass'),
+    'celý pohled ČHMÚ v panelu (kolo 14) je odstraněn');
+  assert.ok(!html.includes('.radSwitch'),'CSS tlačítka v šabloně pryč');
   const rcb=fn('renderCompassBase');
-  assert.ok(rcb.includes('chmiCompassOn && chmiCompassReady()'),'přepnutý pohled se kreslí první');
-  assert.ok(rcb.includes('renderChmiCompass(el); return;'),'a vrací se dřív, než se rozhoduje o kompozitu');
-  assert.ok((rcb.match(/chmiCompassSwitchHtml\(\)/g)||[]).length>=3,
-    'kompozitové větve (chyba, svědci, normál) nesou tlačítko');
-  assert.ok(fn('resetForecastState').includes('chmiCompassOn = false'),
-    'nová lokalita začíná na kompozitu');
-  assert.ok(script.includes('id === "radSwitch"'),'klik na tlačítko přepíná pohled');
+  assert.ok((rcb.match(/'<div class="label">Radar<\/div>'/g)||[]).length>=3,
+    'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
+  assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
+    'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
+  assert.ok(html.includes('>v22<'),'aktuální verze: v22');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
@@ -1289,10 +1250,9 @@ test('kolo 15: strukturální — panel radaru měří nahlas, start z poslední
   assert.ok(rcb.includes('gtPendingHas("radar")'),'skeleton říká jen když COMPOZIT skutečně běží');
   assert.ok(rcb.includes('compassFieldSvg(radarField, C.reachKm, false)'),
     'kompozitový kompas kreslí reálné pole');
-  const rcc=fn('renderChmiCompass');
-  assert.ok(rcc.includes('CHMI_FIELD_KM') && rcc.includes('compassFieldSvg'),
-    'pohled ČHMÚ kreslí reálné pole z výřezu');
-  assert.ok(rcc.includes('dohled'),'zdrojová řádka říká dosah pohledu');
+  /* kolo 22: pohled ČHMÚ (renderChmiCompass) je zrušen spolu
+     s přepínačem radaru; pole ČHMÚ zůstává jen jako datová noha
+     verdiktu (chmiState/chmiFieldFromPatch), ne panel. */
   assert.ok(fn('recomputeWhen').includes('mode:"checking"'),
     'verdikt má stav „ověřuji“');
   assert.ok(fn('renderSolo').includes('Verdikt · ověřuji'),
@@ -1643,7 +1603,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v21<'),'aktuální verze: v21 (bumpnutí kolem 21)');
+  assert.ok(html.includes('>v22<'),'aktuální verze: v22 (bump kolem 22 — revert přepínače)');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1693,7 +1653,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v21<'),'aktuální verze: v21');
+  assert.ok(html.includes('>v22<'),'aktuální verze: v22');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
