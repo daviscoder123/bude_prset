@@ -1157,7 +1157,7 @@ test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
     'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
   assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
     'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
-  assert.ok(html.includes('>v31<'),'aktuální verze: v31');
+  assert.ok(html.includes('>v32<'),'aktuální verze: v32');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
@@ -1608,7 +1608,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v31<'),'aktuální verze: v31');
+  assert.ok(html.includes('>v32<'),'aktuální verze: v32');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1658,7 +1658,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v31<'),'aktuální verze: v31');
+  assert.ok(html.includes('>v32<'),'aktuální verze: v32');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
@@ -1777,7 +1777,7 @@ test('kolo 23: pojistka proti visícímu dotazu na oprávnění (3 s)',()=>{
     'havárie init() se vypíše na clonu, ne němá smrt skriptu');
   assert.ok(script.includes('geoPermTxt()'),
     'nápovědy clony nesou stav oprávnění (diagnostika z mobilu)');
-  assert.ok(html.includes('>v31<'),'aktuální verze: v31');
+  assert.ok(html.includes('>v32<'),'aktuální verze: v32');
 });
 
 test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spustí žádost',async()=>{
@@ -1829,7 +1829,7 @@ test('kolo 24: start aplikace — init() až po všech deklaracích, load() null
     'init() běží až po deklaraci vyhledávacího pole (na konci skriptu)');
   assert.ok(script.slice(initCall).includes('catch'),
     'pojistka havárie z kola 23 (chyba na clonu) zůstává');
-  assert.ok(html.includes('>v31<'),'aktuální verze: v31');
+  assert.ok(html.includes('>v32<'),'aktuální verze: v32');
 });
 
 test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
@@ -1863,7 +1863,7 @@ test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
     'statické HTML startuje s viditelnou clonou — úvod bez bliknutí');
   assert.ok(html.includes('@keyframes riseIn') && html.includes('.compass{animation:riseIn'),
     'panely vplouvají animací riseIn');
-  assert.ok(html.includes('>v31<'),'aktuální verze: v31');
+  assert.ok(html.includes('>v32<'),'aktuální verze: v32');
 });
 
 test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit/ČHMÚ',()=>{
@@ -1894,8 +1894,8 @@ test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit
     'volba pohledu se pamatuje v localStorage, nikam se neposílá');
   assert.ok(script.includes('function humanDur('),
     'lidský formát trvání existuje jako sdílený pomocník');
-  assert.ok(html.includes('.radseg') && html.includes('>v31<'),
-    'CSS segmentu je v šabloně, verze v31');
+  assert.ok(html.includes('.radseg') && html.includes('>v32<'),
+    'CSS segmentu je v šabloně, verze v32');
 });
 
 test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
@@ -1921,7 +1921,7 @@ test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
   assert.ok(rc.includes('Odsud déšť nečekej') && rc.includes('Intenzitu dopředu neodhadnu')
     && rc.includes('skoro stojí'),
     'vysvětlení v úzkém panelu jsou zkrácená (málo místa = kratší text)');
-  assert.ok(html.includes('>v31<'),'aktuální verze: v31');
+  assert.ok(html.includes('>v32<'),'aktuální verze: v32');
 });
 
 test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start mobilu)',()=>{
@@ -1942,7 +1942,7 @@ test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start 
   const rc=fn('renderCompassBase');
   assert.ok(rc.includes('radViewCur === "chmu" && chmiReady && chmiCells'),
     'zdroj tvrdí ČHMÚ jen tehdy, když kompas opravdu kreslí jeho pole (jinak kompozit)');
-  assert.ok(html.includes('>v31<'),'aktuální verze: v31');
+  assert.ok(html.includes('>v32<'),'aktuální verze: v32');
 });
 
 test('kolo 29: široké rozpětí se hlásí jako časy dne, příčina se jmenuje',()=>{
@@ -1971,7 +1971,7 @@ test('kolo 29: široké rozpětí se hlásí jako časy dne, příčina se jmenu
     'mobilní solo panel mluví tentýmž jazykem (časy, ne „za 2 h 44 min“)');
   assert.ok(rs.includes('if(!winBig && W.lo != null'),
     'dodatek „mezi X. a Y. minutou“ se u časového okna neduplikuje');
-  assert.ok(html.includes('>v31<'),'aktuální verze: v31');
+  assert.ok(html.includes('>v32<'),'aktuální verze: v32');
 });
 
 /* ==================== KOLO 30: VERDIKT ČEKÁ JEN NA POZOROVÁNÍ ==================== */
@@ -2039,7 +2039,7 @@ test('kolo 30: strukturální — čekání na pozorování, pojistná překresl
   assert.ok(script.includes('var GT_OBS'),
     'množina pozorovacích klíčů je pojmenovaná');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v17'),'service worker bump v17');
+  assert.ok(swSrc.includes('bude-prset-v18'),'service worker bump v17');
 });
 
 test('kolo 31: pohled ČHMÚ mluví daty národního radaru (Dave, 20. 11.)',()=>{
@@ -2057,9 +2057,9 @@ test('kolo 31: pohled ČHMÚ mluví daty národního radaru (Dave, 20. 11.)',()=
   const n=c.chmiNarrative([{e:10,n:0,o:.5,rkm:1.5}]);
   assert.equal(n.cls,'hit','COTREC čeká srážky → hit');
   assert.equal(n.verd,'Přiletí k tobě.','verdikt z COTREC osy ČHMÚ');
-  assert.ok(n.expl.includes('echo <b>9 km V</b>'),
+  assert.ok(n.expl.includes('srážky <b>9 km V</b>'),
     'nejbližší echo z reálných buněk 1×1 km pole');
-  assert.ok(n.expl.includes('za ~<b>25 min</b>'),
+  assert.ok(n.expl.includes('asi za <b>25 min</b>'),
     'čas příchodu z COTREC kroku, ne z kompozitní geometrie');
   assert.ok(!n.expl.includes('Prolétne')&&!n.expl.includes('Tě mine'),
     'žádná kompozitní fráze v popisku ČHMÚ');
@@ -2068,7 +2068,7 @@ test('kolo 31: pohled ČHMÚ mluví daty národního radaru (Dave, 20. 11.)',()=
   const nad=c.chmiNarrative([{e:10,n:0,o:.5,rkm:1.5}]);
   assert.equal(nad.cls,'hit');
   assert.equal(nad.verd,'Právě nad tebou.','echo nad tebou');
-  assert.ok(nad.expl.includes('konec za ~<b>10 min</b>'),
+  assert.ok(nad.expl.includes('přestanou asi za <b>10 min</b>'),
     'odchod se čte z prvního suchého kroku COTREC');
   /* COTREC suchý celou hodinu → miss, ne slib. */
   c.chmiState.nowWet=false;
@@ -2108,8 +2108,42 @@ test('kolo 31: strukturální — přepínač radaru přepisuje i popisek',()=>{
   assert.ok(!nc.includes('Prolet')&&!nc.includes('Prolétne')
     &&!nc.includes('missKm')&&!nc.includes('speedKmh'),
     'chmiNarrative nepoužívá kompozitní geometrii');
-  assert.ok(html.includes('.radseg')&&html.includes('>v31<'),
-    'přepínač zůstává, verze v31');
+  assert.ok(html.includes('.radseg')&&html.includes('>v32<'),
+    'přepínač zůstává, verze v32');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v17'),'service worker bump v17');
+  assert.ok(swSrc.includes('bude-prset-v18'),'service worker bump v17');
+});
+
+test('kolo 32: popisek ČHMÚ je uživatelsky přívětivý (Dave, 20. 11.)',()=>{
+  /* Dave: „ať popíše, co vidí na radaru — uživatelsky přívětivě“.
+     Věta pod verdiktem mluví běžnou češtinou (co padá, kde je,
+     kdy dorazí), žargon v uživatelském textu není. */
+  const c=context(['chmiNarrative','smer8'],{
+    KOMPAS_SMERY8:["S","SV","V","JV","J","JZ","Z","SZ"],
+    stanicePotvrzujeSelf:()=>false,
+    chmiState:{nowWet:false,nowOrd:.9,ageMin:7,scale:6,
+      first:{dt:25,wet:true,ord:.5},
+      steps:[{dt:10,wet:false},{dt:25,wet:true}]}
+  });
+  const n=c.chmiNarrative([{e:10,n:0,o:.5,rkm:1.5}]);
+  assert.ok(n.expl.includes('srážky <b>9 km V</b>')
+    &&n.expl.includes('asi za <b>25 min</b>'),
+    'srozumitelně: co padá, kde je a kdy dorazí');
+  for(const z of ['COTREC','echo','osy','provozovatele','PseudoCAPPI'])
+    assert.ok(!n.expl.includes(z),'žargon „'+z+'“ v popisku není');
+  /* Nad tebou: konec srážek lámaný na lidskou řeč. */
+  c.chmiState.nowWet=true;
+  const nad=c.chmiNarrative([{e:10,n:0,o:.5,rkm:1.5}]);
+  assert.ok(nad.expl.includes('přestanou asi za <b>10 min</b>'),
+    'konec srážek srozumitelně, ne „první suchý krok“');
+  assert.ok(!nad.expl.includes('echo')&&!nad.expl.includes('COTREC'));
+  /* Věty zůstávají krátké (mobilní panel). */
+  for(const v of [n.verd,nad.verd,'Přiletí k tobě.','Nic do hodiny.',
+                  'Srážky v dohledu.','Nad tebou mrholí.'])
+    assert.ok(v.length<=20,'verdikt zůstává úsporný: '+v);
+  const rcb=fn('renderCompassBase');
+  assert.ok(rcb.includes('popisek z tohoto radaru'),
+    'src krátce: popisek jde ze zobrazeného radaru');
+  assert.ok(!rcb.includes('(pole 1×1 km + COTREC)'),
+    'technická závorka z src řádku je pryč');
 });

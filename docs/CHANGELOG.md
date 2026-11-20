@@ -672,6 +672,32 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 32 — popisek ČHMÚ v lidské řeči, ne v žargonu (20. 11.)
+
+Dave: „Chci změnu popisku radaru při změně radaru na ČHMÚ. Ať
+popíše, co vidí na radaru — uživatelsky přívětivě.“ Kolo 31
+přepnulo popisek na data zobrazeného radaru, ale věta pod verdiktem
+zněla jako technická zpráva: „Nejbližší slabé echo 9 km V od tebe;
+COTREC národního radaru čeká srážky u tebe za ~25 min.“
+
+Změna je jen ve znění, logika zůstává z kola 31:
+- „Nejbližší slabé echo“ → „Nejbližší slabé srážky 9 km V od tebe“;
+  slovo echo zmizelo z uživatelských vět úplně.
+- „COTREC čeká srážky u tebe za ~25 min“ → „podle předpovědi
+  radaru dorazí k tobě asi za 25 min“; zkratka COTREC uživatel
+  nevidí, zůstává jen v src řádku a komentářích.
+- Konec srážek nad tebou: „přestanou asi za 10 min“ místo
+  „COTREC čeká jeho konec za ~10 min“.
+- Poslední věta bez extrapolace: „Srážky v dohledu.“ místo
+  „Echo v dosahu.“.
+- Src řádek zkrácen na „popisek z tohoto radaru“ (technická
+  závorka s polem a COTREC pryč), verdikty zůstaly úsporné
+  (max 20 znaků) — panel je primárně mobilní.
+
+Verze v rohu: v32; service worker v18. Testy: 163/163 (regrese 109:
++1 test kola 32, přívětivé znění bez žargonu, délky verdiktů,
+strukturní úprava src; worker 54).
+
 ## Kolo 31 — pohled ČHMÚ mluví daty národního radaru (20. 11.)
 
 Dave: „Když přepínám radar, tak chci jiný popisek podle dat daného
