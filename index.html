@@ -739,7 +739,7 @@ html.compact table{border-spacing:1.5px}
 
 <div id="offlineBar">Jsi offline — zobrazená data můžou být stará</div>
 <div id="status" class="show"><div><span class="pulse">●</span><br>Zjišťuji tvou polohu…</div></div>
-<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v32</div>
+<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v33</div>
 
 <script>
 "use strict";
@@ -2733,11 +2733,15 @@ window.addEventListener("resize", function(){
   fitPanels();
   var was = NARROW.matches;
   applyLayoutMode();
-  if(was !== NARROW.matches && lastJ) render(lastJ, lastModels); else fitGuard();
+  /* KOLO 33: přepnutí široký/úzký layout musí překreslit i kompas,
+     jinak by v něm po přepnutí zůstala viset dlouhá věta (guard
+     htmlIfChanged by už stejný obsah sám od sebe nepřepsal). */
+  if(was !== NARROW.matches){ renderCompass(); if(lastJ) render(lastJ, lastModels); }
+  else fitGuard();
 });
 window.addEventListener("orientationchange", function(){ setTimeout(function(){
   var was = NARROW.matches; applyLayoutMode();
-  if(was !== NARROW.matches && lastJ) render(lastJ, lastModels);
+  if(was !== NARROW.matches){ renderCompass(); if(lastJ) render(lastJ, lastModels); }
 }, 200); });
 applyLayoutMode();
 function fmtHrHead(d){ return NARROW.matches ? String(+placeParts(d).hour) : fmtHr(d); }
@@ -5611,12 +5615,17 @@ function wireRadSeg(el){
    nevyhánějí). Pozemní pravda (kolo 12) platí i tady: stanice měří
    srážky pod prahem echa → verdikt to přizná, nechá vypadat, že
    u uživatele nic není. Vrací {cls, verd, expl} nebo null. */
-function chmiNarrative(cells){
+function chmiNarrative(cells, short){
   /* KOLO 32 (Dave, 20. 11.: „ať popíše, co vidí na radaru — uživatelsky
      přívětivě“): věta pod verdiktem mluví běžnou češtinou — co padá,
      kde je a kdy dorazí k tobě. Žargon (echo, COTREC osa, provozovatel
      sítě) zůstává jen v src řádku a v komentářích, v uživatelském
-     textu ho není. Logika z kola 31 se nemění, jen znění vět. */
+     textu ho není. Logika z kola 31 se nemění, jen znění vět.
+     KOLO 33 (Dave, PC, 20. 11.: „když zmenším rozložení okna, tak ten
+     text je schovaný u popisku minimálně zčásti — vytvoř stručnější
+     odpovědi, když je méně místa“): parametr short zapne krátké věty
+     pro tytéž situace; verdikt i klíčové údaje (vzdálenost, směr,
+     čas) zůstávají, škrtá se jen omáčka okolo. */
   var S = chmiState;
   if(!S || S === "off" || S === "error" || !cells || !cells.length) return null;
   /* Pojmenování intenzity jen z ověřené legendy; jinak se přidá nic. */
@@ -5632,42 +5641,55 @@ function chmiNarrative(cells){
     if(!best || d < best.d) best = {d:d, e:c.e, n:c.n, o:c.o};
   }
   best.d = Math.max(1, Math.round(best.d));
-  var bestTxt = sil(best.o) + "srážky <b>" + best.d + " km "
-    + smer8(best.e, best.n) + "</b> od tebe";
+  var smr = smer8(best.e, best.n);
+  var bestTxt = sil(best.o) + "srážky <b>" + best.d + " km " + smr + "</b> od tebe";
+  var kmTxt = "<b>" + best.d + " km " + smr + "</b>";
   /* Prší právě nad tebou: hit; déšť vydrží, nebo brzy skončí. */
   if(S.nowWet){
     var odchod = (S.steps && S.steps.length && !S.steps[0].wet) ? S.steps[0].dt : null;
     return { cls:"hit", verd:"Právě nad tebou.",
-      expl:"Radar nad tebou vidí " + (sil(S.nowOrd) || "") + "srážky"
-        + (odchod != null
-           ? " a jeho předpověď říká, že přestanou asi za <b>" + odchod + " min</b>."
-           : (S.steps && S.steps.length
-              ? " a jeho předpověď je nad tebou drží nejméně další hodinu." : ".")) };
+      expl: short
+        ? "Nad tebou padá" + (odchod != null
+            ? "; přestane asi za <b>" + odchod + " min</b>."
+            : ((S.steps && S.steps.length) ? "; vydrží aspoň hodinu." : "."))
+        : "Radar nad tebou vidí " + (sil(S.nowOrd) || "") + "srážky"
+          + (odchod != null
+             ? " a jeho předpověď říká, že přestanou asi za <b>" + odchod + " min</b>."
+             : (S.steps && S.steps.length
+                ? " a jeho předpověď je nad tebou drží nejméně další hodinu." : ".")) };
   }
   /* Kolo 12 i v tomhle pohledu: stanice měří, radar nevidí → pravda
      z pozorování, ne „nic u tebe“. */
   if(stanicePotvrzujeSelf()){
     return { cls:"hit", verd:"Nad tebou mrholí.",
-      expl:"Stanice u tebe naměřila tak slabé srážky, že je radar"
-         + " ještě nezachytí. Jeho nejbližší " + bestTxt + "." };
+      expl: short
+        ? "Mrholení vidí jen stanice, radar ne."
+        : "Stanice u tebe naměřila tak slabé srážky, že je radar"
+          + " ještě nezachytí. Jeho nejbližší " + bestTxt + "." };
   }
   /* Předpověď čeká srážky u tebe → příchod z extrapolace radaru. */
   if(S.first){
     return { cls:"hit", verd:"Přiletí k tobě.",
-      expl:"Nejbližší " + bestTxt + "; podle předpovědi radaru"
-         + " dorazí k tobě asi za <b>" + S.first.dt + " min</b>." };
+      expl: short
+        ? "Déšť " + kmTxt + " dorazí asi za <b>" + S.first.dt + " min</b>."
+        : "Nejbližší " + bestTxt + "; podle předpovědi radaru"
+          + " dorazí k tobě asi za <b>" + S.first.dt + " min</b>." };
   }
   /* Kroky jsou, ale žádný mokrý: radar na hodinu o dešti u tebe
      neví → žádný slib. */
   if(S.steps && S.steps.length){
     return { cls:"miss", verd:"Nic do hodiny.",
-      expl:"Nejbližší " + bestTxt + ", ale podle předpovědi se"
-         + " k tobě do hodiny nedostanou. Odsud déšť nečekej." };
+      expl: short
+        ? "Déšť " + kmTxt + " k tobě do hodiny nepřijde."
+        : "Nejbližší " + bestTxt + ", ale podle předpovědi se"
+          + " k tobě do hodiny nedostanou. Odsud déšť nečekej." };
   }
   /* Bez extrapolace se slibovat čas nedá. */
   return { cls:"miss", verd:"Srážky v dohledu.",
-    expl:"Nejbližší " + bestTxt + "; bez předpovědi ale odhad"
-       + " příchodu k tobě nedám." };
+    expl: short
+      ? "Déšť " + kmTxt + ", čas neodhadnu."
+      : "Nejbližší " + bestTxt + "; bez předpovědi ale odhad"
+        + " příchodu k tobě nedám." };
 }
 function renderCompassBase(){
   var el = document.getElementById("compass");
@@ -5781,6 +5803,11 @@ function renderCompassBase(){
     svg += compassFieldSvg(radarField, C.reachKm, false)
          + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF" stroke="rgba(255,255,255,.6)" stroke-width=".6"/>';
   }
+  /* KOLO 33: ten samý signál jako lišta souhrnů (applyLayoutMode,
+     html.compact): v úzkém layoutu (mobil, zúžené okno na PC) se
+     píší stručné věty — panel má místa na méně znaků a dlouhá věta
+     se pak alespoň částečně schová. */
+  var narrow = !!(typeof NARROW !== "undefined" && NARROW && NARROW.matches);
   var verd = "", expl = "", cls = "";
   var snowTxt = C.snow ? " (sníh)" : "";
   var src = viaSat
@@ -5922,6 +5949,37 @@ function renderCompassBase(){
                + C.bearingFrom + ") tam dál stojí."));
     src += " · kompozit mlčí, pravdu říká pozorování";
   }
+  /* KOLO 33 (Dave, PC, 20. 11.: „když zmenším rozložení okna, tak ten
+     text je schovaný u popisku minimálně zčásti — vytvoř stručnější
+     odpovědi, když je méně místa pro stejné meteo situace“): úzký
+     layout (NARROW / html.compact) dostává krátké věty pro tytéž
+     situace, úplně stejně jako lišta souhrnů (krátké .k popisky).
+     Verdikt se nekrátí — krátký je sám od sebe; krátí se jen
+     vysvětlující věta a klíčové údaje (vzdálenost, směr, čas, mm/h)
+     zůstávají. Pohled ČHMÚ si krátké varianty řeší sám v
+     chmiNarrative (parametr short), tahle větev pokrývá kompozit
+     a pozemní pravdu; o přepis ČHMÚ se postará blok kola 31 níž. */
+  if(narrow){
+    if(verd === "Právě nad tebou prší."){
+      expl = groundTruthWitnesses().join(" a ") + " potvrzují srážky; kompozit mlčí.";
+    } else if(C.state === "empty"){
+      expl = "V okruhu ~" + C.reachKm + " km " + (viaSat ? "satelit" : "radar")
+           + " nic nevidí, k tobě nic neletí.";
+    } else if(C.state === "overhead"){
+      expl = "Nad tebou ~" + fmtMM(C.vMm) + " mm/h" + snowTxt + ".";
+    } else if(C.state === "over"){
+      expl = "Nad tebou ~" + fmtMM(C.mmh) + " mm/h" + snowTxt + "."
+           + ((C.leaveMin != null && C.speedKmh > 0) ? " Odezní za ~" + C.leaveMin + " min." : "");
+    } else if(C.state === "hit"){
+      expl = "Buňka " + C.distKm + " km " + C.bearingFrom + " od tebe dorazí za ~"
+           + (C.etaMin <= 60 ? C.etaMin + " min" : (Math.round(C.etaMin/6)/10) + " h") + ".";
+    } else if(C.state === "miss"){
+      expl = "Prolétne " + C.missKm + " km " + C.missBearing
+           + " od tebe; odsud déšť nečekej.";
+    } else if(C.state === "standing"){
+      expl = "Buňka " + C.distKm + " km " + C.bearingFrom + " stojí, k tobě nedojde.";
+    }
+  }
   /* KOLO 31 (Dave, 20. 11.): v pohledu ČHMÚ musí popisek mluvit daty
      radaru, který je vybraný. Verdikt a věta pod ním se přepočítají
      z pole 1×1 km a COTREC osy národního radaru (chmiNarrative);
@@ -5931,7 +5989,7 @@ function renderCompassBase(){
      ošetřuje taky: stanice nad tebou měří i tehdy, když národní
      radar echo nevidí. */
   if(!viaSat && radViewCur === "chmu" && chmiReady && chmiCells){
-    var n31 = chmiNarrative(chmiCells);
+    var n31 = chmiNarrative(chmiCells, narrow);
     if(n31){
       verd = n31.verd; expl = n31.expl; cls = n31.cls;
       src += " · popisek z tohoto radaru";
