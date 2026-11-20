@@ -1153,7 +1153,7 @@ test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
     'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
   assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
     'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
-  assert.ok(html.includes('>v23<'),'aktuální verze: v23');
+  assert.ok(html.includes('>v24<'),'aktuální verze: v24');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
@@ -1603,7 +1603,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v23<'),'aktuální verze: v23');
+  assert.ok(html.includes('>v24<'),'aktuální verze: v24');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1653,7 +1653,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v23<'),'aktuální verze: v23');
+  assert.ok(html.includes('>v24<'),'aktuální verze: v24');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
@@ -1772,7 +1772,7 @@ test('kolo 23: pojistka proti visícímu dotazu na oprávnění (3 s)',()=>{
     'havárie init() se vypíše na clonu, ne němá smrt skriptu');
   assert.ok(script.includes('geoPermTxt()'),
     'nápovědy clony nesou stav oprávnění (diagnostika z mobilu)');
-  assert.ok(html.includes('>v23<'),'aktuální verze: v23');
+  assert.ok(html.includes('>v24<'),'aktuální verze: v24');
 });
 
 test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spustí žádost',async()=>{
@@ -1798,4 +1798,31 @@ test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spust�
   assert.equal(calls.acquire,1,
     'po vypršení pojistky jede automatická žádost (stará cesta s hint 10 s, pozorovatel 17 s, hláška 100 s)');
   assert.equal(calls.overlay,1,'studený start má i tlačítkovou clonu s cestou ven');
+});
+
+test('kolo 24: start aplikace — init() až po všech deklaracích, load() null-safe',()=>{
+  /* Daveův snímek z 21. 11. (v23): „Start se nepovedl — chyba:
+     undefined is not an object (evaluating 'input.value =
+     place.name')“. Příčina měsíců „beze změny“: init() volaný
+     v půlce skriptu (od kola 15) → rychlý start z uložené lokality
+     → load() během vyhodnocování skriptu → zápis do `var input`,
+     deklarovaného až o stovky řádků níž → TypeError, který zabil
+     CELÝ skript (geolokace, posluchače, všechno). Browser testy
+     byly slepé: fixture startovala bez uložené lokality, takže
+     rychlá cesta do testů nedorazila. Kolo 24 přesouvá spuštění
+     init() na úplný konec skriptu a load() si dohledá element
+     lokality přímo, s null pojistkou. */
+  const ld=fn('load');
+  assert.ok(!ld.includes('input.value = place.name'),
+    'load nesmí psát do pozdě deklarované top-level proměnné (ta zabíjela Daveův telefon)');
+  assert.ok(ld.includes('$("locInput")'),
+    'load dohledá vstup pro obec přímo, s null pojistkou');
+  const initCall=script.lastIndexOf('try{\n  init();');
+  assert.notEqual(initCall,-1,'init() se volá v pojistce try/catch');
+  const inputDecl=script.indexOf('var input = $("locInput")');
+  assert.ok(inputDecl!==-1 && initCall>inputDecl,
+    'init() běží až po deklaraci vyhledávacího pole (na konci skriptu)');
+  assert.ok(script.slice(initCall).includes('catch'),
+    'pojistka havárie z kola 23 (chyba na clonu) zůstává');
+  assert.ok(html.includes('>v24<'),'aktuální verze: v24');
 });

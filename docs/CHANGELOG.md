@@ -672,6 +672,33 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 24 — pravá příčina nalezena: rychlý start zabíjel celý skript (21. 11.)
+
+Dave 21. 11. 13:28, snímek obrazovky (v23): „Start se nepovedl —
+chyba: undefined is not an object (evaluating 'input.value =
+place.name')“. Detektor havárie z kola 23 poprvé ukázal přesnou
+příčinu a celý měsíc „beze změny“ je vysvětlený najednou.
+
+Co se skutečně dělo: skript volal init() v půlce souboru (od kola
+15). init() našel uloženou lokalitu (rychlý start, okno 24 h od
+kola 18) a synchronně zavolal load(); ta zapsala název obce do
+`input.value`, ale `var input = $("locInput")` je deklarované až
+o stovky řádků níž a v tu chvíli ještě undefined. TypeError zabil
+CELÝ skript od místa volání: žádná geolokace (proto „nežádá mě to
+o polohu“), žádní posluchači, žádná data. Geolokace přitom celou
+dobu fungovala; mrtvý skript se k ní jen nikdy nedostal. Proč to
+nikdo nechytil: node testy load() nikdy nespouštěly, browser
+fixture startovala bez uložené lokality — rychlá cesta do testů
+vůbec nedorazila. Náhoda chtěla, že aplikace na desktopu startuje vždy ručně, takže se to projevovalo jen na Daveově iPhonu.
+
+Oprava: init() se spouští jako syntakticky poslední příkaz
+souboru (až za všemi deklaracemi), load() si dohledá pole obce
+přímo s null pojistkou a browser test dostává volitelnou uloženou
+lokalitu (fixture savedPlace), takže Daveův start je odteď v CI
+trvale pokrytý. Pojistka havárie z kola 23 zůstává. Badge v24,
+service worker v10 (vynutí aktualizaci i pozastavené PWA).
+152/152 node testů; browser testy v CI.
+
 ## Kolo 23 — pojistka proti visícímu dotazu na oprávnění (klíč k mobilu) (21. 11.)
 Dave 21. 11.: na mobilu běží v22 (badge potvrzen), Nastavení hlásí
 „Při používání“, ale clona za 2 minuty nezměnila ani slovo; na
