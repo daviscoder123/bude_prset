@@ -84,11 +84,15 @@ async function fixture(timezone='America/Los_Angeles',width=1280,height=900){
     return route.fulfill({status:503,json:{error:'Unavailable in deterministic test'}});
   });
   await p.goto(base,{waitUntil:'domcontentloaded'});
-  // Kolo 17: startovní clona „Zjišťuji tvou polohu…“ je zpátky (Dave
-  // 19. 11.: „Tu clonu při startu, když nejsou načteny data, tam nech.“)
-  // a zamítnutá geolokace (default v čerstvém kontextu, code 1) ukazuje
-  // vzdělávací dialog — zavřeme ho klepnutím do pozadí, jako před kolnem 16.
-  await p.locator('#retryGeo').waitFor({state:'visible'});
+  // Kolo 21: automatická žádost o polohu už na startu neletí (WebKit ji
+  // umí spolknout a clona pak visí, viz src/main.js kolo 18/21). Čerstvý
+  // kontext bez rozhodnutého oprávnění uvidí tlačítkovou clonu (btnGeoTry);
+  // zamítnutý stav (jiné kontexty / prohlížeče) ukáže vzdělávací dialog
+  // (retryGeo). Přijmeme obě varianty a clonu zavřeme klepnutím do pozadí,
+  // jako před kolem 16.
+  await p.locator('#status.show').waitFor({state:'visible'});
+  await p.waitForFunction(()=>document.getElementById('btnGeoTry')
+    ||document.getElementById('retryGeo'));
   await p.locator('#status').click({position:{x:4,y:4}});
   return {ctx,p,errors,control,epoch};
 }
@@ -141,6 +145,12 @@ test('desktop search, model-only rain, mobile resize and geolocation',async()=>{
     await ctx.grantPermissions(['geolocation']);
     await ctx.setGeolocation({latitude:50.08,longitude:14.42});
     await p.locator('#pinBtn').click();
+    await p.waitForFunction(()=>cur?.lat===50.08&&lastJ);
+    /* Kolo 21: nová cesta — geolokace vyvolaná z tlačítka studené
+       clony. WebKit automatickou žádost při startu umí spolknout;
+       žádost z gesty (klepnutí na „Povolit polohu“) jede vždy. */
+    await p.evaluate(()=>{ window.cur=null; window.lastJ=null; geoAskOverlay(); });
+    await p.locator('#btnGeoTry').click();
     await p.waitForFunction(()=>cur?.lat===50.08&&lastJ);
     assert.deepEqual(errors,[]);
   }finally{await ctx.close();}
