@@ -1403,6 +1403,7 @@ test('kolo 17b: behaviorálně — vypršení hrubé fáze otevře watchPosition
     clearTimeout:()=>{},                /* v testu negradí reálné časovače */
     setTimeout:()=>{ return 5; },
     geoRefineT:null, geoHintT:null, geoWatchId:null, geoAskedByUser:null,
+    geoCoarseT:null, geoFailT:null, geoFailShown:false,
     lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
     status:(m)=>{ statusMsgs.push(m); },
     pojmenujMisto:()=>Promise.resolve({district:null, city:'Praha', cc:'CZ'}),
@@ -1436,6 +1437,7 @@ test('kolo 17b: behaviorálně — zamítnutí (code 1) jde do noGeo, watchPosit
     }},
     clearTimeout:()=>{}, setTimeout:()=>{ return 5; },
     geoRefineT:null, geoHintT:null, geoWatchId:null,
+    geoCoarseT:null, geoFailT:null, geoFailShown:false,
     lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
     status:()=>{}, pojmenujMisto:()=>Promise.resolve(null), load:()=>{},
     noGeo:(e)=>{ noGeoErr.push(e); }
@@ -1444,4 +1446,94 @@ test('kolo 17b: behaviorálně — zamítnutí (code 1) jde do noGeo, watchPosit
   assert.equal(noGeoErr.length,1,'zamítnutí jde do vzdělávacího dialogu (noGeo)');
   assert.equal(noGeoErr[0].code,1);
   assert.equal(watchOpened,0,'přesné GPS nemá smysl, když je přístup zamítnutý');
+});
+
+test('kolo 18: visící geolokace nikdy nenechá clonu němou (pojistky)',()=>{
+  /* Dave 20. 11. 11:44: „Opět to trvá… Neptá se mě to na začátku na
+     povolení GPS. Proto to asi nezískává data“ — clona visela bez
+     odezvy i po minutách (IMG_5099). WebKit v samostatné PWA umí
+     systémový dotaz na polohu přehlédnout: žádost visí bez fixu,
+     bez chyby, i bez časovače. Kolo 18 dává: (1) hlášení i v tichém
+     režimu, když nejsou načtená data (report), (2) pojistku hrubé
+     fáze 17 s — nevyřízený callback neumlčí fallback, (3) pojistný
+     časovač 100 s — čekání skončí hláškou, nikdy němou clonou,
+     (4) pokyn na Nastavení → Polohové služby v hláškách,
+     (5) rychlý start 24 h místo 8 h (méně ranních čekání na GPS). */
+  const ap=fn('acquirePosition');
+  assert.ok(ap.includes('report = !silent || (!cur && !lastJ)'),
+    'tichý režim hlásí vždy, když nejsou načtená data');
+  assert.ok(ap.includes('17000'),'pojistka hrubé fáze: 17 s');
+  assert.ok(ap.includes('100000'),'pojistný časovač: 100 s');
+  assert.ok(fn('noGeo').includes('geoFailShown'),
+    'po noGeo se pojistná hláška nezduplikuje');
+  assert.ok((ap + fn('noGeo')).includes('Nezobrazil se dotaz na povolení polohy'),
+    'hlášky odkazují na cestu k povolení v Nastavení');
+  assert.ok(fn('init').includes('24*3600*1000'),
+    'rychlý start kryje 24 h, ne 8 h');
+  assert.ok(fn('pick').includes('clearTimeout(geoFailT)'),
+    'ruční volba obce vypíná i pojistné časovače');
+});
+
+test('kolo 18: behaviorálně — tichý návrat bez dat po selhání GPS ozve hlášku, ne němé ticho',()=>{
+  /* iOS po návratu ze spánku volá acquirePosition(true) (visibility-
+     change). Kolo 17 v tichém režimu nehlásilo nic a vstup do funkce
+     smazal čekající hlášku — uživatel dívající se na clonu bez dat
+     zůstal bez jediného slova. Kolo 18: bez načtených dat se hlásí
+     i v tichém režimu (report). Důkaz vykonaný v izolovaném kontextu. */
+  const timers=[]; let watchOpened=0, watchErr=null; const statusMsgs=[], noGeoCalls=[];
+  const c=context(['acquirePosition','geoWatchStop'],{
+    navigator:{geolocation:{
+      getCurrentPosition:(ok,err)=>{ err({code:3}); },
+      watchPosition:(ok2,err2)=>{ watchOpened++; watchErr=err2; return 42; },
+      clearWatch:()=>{}
+    }},
+    clearTimeout:()=>{},
+    setTimeout:(f,delay)=>{ timers.push({f,delay}); return timers.length; },
+    geoRefineT:null, geoHintT:null, geoWatchId:null,
+    geoCoarseT:null, geoFailT:null, geoFailShown:false,
+    lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
+    status:(m)=>{ statusMsgs.push(m); },
+    pojmenujMisto:()=>Promise.resolve(null), load:()=>{},
+    noGeo:(e)=>{ noGeoCalls.push(e); }
+  });
+  c.acquirePosition(true);                    /* TICHÉ volání (návrat do appky) */
+  assert.ok(timers.some(t=>t.delay===10000),
+    'hláška po 10 s se nasadí i v tichém režimu bez dat');
+  assert.equal(watchOpened,1,'po code 3 běží pozorovatel i v tichém režimu');
+  watchErr({code:3});                        /* GPS neodpovědělo ani za 75 s */
+  assert.equal(noGeoCalls.length,1,
+    'neúspěch se v tichém režimu bez dat nezatají — jede noGeo');
+  assert.equal(noGeoCalls[0].code,3);
+});
+
+test('kolo 18: behaviorálně — visící hrubá fáze: pojistka 17 s otevře pozorovatel, 100 s skončí hláškou',()=>{
+  /* Simulace WebKitu, který ve stavu „Zeptat se příště“ neozve ani
+     úspěšný, ani chybový callback (systémový dotaz na povolení se
+     na obrazovce neobjeví). Kolo 18: pojistka 17 s otevře pozorovatel
+     watchPosition; pojistný časovač 100 s ukončí čekání hláškou
+     „Polohu se nepodařilo zjistit“ (noGeo), ne němou clonou. */
+  const timers=[]; let watchOpened=0, watchOpenedByWatchdog=0; const noGeoCalls=[];
+  const c=context(['acquirePosition','geoWatchStop'],{
+    navigator:{geolocation:{
+      getCurrentPosition:()=>{},              /* NEODPOVÍ NIKDY */
+      watchPosition:()=>{ watchOpened++; return 42; },
+      clearWatch:()=>{}
+    }},
+    clearTimeout:()=>{},
+    setTimeout:(f,delay)=>{ timers.push({f,delay}); return timers.length; },
+    geoRefineT:null, geoHintT:null, geoWatchId:null,
+    geoCoarseT:null, geoFailT:null, geoFailShown:false,
+    lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
+    status:()=>{}, pojmenujMisto:()=>Promise.resolve(null), load:()=>{},
+    noGeo:(e)=>{ noGeoCalls.push(e); }
+  });
+  c.acquirePosition(false);
+  assert.equal(watchOpened,0,'zpočátku se nic neotvírá, čeká se na hrubou fázi');
+  timers.filter(t=>t.delay===17000).forEach(t=>{ watchOpenedByWatchdog=watchOpened; t.f(); });
+  assert.equal(watchOpened,1,'po 17 s se otevře pozorovatel, i když callback nikdy neodpověděl');
+  assert.ok(timers.some(t=>t.delay===100000),'pojistný časovač 100 s je nasazen');
+  timers.filter(t=>t.delay===100000).forEach(t=>t.f());
+  assert.equal(noGeoCalls.length,1,
+    'po 100 s čekání končí hláškou — nikdy němou clonou');
+  assert.equal(noGeoCalls[0].code,3);
 });
