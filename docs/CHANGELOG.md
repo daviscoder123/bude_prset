@@ -597,3 +597,22 @@ dalším otevření. Opravy:
 Měření po opravě: stejný scénář druhého otevření nyní vyvolá 0
 přenačtení. Testy: 3 nové (1 strukturní, 2 behaviorální), celkem
 144/144. Build 501 780 B.
+
+## Kolo 20 — Wi-Fi hledání lokace odstraněno, verze viditelná v rozhraní (20. 11.)
+Dave 20. 11. 12:20 (IMG_5100): „Je nutné tam mít to Wi-Fi hledání lokace?“
+Není. Wi-Fi poloha byla rychlá, ale nepřesná (Daveův telefon ji měl až
+2,9 km vedle) a pro radar s pixelem ~1,2 km nepoužitelná; rychlost
+každodenních startů kryje od kola 18 rychlý start z uložené lokality.
+Změny:
+- první (a jediný jednorázový) geolokační dotaz žádá rovnou přesné
+  GPS: timeout 20 s, maximumAge 0, enableHighAccuracy true;
+  fallback na pozorovatel watchPosition (kolo 17) i všechny pojistky
+  kola 18 zůstávají beze změny,
+- hlášky aktualizovány („Čekám na přesné GPS z družic…“), pokyny na
+  Nastavení → Polohové služby zůstávají,
+- v pravém dolním rohu je viditelné označení verze (v20): na mobilu
+  jde na první pohled ověřit, které kolo běží (iOS drží pozastavenou
+  PWA v paměti se starým kódem, dřív nebylo možné poznat, jestli
+  oprava vůbec dorazila).
+Testy: 2 nové (1 strukturní, 1 behaviorální; kolo 17 test aktualizován
+na přesné-GPS-first), celkem 146/146. Build 502 315 B.

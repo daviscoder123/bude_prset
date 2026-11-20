@@ -1327,7 +1327,8 @@ test('kolo 17: geolokace nenechá studený start GPS zahodit (watchPosition)',()
      doručil by o chvíli později. Léky: delší hrubý timeout, fallback
      na watchPosition (kódy 2 a 3), jasná komunikace v cloně. */
   const ap=fn('acquirePosition');
-  assert.ok(ap.includes('timeout:15000'),'hrubá fáze má 15 s (dříve 12 s)');
+  assert.ok(ap.includes('timeout:20000'),
+    'kolo 20: první dotaz jde rovnou po přesném GPS (20 s), Wi-Fi fáze pryč');
   assert.ok(ap.includes('watchPosition'),
     'po výpadku/vypršení se otevře pozorovatel watchPosition');
   assert.ok(fn('geoWatchStop').includes('clearWatch'),
@@ -1624,4 +1625,50 @@ test('kolo 19: behaviorálně — skutečné přesunutí o kilometry: přenačte
   assert.equal(loads.length,1,'přesun se projeví právě jedním přenačtením');
   assert.equal(loads[0].place.lat.toFixed(4),N.lat.toFixed(4),
     'aplikace skončí na nové poloze, ne na uložené');
+});
+
+test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',()=>{
+  /* Dave 20. 11. 12:20 (IMG_5100): „Je nutné tam mít to Wi-Fi hledání
+     lokace?“ Není — Wi-Fi poloha byla rychlá, ale nepřesná (Daveův
+     telefon až 2,9 km vedle) a pro radar s pixelem ~1,2 km
+     nepoužitelná. Kolo 20 odstraňuje Wi-Fi fázi: jediný geolokační
+     dotaz žádá rovnou přesné GPS. Zároveň je v rozhraní viditelné
+     označení verze (v20) — Dave tak na mobilu ověří, že nové kolo
+     skutečně běží (iOS drží pozastavenou PWA v paměti se starým
+     kódem, proto dřív „beze změny“ bez možnosti rozlišení). */
+  const ap=fn('acquirePosition');
+  assert.ok(ap.includes('timeout:20000'),'první dotaz čeká na přesné GPS 20 s');
+  assert.ok(!ap.includes('enableHighAccuracy:false'),
+    'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
+  assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
+  assert.ok(html.includes('>v20<'),'aktuální verze: v20');
+});
+
+test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
+  const gpOpts=[], loads=[]; let watchOpened=0;
+  const c=context(['acquirePosition','geoWatchStop','distKm','skladejNazev'],{
+    navigator:{geolocation:{
+      getCurrentPosition:(ok,err,opts)=>{
+        gpOpts.push(opts);
+        ok({coords:{latitude:50.05, longitude:14.40, accuracy:25}});
+      },
+      watchPosition:()=>{ watchOpened++; return 9; },
+      clearWatch:()=>{}
+    }},
+    clearTimeout:()=>{}, setTimeout:()=>{ return 5; },
+    geoRefineT:null, geoHintT:null, geoWatchId:null,
+    geoCoarseT:null, geoFailT:null, geoFailShown:false,
+    lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
+    status:()=>{}, pojmenujMisto:()=>Promise.resolve({district:null,city:'Praha',cc:'CZ'}),
+    load:(place,silent)=>{ loads.push({place,silent}); }, noGeo:()=>{}
+  });
+  c.acquirePosition(false);
+  assert.equal(gpOpts.length,1,'poloha se ptá jediným jednorázovým dotazem');
+  assert.ok(gpOpts[0] && gpOpts[0].enableHighAccuracy===true
+    && gpOpts[0].timeout===20000 && gpOpts[0].maximumAge===0,
+    'první dotaz: rovnou přesné GPS (žádné Wi-Fi): '+JSON.stringify(gpOpts[0]));
+  await new Promise(r=>setTimeout(r,10));
+  assert.equal(watchOpened,0,'přesný fix dorazil → pozorovatel se neotevírá');
+  assert.equal(loads.length,1,'fix se použije jako lokalita');
+  assert.equal(loads[0].silent,false,'fix na startu není silent');
 });
