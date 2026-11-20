@@ -1299,8 +1299,8 @@ test('kolo 15: strukturální — panel radaru měří nahlas, start z poslední
     'mobilní panel umí říct, že verdict ještě není hotový');
   /* rychlý start: naposledy použitá lokalita z localStorage */
   assert.ok(fn('load').includes('bpPlace_v1'),'load ukládá poslední lokalitu');
-  assert.ok(fn('init').includes('bpPlace_v1') && fn('init').includes('acquirePosition'),
-    'start vezme cache instantly a geolokaci nechá běžet');
+  assert.ok(fn('init').includes('bpPlace_v1') && fn('init').includes('geoStart'),
+    'start vezme cache instantly a geolokaci nechá běžet (přes geoStart, kolo 21)');
   assert.ok(script.includes('gtStart("radar")') && script.includes('gtSettle("radar")'),
     'kompozit se registruje a po dokončení odregistruje');
   assert.ok(script.includes('gtStart("chmi")') && script.includes('gtStart("stanice")'),
@@ -1407,6 +1407,7 @@ test('kolo 17b: behaviorálně — vypršení hrubé fáze otevře watchPosition
     geoCoarseT:null, geoFailT:null, geoFailShown:false,
     lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
     status:(m)=>{ statusMsgs.push(m); },
+    geoBindHelp:()=>{},
     pojmenujMisto:()=>Promise.resolve({district:null, city:'Praha', cc:'CZ'}),
     load:(place,silent)=>{ loads.push({place,silent}); },
     noGeo:(err)=>{ noGeoCalls.push(err); }
@@ -1494,6 +1495,7 @@ test('kolo 18: behaviorálně — tichý návrat bez dat po selhání GPS ozve h
     geoCoarseT:null, geoFailT:null, geoFailShown:false,
     lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
     status:(m)=>{ statusMsgs.push(m); },
+    geoBindHelp:()=>{},
     pojmenujMisto:()=>Promise.resolve(null), load:()=>{},
     noGeo:(e)=>{ noGeoCalls.push(e); }
   });
@@ -1525,7 +1527,7 @@ test('kolo 18: behaviorálně — visící hrubá fáze: pojistka 17 s otevře p
     geoRefineT:null, geoHintT:null, geoWatchId:null,
     geoCoarseT:null, geoFailT:null, geoFailShown:false,
     lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
-    status:()=>{}, pojmenujMisto:()=>Promise.resolve(null), load:()=>{},
+    status:()=>{}, geoBindHelp:()=>{}, pojmenujMisto:()=>Promise.resolve(null), load:()=>{},
     noGeo:(e)=>{ noGeoCalls.push(e); }
   });
   c.acquirePosition(false);
@@ -1641,7 +1643,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v20<'),'aktuální verze: v20');
+  assert.ok(html.includes('>v21<'),'aktuální verze: v21 (bumpnutí kolem 21)');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1671,4 +1673,118 @@ test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (�
   assert.equal(watchOpened,0,'přesný fix dorazil → pozorovatel se neotevírá');
   assert.equal(loads.length,1,'fix se použije jako lokalita');
   assert.equal(loads[0].silent,false,'fix na startu není silent');
+});
+
+test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
+  /* Dave 20. 11. odpoledne: „Nežádá mě to o polohu. Nejde to ani
+     v samotném Safari. Pořád jen načítání polohy na té cloně.“
+     WebKit umí automatickou žádost při startu spolknout — visí bez
+     fixu, bez chyby i bez systémového dotazu (kolo 18 to naměřilo
+     v PWA, kolo 21 i v Safaru). Jediná spolehlivá cesta na iOS je
+     geolocation vyvolaná z gesty. Start proto projde STAV oprávnění
+     přes navigator.permissions: granted → auto, denied → návod hned,
+     jinak tlačítko „Povolit polohu“ v cloně. */
+  const gs=fn('geoStart');
+  assert.ok(gs.includes('permissions.query'),
+    'start se ptá na STAV oprávnění, ne slepě spouští žádost');
+  assert.ok(gs.includes('geoAskOverlay'),
+    'nerozhodnutý stav zobrazí tlačítkovou clonu');
+  assert.ok(gs.includes('bpGeoOk'),
+    'úspěšný fix se zapamatuje — další starty jsou automatické');
+  assert.ok(fn('init').includes('geoStart'),
+    'init žádá o polohu přes geoStart, ne acquirePosition');
+  assert.ok(html.includes('>v21<'),'aktuální verze: v21');
+  assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
+  assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
+});
+
+test('kolo 21: behaviorálně — stav „prompt“: žádost čeká na dotyk, sama neletí',async()=>{
+  const calls={acquire:0,overlay:0}; let resolveQ=null;
+  const c=context(['geoStart'],{
+    navigator:{geolocation:{},
+      permissions:{query:()=>new Promise(r=>{resolveQ=r;})}},
+    localStorage:{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},
+    lastJ:null, cur:null,
+    acquirePosition:()=>{calls.acquire++;},
+    noGeo:()=>{},
+    geoAskOverlay:()=>{calls.overlay++;},
+    status:()=>{}
+  });
+  c.geoStart(false);
+  assert.equal(calls.acquire,0,'před odpovědí permissions nic neletí');
+  assert.ok(resolveQ,'permissions.query byl volán');
+  resolveQ({state:'prompt'});
+  await new Promise(r=>setTimeout(r,5));
+  assert.equal(calls.acquire,0,
+    'stav „prompt“ NESPOUŠTÍ automatickou žádost (WebKit by ji spolkl)');
+  assert.equal(calls.overlay,1,
+    'studený start nabídne tlačítko „Povolit polohu“');
+});
+
+test('kolo 21: behaviorálně — granted jede samo, denied ukáže návod hned',async()=>{
+  const calls={acquire:0,noGeo:0,overlay:0}; const noGeoErr=[];
+  const mk=(state)=>context(['geoStart'],{
+    navigator:{geolocation:{},
+      permissions:{query:()=>Promise.resolve({state})}},
+    localStorage:{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},
+    lastJ:null, cur:null,
+    acquirePosition:()=>{calls.acquire++;},
+    noGeo:(e)=>{calls.noGeo++;noGeoErr.push(e);},
+    geoAskOverlay:()=>{calls.overlay++;},
+    status:()=>{}
+  });
+  const g=mk('granted');
+  g.geoStart(false);
+  await new Promise(r=>setTimeout(r,5));
+  assert.equal(calls.acquire,1,'granted → žádost jede automaticky (dotaz nepadá)');
+  assert.equal(calls.overlay,0,'u granted netřeba žádné tlačítko');
+  const d=mk('denied');
+  d.geoStart(false);
+  await new Promise(r=>setTimeout(r,5));
+  assert.equal(calls.acquire,1,'denied → žádost nespouštíme (visela by)');
+  assert.equal(calls.noGeo,1,'denied → hned návod k Nastavení (noGeo)');
+  assert.equal(noGeoErr[0] && noGeoErr[0].code,1,'jde o zamítnutí (code 1)');
+  assert.equal(calls.overlay,0,'u denied se ukazuje dialog, ne tlačítka');
+});
+
+test('kolo 21: behaviorálně — bez permissions API zůstává automatická žádost (staré iOS)',()=>{
+  const calls={acquire:0};
+  const c=context(['geoStart'],{
+    navigator:{geolocation:{}},          /*žádné permissions API jako na iOS < 16*/
+    localStorage:{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},
+    lastJ:null, cur:null,
+    acquirePosition:()=>{calls.acquire++;},
+    noGeo:()=>{}, geoAskOverlay:()=>{}, status:()=>{}
+  });
+  c.geoStart(false);
+  assert.equal(calls.acquire,1,
+    'prohlížeč bez permissions API žádná žádost nevisí na dotyku');
+});
+
+test('kolo 21: behaviorálně — rychlý start z uložené lokality: žádná clona s tlačítky',async()=>{
+  /* Daveova každodenní cesta: uložená lokalita + nerozhodnuté
+     oprávnění. Data jedou, geolokace se neptá a clona nikoho
+     nevyrušuje — tlačítková clona smí přijít jen na skutečném
+     studeném startu bez dat. */
+  const calls={acquire:0,overlay:0}; let resolveQ=null;
+  const c=context(['geoStart'],{
+    navigator:{geolocation:{},
+      permissions:{query:()=>new Promise(r=>{resolveQ=r;})}},
+    localStorage:{getItem:(k)=> k==='bpPlace_v1'
+      ? JSON.stringify({lat:50.075,lon:14.415,t:Date.now()})
+      : null,
+      setItem:()=>{},removeItem:()=>{}},
+    lastJ:null, cur:null,
+    acquirePosition:()=>{calls.acquire++;},
+    noGeo:()=>{},
+    geoAskOverlay:()=>{calls.overlay++;},
+    status:()=>{}
+  });
+  c.geoStart(true);                       /* tichý start s uloženou lokalitou */
+  resolveQ({state:'prompt'});
+  await new Promise(r=>setTimeout(r,5));
+  assert.equal(calls.overlay,0,
+    's uloženou lokalitou se žádná tlačítková clona neukazuje');
+  assert.equal(calls.acquire,0,
+    've stavu „prompt“ se geolokace sama nespouští (žádost bez dotazu)');
 });

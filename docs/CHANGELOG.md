@@ -616,3 +616,36 @@ Změny:
   oprava vůbec dorazila).
 Testy: 2 nové (1 strukturní, 1 behaviorální; kolo 17 test aktualizován
 na přesné-GPS-first), celkem 146/146. Build 502 315 B.
+
+## Kolo 21 — geolokace konečně jede na iOS: žádost z dotyku, ne automaticky (20. 11.)
+Dave 20. 11. odpoledne: „Nežádá mě to o polohu. Nejde to ani v samotném
+Safari. Pořád jen načítání polohy na té cloně. Vyřeš tu polohu.“
+Příčina: WebKit (Safari i PWA na něm) umí systémový dotaz na povolení
+polohy přehlédnout, když žádost letí automaticky při startu stránky.
+Žádost pak visí bez fixu, bez chyby i bez časovače (kolo 18 to
+naměřilo v PWA, kolo 21 prokázalo, že to platí i v běžném Safari).
+Jediná spolehlivá cesta na iOS je vyvolat geolocation z dotyku prstu.
+Změny:
+- start aplikace nejprve projde stav oprávnění přes
+  navigator.permissions (Safari 16+, Chrome, Android):
+  granted → žádá hned automaticky (systémový dotaz nepadá);
+  denied → okamžitě ukáže návod k Nastavení (nic nevisí, dřív
+  se čekalo na pojistku 100 s);
+  prompt (nerozhodnuto) → automatická žádost NELETÍ — clona
+  nabídne tlačítko „Povolit polohu“, jehož klepnutí spustí žádost
+  z gesty a iOS pak systémový dotaz spolehlivě zobrazí,
+- clona studeného startu: nově „Kde právě jsi?“ s tlačítky
+  „Povolit polohu“ a „Napiš obec ručně“ (nouzová cesta vždy),
+- prohlížeče bez permissions API (iOS < 16) zůstávají u
+  automatické žádosti s pojistkami (kolo 17/18), tlačítko je
+  dostupné i v nápovědě po 10 s i ve zprávě pozorovatele,
+- první úspěšný fix se zapamatuje (bpGeoOk) — další starty jsou
+  automatické; zamítnutí paměť vymaže,
+- rychlý start z uložené lokality se stavem „prompt“ nikdy
+  nevyrušuje tlačítkovou clonou (data jedou dál),
+- service worker bump v6 → v7: aktualizace SW se vynutí hned při
+  startu, controllerchange reloadne stránku s novým kódem,
+- verze v rohu: v21 (ověření, které kolo telefon skutečně běží).
+Testy: 5 nových v regresích (1 strukturní, 4 behaviorální) +
+aktualizace kola 17/18 (init používá geoStart) + browser test
+nové tlačítkové cesty. Celkem 151/151. Build 507 389 B.
