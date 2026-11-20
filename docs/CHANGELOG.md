@@ -672,6 +672,37 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 31 — pohled ČHMÚ mluví daty národního radaru (20. 11.)
+
+Dave: „Když přepínám radar, tak chci jiný popisek podle dat daného
+radaru.“ Od kola 26 měl pohled ČHMÚ jiné POZADÍ (1×1 km pole) a jiný
+src řádek, ale verdikt a věta pod ním pořád pocházely z kompozitní
+geometrie: kompas kreslil národní a slova citovala cizí mozaiku
+(„Tě mine. Prolétne 39 km V od tebe…“).
+
+Nová funkce chmiNarrative() počítá popisek z dat zobrazeného
+radaru:
+- Nejbližší echo z reálných buněk 1×1 km pole (vzdálenost od kraje
+  echa, směr z compass rose), intenzita jen s ověřenou legendou
+  (kolo 8ba: bez škály se čísla nevyhánějí).
+- Čas z COTREC osy provozovatele sítě: první mokrý krok →
+  „Přiletí k tobě.“ za ~N min; echo nad tebou → „Právě nad tebou.“
+  a konec z prvního suchého kroku; celá hodina suchá → poctivé
+  „Nic do hodiny.“, žádný slib z cizí extrapolace.
+- Pozemní pravda (kolo 12) platí i v tomhle pohledu: stanice měří
+  srážky pod prahem echa → „Nad tebou mrholí.“, ne falešné „nic
+  u tebe“.
+- Elipsa a trajektorie zůstávají vizuálním doplňkem z kompozitu
+  (pohyb buňky se počítá z kompozitní osy), src řádek přiznává
+  „popisek z tohoto radaru (pole 1×1 km + COTREC)“.
+- Přepis se děje jen s čerstvým snímkem (do 45 min), v dosahu
+  národního radaru a s buňkami; jinak zůstává kompozitní text
+  i kompozitní podklad, aby slova nelhala o tom, co je vidět.
+
+Verze v rohu: v31; service worker v17. Testy: 162/162 (regrese 108:
++2 testy kola 31, výpočet popisku a struktura přepisu; worker 54).
+Build 524 994 B.
+
 ## Kolo 30 — verdikt čeká jen na pozorování, nowcast DWD/KNMI ho neblokuje (20. 11.)
 
 Dave (mobil, Líšeň, 15:26): „Co se děje s tím verdiktem panelem?“
