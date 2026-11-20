@@ -672,6 +672,35 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 33 — úzký layout: stručné odpovědi pro tytéž situace (20. 11.)
+
+Dave (PC): „Když zmenším rozložení okna, tak ten text je schovaný
+u popisku minimálně zčásti. Vytvoř stručnější odpovědi, když je
+méně místa pro stejné meteo situace.“ Panel Radar v úzkém okně
+má na méně znaků a dlouhá vysvětlující věta se do něj nezvedla.
+
+Řešení, tři části:
+- Úzký layout se netuší odhadem, ale čte se ze stejného signálu
+  jako lišta souhrnů (NARROW / html.compact z applyLayoutMode):
+  zúžené okno na PC pod 900 px i mobil dostanou krátké věty.
+- krátké varianty pokrývají tytéž meteo situace v obou pohledech:
+  kompozit (prázdný dosah, nad tebou, přiletí, mine, stojí,
+  pozemní pravda „právě nad tebou prší“) i ČHMÚ (padá nad tebou,
+  mrholí jen stanice, déšť dorazí, do hodiny nic). Verdikt se
+  nekrátí — krátký je sám; krátí se jen vysvětlující věta a klíčové
+  údaje (vzdálenost, směr, čas) zůstávají. Příklad: „Nejbližší
+  slabé srážky 9 km V od tebe; podle předpovědi radaru dorazí
+  k tobě asi za 25 min.“ → „Déšť 9 km V dorazí asi za 25 min.“
+- Přepnutí široký/úzký (zmenšení a roztažení okna na PC) musí
+  kompas překreslit, jinak by v něm po přepnutí zůstala viset
+  dlouhá věta z předchozího režimu; resize a orientationchange
+  nyní volají renderCompass().
+
+Verze v rohu: v33; service worker v19. Testy: 164/164 (regrese 110:
++1 test kola 33, stejné situace ve dvou délkách se zachovalým
+verdiktem, vzdáleností, směrem a časem, signál NARROW, překreslení
+kompasu při přepnutí režimu; worker 54).
+
 ## Kolo 32 — popisek ČHMÚ v lidské řeči, ne v žargonu (20. 11.)
 
 Dave: „Chci změnu popisku radaru při změně radaru na ČHMÚ. Ať
