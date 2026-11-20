@@ -672,6 +672,40 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 30 — verdikt čeká jen na pozorování, nowcast DWD/KNMI ho neblokuje (20. 11.)
+
+Dave (mobil, Líšeň, 15:26): „Co se děje s tím verdiktem panelem?“
+Snímek ukazoval rozpor: radarový panel byl dávno hotový („Tě mine.
+Prolétne 39 km V od tebe · snímek 7 min“), modely dávno dořekly
+(„DÉŠŤ OD 21:00“, shoda 2/10), ale verdikt visel ve stavu
+„Ověřuji · Verdikt ještě není hotový“ a psal, že „Radar, stanice
+i ČHMÚ ještě měří — přesný verdikt se doplní sám“.
+
+Diagnóza, dvě chyby v jedné:
+- Verdikt blokoval jediný rozpracovaný zdroj: nowcast DWD RADVOR/KNMI
+  (radarová extrapolace provozovatele sítě). Registr běžících měření
+  z kola 15 počítal pending všechny zdroje najednou, takže model
+  držel celý verdikt v „ověřuji“ — a s ním zmizel i panel Kdy.
+- Věta o čekání lhala: vypsala „pozemní pozorování“, i když žádné
+  ne běželo. Nowcast není pozemní měření, ale výpočet.
+
+Oprava, tři části:
+- Registr se rozdělil na dvě množiny: pozorování (radarový kompozit,
+  stanice, radar ČHMÚ) a nowcasty (met.no, regionální, DWD RADVOR/
+  KNMI, družice). Verdikt „ověřuji“ čeká pouze na pozorování;
+  nowcast se stáhne, až ho dá, a recomputeWhen() ho sám doladí.
+- Texty už vypisují skutečné zdroje, na které se čeká; pending
+  nowcasty mají vlastní štítek s dovětkem „verdikt na něj nečeká“.
+  Pevná fráze o měření všech tří nohou najednou je pryč.
+- Pojistná překreslovačka: gtPrune probíhal líně, až při dalším
+  recomputeWhen, takže zapomenutý settle mohl UI nechat viset
+  navždy. Nový časovač (jeden na celek) po 90 s + 2 s sám překreslí,
+  pokud něco stále visí.
+
+Verze v rohu: v30; service worker v16. Testy: 160/160 (regrese 106:
++3 testy kola 30 — registr dvou množin, nowcast neblokuje verdikt,
+struktura; worker 54). Build 521 038 B.
+
 ## Kolo 29 — nepřesné informace: široké rozpětí jako časy, ne nemožné minuty (21. 11.)
 
 Dave (mobil, Líšeň, panel Kdy hlásil „za 115–254 min“): „Nejsem

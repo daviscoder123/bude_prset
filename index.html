@@ -739,7 +739,7 @@ html.compact table{border-spacing:1.5px}
 
 <div id="offlineBar">Jsi offline — zobrazená data můžou být stará</div>
 <div id="status" class="show"><div><span class="pulse">●</span><br>Zjišťuji tvou polohu…</div></div>
-<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v29</div>
+<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v30</div>
 
 <script>
 "use strict";
@@ -3378,7 +3378,7 @@ var gtPending = {};   /* {klíč: čas začátku měření} */
 var GT_LABELS = {radar:"radarový kompozit", stanice:"stanice", chmi:"radar ČHMÚ",
                  metno:"met.no nowcast", regio:"regionální nowcast",
                  wms:"DWD RADVOR/KNMI", sat:"družice"};
-function gtStart(key){ gtPending[key] = Date.now(); }
+function gtStart(key){ gtPending[key] = Date.now(); gtNetArm(); }
 function gtSettle(key){ try{ delete gtPending[key]; }catch(e){} }
 function gtPrune(){
   var t = Date.now();
@@ -3400,6 +3400,48 @@ function gtAnyPending(){ return gtPendingLabels().length > 0; }
 function gtPendingHas(key){
   gtPrune();
   return Object.prototype.hasOwnProperty.call(gtPending, key);
+}
+/* KOLO 30: VERDIKT ČEKÁ JEN NA POZOROVÁNÍ.
+   Měřený případ (Dave, 20. 11., mobil, Líšeň 15:26): radar i modely
+   byly dávno hotové, ale jediný rozpracovaný nowcast (DWD RADVOR/KNMI)
+   držel celý verdikt ve stavu „ověřuji“ a verdikt navíc lhal, že
+   „pozemní pozorování měří“. Nowcast je ovšem extrapolace provozovatele
+   sítě, tedy model, nikoli pozorování. Nesmí blokovat verdikt: až
+   dodá data, recomputeWhen() ho sám doladí. Blokující klíče proto
+   zůstávají jen tři: radar, stanice, ČHMÚ. */
+var GT_OBS = {radar:1, stanice:1, chmi:1};
+function gtPendingObs(){
+  gtPrune();
+  var out = [];
+  for(var k in GT_OBS){
+    if(!Object.prototype.hasOwnProperty.call(GT_OBS, k)) continue;
+    if(Object.prototype.hasOwnProperty.call(gtPending, k)) out.push(GT_LABELS[k] || k);
+  }
+  return out;
+}
+function gtPendingNc(){
+  gtPrune();
+  var out = [];
+  for(var k in gtPending){
+    if(!Object.prototype.hasOwnProperty.call(gtPending, k)) continue;
+    if(!GT_OBS[k]) out.push(GT_LABELS[k] || k);
+  }
+  return out;
+}
+/* KOLO 30: pojistná překreslovačka. gtPrune() probíhá líně, až při
+   dalším recomputeWhen — když nikdo nic nedodá, nic ho také
+   nezavolá a UI visí v „ověřuji“ navždy. Jeden časovač na celek,
+   spouští se s prvním gtStart, po GT_MAX_PENDING_MS + 2 s překreslí,
+   pokud něco stále visí; poté se vyzbrojí znovu dalším gtStart. */
+var gtNetTimer = null;
+function gtNetArm(){
+  if(typeof setTimeout !== "function") return;      /* node test harness bez DOM */
+  if(gtNetTimer) return;
+  gtNetTimer = setTimeout(function(){
+    gtNetTimer = null;
+    gtPrune();
+    if(gtPendingLabels().length) recomputeWhen();
+  }, GT_MAX_PENDING_MS + 2000);
 }
 function resetForecastState(){
   lastJ = null; lastModels = null; lastForecastId = null;
@@ -7677,11 +7719,19 @@ function renderSolo(){
     pill.textContent = "Verdikt · ověřuji";
     big.textContent = "Ověřuji";
     if(word) word.textContent = "Verdikt ještě není hotový";
-    sub.textContent = "Modely hlásí srážky: " + W.votes.join(", ") + ". Radar, stanice i ČHMÚ ještě měří ("
-      + W.pending.join(", ") + ") — přesný verdikt se doplní sám.";
+    /* KOLO 30: vypisují se SKUTEČNÁ pozorování, na která se čeká.
+       Dřív tu byla natvrdo věta o měření všech tři pozorovacích nohou
+       dohromady, i když v registru visel jen nowcast DWD — fráze
+       neodpovídala realitě (Dave, 20. 11. 15:26). */
+    sub.textContent = "Modely hlásí srážky: " + W.votes.join(", ") + ". Pozorování ("
+      + (W.pending || []).join(", ") + ") ještě měří — přesný verdikt se doplní sám"
+      + ((W.pendingNc && W.pendingNc.length)
+         ? "; nowcast (" + W.pendingNc.join(", ") + ") se stahuje, ale verdikt na něj nečeká"
+         : "")
+      + ".";
     facts.innerHTML = "";
     talk.textContent = "Na pomalém připojení pozorovací data docházejí o pár sekund později. Aplikace se aktualizuje sama, nemusíš stránku obnovovat.";
-    src.textContent = "čekám na: " + W.pending.join(", ");
+    src.textContent = "čekám na: " + (W.pending || []).join(", ");
     return;
   }
 
@@ -9680,18 +9730,27 @@ function recomputeWhen(){
      několika sekund překlopil na „Slabý déšť právě teď · potvrzuje
      radar ČHMÚ“ — ČHMÚ prostě na výpadkovém připojení došel později.
      „Nepotvrzeno“ je tvrzení o výsledku měření; dokud měření běží,
-     aplikace nesmí výsledek předjímat. */
-  if(votes.length >= 1 && indepVotes < 2 && gtAnyPending()){
-    var pendList = gtPendingLabels();
+     aplikace nesmí výsledek předjímat.
+
+     KOLO 30: čeká se jen na POZOROVÁNÍ (gtPendingObs). Dave 20. 11.
+     (Líšeň, 15:26): hotový radar i hotové modely, ale jediný
+     rozpracovaný nowcast DWD RADVOR/KNMI držel verdikt v „ověřuji“
+     a vypnul panel Kdy. Nowcast je model Extrapolace provozovatele
+     sítě, nikoli pozemní měření — verdikt ho nečeká, po settle
+     se doladí sám. */
+  if(votes.length >= 1 && indepVotes < 2 && gtPendingObs().length){
+    var pendList = gtPendingObs();
+    var pendNc = gtPendingNc();
     big.className = "big";
     big.innerHTML = "Ověřuji <small>pozorováním</small>";
     sub.innerHTML = "Signál srážek: " + votes.join(", ") + ". Pozemní pozorování ("
       + pendList.join(", ") + ") ještě měří — verdikt se stanoví, až dodají data."
+      + (pendNc.length ? " Nowcast (" + pendNc.join(", ") + ") se stahuje dál, verdikt na něj nečeká." : "")
       + beamNote + blitzNote();
     srcEl.textContent = "ověřuji · čekám na: " + pendList.join(", ") + sourceCaveat();
     if($("whenUntil")) $("whenUntil").innerHTML = "";
     whenState = {mode:"checking", votes:votes, indep:indepVotes,
-                 pending:pendList, now:now};
+                 pending:pendList, pendingNc:pendNc, now:now};
     renderSolo();
     return;
   }
