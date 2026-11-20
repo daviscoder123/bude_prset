@@ -553,3 +553,26 @@ doručení fixu (accuracy 25 m) musí použít lokalitu (load s názvem z geokod
 a pozorovatele zavřít (clearWatch). Test 2 simuluje zamítnutí přístupu
 (code 1): volání jde do noGeo a watchPosition se neotevírá. Celkem 138/138
 testů, build beze změny (main.js a index.html nedotčeny).
+
+## Kolo 18 — visící geolokace nikdy nenechá clonu němou (20. 11.)
+Dave 20. 11. 11:44 (IMG_5099): clona „Zjišťuji tvou polohu…“ visela bez odezvy
+i po minutách a systémový dotaz na povolení polohy se nikdy nezobrazil.
+WebKit v samostatné PWA umí dotaz na povolení přehlédnout; žádost pak visí
+bez fixu, bez chyby, a neozve se ani časovač. Druhá slepá ulička: iOS po
+návratu ze spánku volá acquirePosition(true), které dřív smazalo čekající
+hlášku, ale samo nehlásilo nic. Opravy:
+- report = !silent || (!cur && !lastJ): uživatel bez načtených dat dostává
+  hlášky vždy, i při tichém volání z visibilitychange,
+- pojistka hrubé fáze 17 s: neozve-li se callback vůbec, pozorovatel
+  watchPosition se otevře stejně,
+- pojistný časovač 100 s: čekání vždy skončí hláškou „Polohu se nepodařilo
+  zjistit…“ s pokynem na Nastavení → Polohové služby a možností psát obec
+  ručně — žádná němá clona,
+- pokyn „Nezobrazil se dotaz na povolení polohy?“ v hláškách po 10 s i v
+  závěrečné hlášce (ikona z plochy má oprávnění vlastní, nezávislé
+  na Safaru),
+- rychlý start z localStorage prodloužen z 8 h na 24 h: první ranní start
+  po noci už nevisí na studeném GPS (data se stahují vždy čerstvá),
+- ruční volba obce (pick) vypíná i nové pojistné časovače.
+Testy: 3 nové (1 strukturní, 2 behaviorální, vykonávají acquirePosition
+v izolovaném kontextu), celkem 141/141. Build 500 678 B.

@@ -1992,13 +1992,17 @@ function init(){
   /* KOLO 15: okamžitý start z poslední lokality. Na prvním načtení
      appka čekala na GPS fix a teprv potom začala stahovat data —
      na mobilu to znamenalo dlouhé prázdné „Načítám“. Poslední použitá
-     lokalita (do 8 h stará, uložená v load() do localStorage) se
+     lokalita (do 24 h stará, uložená v load() do localStorage) se
      vezme hned a geolokace ji na pozadí zpřesní; když selže nebo ji
-     uživatel odepře, appka stejně zobrazí platnou předpověď. */
+     uživatel odepře, appka stejně zobrazí platnou předpověď.
+     KOLO 18 (Dave 20. 11.): osmihodinové okno nestačilo — první
+     ranní start po noci pokaždé visel na studeném GPS. Data se
+     stahují VŽDY čerstvá, lokalita se jen beze změny znovu použije;
+     24 h kryje běžnou denní pauzu a geolokace stejně dobehne. */
   var last = null;
   try{ last = JSON.parse(localStorage.getItem("bpPlace_v1") || "null"); }catch(e){}
   if(last && typeof last.lat === "number" && typeof last.lon === "number"
-     && last.name && Date.now() - (last.t || 0) < 8*3600*1000){
+     && last.name && Date.now() - (last.t || 0) < 24*3600*1000){
     load({lat:last.lat, lon:last.lon, cc:last.cc || "", name:last.name}, true);
   }
   acquirePosition(false);
@@ -2031,6 +2035,9 @@ window.addEventListener("pageshow", function(e){
 var geoRefineT = null;
 var geoWatchId = null;      /* kolo 17: pozorovatel pro pádovanou GPS (watchPosition) */
 var geoHintT = null;        /* kolo 17: hláška „trvá to déle“ po 10 s */
+var geoCoarseT = null;      /* kolo 18: pojistka hrubé fáze (visící dotaz na povolení neumlčí appku) */
+var geoFailT = null;        /* kolo 18: pojistný časovač — čekání končí hlášením, nikdy němou clonou */
+var geoFailShown = false;   /* kolo 18: noGeo už ozvalo; pojistka pak nic nepřepisuje */
 
 /* Složí název z toho, co geokodér vrátil. Městská část má přednost
    před obcí: kdo je v Řečkovicích, chce vidět Řečkovice. */
@@ -2093,7 +2100,10 @@ function acquirePosition(silent){
   if(!navigator.geolocation){ if(!silent) noGeo(); return; }
   clearTimeout(geoRefineT);
   clearTimeout(geoHintT);
+  clearTimeout(geoCoarseT);   /* kolo 18: pojistky nové žádosti */
+  clearTimeout(geoFailT);
   geoWatchStop();            /* maximálně jeden pozorovatel na celou aplikaci */
+  geoFailShown = false;      /* kolo 18: nová žádost = nová šance na hlášení */
 
   function pouzij(lat, lon, presnostM, jePresna){
     geoWatchStop();          /* fix dorazil — pozorovatel už nepotřebujeme */
@@ -2135,35 +2145,74 @@ function acquirePosition(silent){
      Zamítnutí (code 1) se dál řeší vzdělávacím dialogem (iOS po
      zamítnutí svůj dotaz už nikdy nezopakuje — dialog je jediná
      cesta, jak uživatele dovést k povolení). */
-  if(!silent && !lastJ){
+  /* KOLO 18 (Dave 20. 11. 11:44: clona „Zjišťuji tvou polohu…“ visela
+     bez odezvy i po minutách; „Neptá se mě to na začátku na povolení
+     GPS“): WebKit v samostatné PWA umí systémový dotaz na polohu
+     přehlédnout — žádost pak visí bez fixu, bez chyby, a neozve se
+     ani prohlížečový časovač. Druhá slepá ulička: „silent“ bylo
+     určeno pro obnovu na pozadí s načtenými daty, ale iOS po návratu
+     ze spánku volá acquirePosition(true), jehož vstup smazal kolo 17
+     čekající hlášku — clona pak visela němě i s fungující geolokací.
+     Když uživatel dívající se na prázdnou clonu čeká, aplikace
+     hlásí VŽDY (report), ať je žádost jakkoli tichá. */
+  var report = !silent || (!cur && !lastJ);
+
+  if(report && !lastJ){
     geoHintT = setTimeout(function(){
       if(lastJ) return;      /* data mezitím dojela z jiné lokality — nic neřešit */
-      status("Zjišťuji tvou polohu…<br><span style=\"font-size:11px\">Trvá to déle, než čeká poloha z Wi-Fi a vysílačů — přecházím na pomalejší přesné GPS (může to trvat až minutu).</span><br><span style=\"font-size:11px\">Nechceš-li čekat, klepnutím tuto hlášku zavřeš a napiš obec ručně.</span>");
+      status("Zjišťuji tvou polohu…<br><span style=\"font-size:11px\">Trvá to déle, než čeká poloha z Wi-Fi a vysílačů — přecházím na pomalejší přesné GPS (může to trvat až minutu).</span><br><span style=\"font-size:11px\">Nezobrazil se dotaz na povolení polohy? Na iPhonu: Nastavení → Polohové služby → tato aplikace → „Při používání“.</span><br><span style=\"font-size:11px\">Nechceš-li čekat, klepnutím tuto hlášku zavřeš a napiš obec ručně.</span>");
     }, 10000);
   }
-  /* Fáze 1 — rychlá poloha, ať se něco ukáže hned. */
+  /* Fallback: pozorovatel drží GPS kanál otevřený dlouho po tom,
+     co jednorázový dotaz podlehl časovači (nebo se neozval vůbec);
+     dorazí-li první fix, použije se hned a pozorovatel se zavře
+     (geoWatchStop v pouzij). */
+  var watchOtevren = false;
+  function openWatch(){
+    if(watchOtevren || !navigator.geolocation.watchPosition) return;
+    watchOtevren = true;
+    if(report && !lastJ){
+      clearTimeout(geoHintT);
+      status("Zjišťuji tvou polohu přesným GPS…<br><span style=\"font-size:11px\">Rychlá metoda (Wi-Fi/vysílače) neodpověděla — čekám na GPS, to může trvat i minutu.</span><br><span style=\"font-size:11px\">Nezobrazil se dotaz na povolení polohy? Na iPhonu: Nastavení → Polohové služby → tato aplikace → „Při používání“.</span><br><span style=\"font-size:11px\">Nechceš-li čekat, klepnutím zavřeš a napiš obec ručně.</span>");
+    }
+    geoWatchId = navigator.geolocation.watchPosition(function(p){
+      pouzij(p.coords.latitude, p.coords.longitude, p.coords.accuracy,
+             p.coords.accuracy != null && p.coords.accuracy <= 150);
+    }, function(err2){
+      geoWatchStop();
+      if(report) noGeo(err2);
+    }, {timeout:75000, maximumAge:0, enableHighAccuracy:true});
+  }
+  /* Fáze 1 — rychlá poloha, ať se něco ukáže hned. Kolo 18 hlídá i
+     stav, kdy se neozve ani chybový callback (visící dotaz na
+     povolení): pojistka po 17 s otevře pozorovatel stejně. */
+  var hrubaOdpovedela = false;
+  geoCoarseT = setTimeout(function(){
+    if(!hrubaOdpovedela && !watchOtevren) openWatch();
+  }, 17000);
+  if(report){
+    /* KOLO 18: pojistný časovač. Ať geolokace umře jakkoli (visící
+       dotaz i telefon, co se neozve), uživatel do 100 s uvidí hlášku
+       s pokynem a s cestou ručně zapsat obec — žádná němá clona. */
+    geoFailT = setTimeout(function(){
+      if(cur || lastJ || geoFailShown) return;
+      geoWatchStop();
+      noGeo({code:3});
+    }, 100000);
+  }
   navigator.geolocation.getCurrentPosition(function(p){
+    hrubaOdpovedela = true;
+    clearTimeout(geoCoarseT);
     pouzij(p.coords.latitude, p.coords.longitude, p.coords.accuracy,
            p.coords.accuracy != null && p.coords.accuracy <= 150);
   }, function(err){
+    hrubaOdpovedela = true;
+    clearTimeout(geoCoarseT);
     if(err && (err.code === 2 || err.code === 3)
        && navigator.geolocation.watchPosition){
-      /* Fallback: pozorovatel drží GPS kanál otevřený dlouho po tom,
-         co jednorázový dotaz podlehl časovači; dorazí-li první fix,
-         použije se hned a pozorovatel se zavře (geoWatchStop v pouzij). */
-      if(!silent && !lastJ){
-        clearTimeout(geoHintT);
-        status("Zjišťuji tvou polohu přesným GPS…<br><span style=\"font-size:11px\">Rychlá metoda (Wi-Fi/vysílače) neodpověděla — čekám na GPS, to může trvat i minutu.</span><br><span style=\"font-size:11px\">Nechceš-li čekat, klepnutím zavřeš a napiš obec ručně.</span>");
-      }
-      geoWatchId = navigator.geolocation.watchPosition(function(p){
-        pouzij(p.coords.latitude, p.coords.longitude, p.coords.accuracy,
-               p.coords.accuracy != null && p.coords.accuracy <= 150);
-      }, function(err2){
-        geoWatchStop();
-        if(!silent) noGeo(err2);
-      }, {timeout:75000, maximumAge:0, enableHighAccuracy:true});
+      openWatch();
     } else {
-      if(!silent) noGeo(err);
+      if(report) noGeo(err);
     }
   }, {timeout:15000, maximumAge:60000, enableHighAccuracy:false});
 }
@@ -2190,6 +2239,8 @@ function upresni(hrubaLat, hrubaLon, silent){
 function noGeo(err){
   status(null);
   clearTimeout(geoHintT);
+  clearTimeout(geoFailT);   /* kolo 18: pojistka už není potřeba */
+  geoFailShown = true;      /* kolo 18: ozvalo se — pojistka nesmí nic přepsat */
   /* KOLO 17 (Dave 19. 11.: „Nejede zjišťování polohy. Tu clonu při
      startu, když nejsou načteny data, tam nech. Oprav načítání
      polohy.“): zamítnutí (code 1) vždy ukáže vzdělávací dialog —
@@ -2217,7 +2268,7 @@ function noGeo(err){
       if($("soloSub")) $("soloSub").textContent =
         "Polohu se nepodařilo zjistit — napiš obec do vyhledávání nahoře.";
       $("locInput").focus();
-      status("Polohu se nepodařilo zjistit — slabý signál nebo vypnuté polohové služby.<br>Klepnutím zavřeš tuto hlášku a napiš obec ručně.");
+      status("Polohu se nepodařilo zjistit — slabý signál nebo vypnuté polohové služby.<br><span style=\"font-size:11px\">Nezobrazil se dotaz na povolení polohy? Na iPhonu: Nastavení → Polohové služby → tato aplikace → „Při používání“. Ikona z plochy má oprávnění vlastní, nezávislé na Safaru.</span><br>Klepnutím zavřeš tuto hlášku a napiš obec ručně.");
     } else {
       showMsg("Polohu se nepodařilo zjistit — zůstávám na " + cur.name + ".");
     }
@@ -2384,6 +2435,8 @@ function pick(i){
   manualPickAt = Date.now();
   geoWatchStop();            /* kolo 17: ruční volba ruší čekající GPS pozorovatele */
   clearTimeout(geoHintT);
+  clearTimeout(geoCoarseT); /* kolo 18: ruční volba vypíná i pojistné časovače */
+  clearTimeout(geoFailT);
   closeSugg();
   input.blur();
   load({lat:p.lat, lon:p.lon, name:[p.name, p.cc].filter(Boolean).join(", "), cc:p.cc});
