@@ -551,6 +551,10 @@ test('kolo 25: plynulost — clona se rozplývá, kompas vpluje, ne skáče',asy
      ověřuje na vypočtených stylech v ostrém prohlížeči. */
   const {ctx,p,errors}=await fixture();
   try{
+    /* Clona mizí PLYNULE (0,35 s přechod) — počkat, než dojde na
+       koncový stav visibility:hidden; hned po kliknutí by byla
+       ještě uprostřed mizejícího přechodu. */
+    await p.waitForTimeout(500);
     const st=await p.evaluate(()=>{
       const s=document.getElementById('status');
       const cs=getComputedStyle(s);
