@@ -1157,7 +1157,7 @@ test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
     'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
   assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
     'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
-  assert.ok(html.includes('>v26<'),'aktuální verze: v26');
+  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
@@ -1607,7 +1607,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v26<'),'aktuální verze: v26');
+  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1657,7 +1657,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v26<'),'aktuální verze: v26');
+  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
@@ -1776,7 +1776,7 @@ test('kolo 23: pojistka proti visícímu dotazu na oprávnění (3 s)',()=>{
     'havárie init() se vypíše na clonu, ne němá smrt skriptu');
   assert.ok(script.includes('geoPermTxt()'),
     'nápovědy clony nesou stav oprávnění (diagnostika z mobilu)');
-  assert.ok(html.includes('>v26<'),'aktuální verze: v26');
+  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
 });
 
 test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spustí žádost',async()=>{
@@ -1828,7 +1828,7 @@ test('kolo 24: start aplikace — init() až po všech deklaracích, load() null
     'init() běží až po deklaraci vyhledávacího pole (na konci skriptu)');
   assert.ok(script.slice(initCall).includes('catch'),
     'pojistka havárie z kola 23 (chyba na clonu) zůstává');
-  assert.ok(html.includes('>v26<'),'aktuální verze: v26');
+  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
 });
 
 test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
@@ -1862,7 +1862,7 @@ test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
     'statické HTML startuje s viditelnou clonou — úvod bez bliknutí');
   assert.ok(html.includes('@keyframes riseIn') && html.includes('.compass{animation:riseIn'),
     'panely vplouvají animací riseIn');
-  assert.ok(html.includes('>v26<'),'aktuální verze: v26');
+  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
 });
 
 test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit/ČHMÚ',()=>{
@@ -1893,6 +1893,32 @@ test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit
     'volba pohledu se pamatuje v localStorage, nikam se neposílá');
   assert.ok(script.includes('function humanDur('),
     'lidský formát trvání existuje jako sdílený pomocník');
-  assert.ok(html.includes('.radseg') && html.includes('>v26<'),
-    'CSS segmentu je v šabloně, verze v26');
+  assert.ok(html.includes('.radseg') && html.includes('>v27<'),
+    'CSS segmentu je v šabloně, verze v27');
+});
+
+test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
+  /* Dave (21. 11., PC Líšeň, snímek): „Všimni si, jak je to rozpadlé.
+     Nesedí ty věci do těch polí. Když je málo místa, tak se musí text
+     zkrátit. A radar vždy vycentrovat, případně zmenšit. Apka musí
+     vypadat dobře.“ Desktopový flex-wrap stavěl cifernák a text vedle
+     sebe; v úzkém panelu (aside 210–310 px) textu zbylo ~60–90 px a
+     vysvětlení se lámalo slovo od slova. Kolo 27 panel skládá do
+     sloupce (label + přepínač nahoře, cifernák centrovaný a menší,
+     text přes celou šířku) a dlouhé věty zkracuje. */
+  assert.ok(html.includes('display:block;overflow:hidden;overflow-wrap:anywhere;hyphens:auto}'),
+    'kompas je blokový sloupec s bezpečným zalamováním, ne flex s drceným textem');
+  assert.ok(html.includes('.compass svg{display:block;width:clamp(78px,10vh,102px);height:clamp(78px,10vh,102px);margin:6px auto 8px}'),
+    'cifernák je vycentrovaný (margin auto) a zmenšený (10 vh, max 102 px)');
+  assert.ok(html.includes('.compass .ct{width:100%;min-width:0}'),
+    'text pod cifernákem dostává celou šířku panelu');
+  assert.ok(html.includes('margin-left:auto;vertical-align:middle'),
+    'přepínač Kompozit/ČHMÚ se přitiskne k pravému okraji labelu');
+  const rc=fn('renderCompassBase');
+  assert.ok(rc.includes('(viaSat ? "Satelit" : "Radar")\n    + radViewSeg(radViewCur, !viaSat && chmiReady) + \'</div>\''),
+    'přepínač je uvnitř labelu, nezabírá vlastní řádek');
+  assert.ok(rc.includes('Odsud déšť nečekej') && rc.includes('Intenzitu dopředu neodhadnu')
+    && rc.includes('skoro stojí'),
+    'vysvětlení v úzkém panelu jsou zkrácená (málo místa = kratší text)');
+  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
 });
