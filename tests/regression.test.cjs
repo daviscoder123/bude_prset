@@ -1153,7 +1153,7 @@ test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
     'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
   assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
     'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
-  assert.ok(html.includes('>v22<'),'aktuální verze: v22');
+  assert.ok(html.includes('>v23<'),'aktuální verze: v23');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
@@ -1367,7 +1367,7 @@ test('kolo 17b: behaviorálně — vypršení hrubé fáze otevře watchPosition
     geoCoarseT:null, geoFailT:null, geoFailShown:false,
     lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
     status:(m)=>{ statusMsgs.push(m); },
-    geoBindHelp:()=>{},
+    geoBindHelp:()=>{}, geoPermTxt:()=>"test",
     pojmenujMisto:()=>Promise.resolve({district:null, city:'Praha', cc:'CZ'}),
     load:(place,silent)=>{ loads.push({place,silent}); },
     noGeo:(err)=>{ noGeoCalls.push(err); }
@@ -1455,7 +1455,7 @@ test('kolo 18: behaviorálně — tichý návrat bez dat po selhání GPS ozve h
     geoCoarseT:null, geoFailT:null, geoFailShown:false,
     lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
     status:(m)=>{ statusMsgs.push(m); },
-    geoBindHelp:()=>{},
+    geoBindHelp:()=>{}, geoPermTxt:()=>"test",
     pojmenujMisto:()=>Promise.resolve(null), load:()=>{},
     noGeo:(e)=>{ noGeoCalls.push(e); }
   });
@@ -1487,7 +1487,7 @@ test('kolo 18: behaviorálně — visící hrubá fáze: pojistka 17 s otevře p
     geoRefineT:null, geoHintT:null, geoWatchId:null,
     geoCoarseT:null, geoFailT:null, geoFailShown:false,
     lastJ:null, cur:null, curFromGeo:false, manualPickAt:0,
-    status:()=>{}, geoBindHelp:()=>{}, pojmenujMisto:()=>Promise.resolve(null), load:()=>{},
+    status:()=>{}, geoBindHelp:()=>{}, geoPermTxt:()=>"test", pojmenujMisto:()=>Promise.resolve(null), load:()=>{},
     noGeo:(e)=>{ noGeoCalls.push(e); }
   });
   c.acquirePosition(false);
@@ -1603,7 +1603,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v22<'),'aktuální verze: v22 (bump kolem 22 — revert přepínače)');
+  assert.ok(html.includes('>v23<'),'aktuální verze: v23');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1645,7 +1645,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
      přes navigator.permissions: granted → auto, denied → návod hned,
      jinak tlačítko „Povolit polohu“ v cloně. */
   const gs=fn('geoStart');
-  assert.ok(gs.includes('permissions.query'),
+  assert.ok(gs.includes('geoPermQuery') && fn('geoPermQuery').includes('permissions.query'),
     'start se ptá na STAV oprávnění, ne slepě spouští žádost');
   assert.ok(gs.includes('geoAskOverlay'),
     'nerozhodnutý stav zobrazí tlačítkovou clonu');
@@ -1653,14 +1653,15 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v22<'),'aktuální verze: v22');
+  assert.ok(html.includes('>v23<'),'aktuální verze: v23');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
 
 test('kolo 21: behaviorálně — stav „prompt“: žádost čeká na dotyk, sama neletí',async()=>{
   const calls={acquire:0,overlay:0}; let resolveQ=null;
-  const c=context(['geoStart'],{
+  const c=context(['geoStart','geoPermQuery'],{
+    setTimeout:()=>1, clearTimeout:()=>{},
     navigator:{geolocation:{},
       permissions:{query:()=>new Promise(r=>{resolveQ=r;})}},
     localStorage:{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},
@@ -1683,7 +1684,8 @@ test('kolo 21: behaviorálně — stav „prompt“: žádost čeká na dotyk, s
 
 test('kolo 21: behaviorálně — granted jede samo, denied ukáže návod hned',async()=>{
   const calls={acquire:0,noGeo:0,overlay:0}; const noGeoErr=[];
-  const mk=(state)=>context(['geoStart'],{
+  const mk=(state)=>context(['geoStart','geoPermQuery'],{
+    setTimeout:()=>1, clearTimeout:()=>{},
     navigator:{geolocation:{},
       permissions:{query:()=>Promise.resolve({state})}},
     localStorage:{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},
@@ -1709,7 +1711,8 @@ test('kolo 21: behaviorálně — granted jede samo, denied ukáže návod hned'
 
 test('kolo 21: behaviorálně — bez permissions API zůstává automatická žádost (staré iOS)',()=>{
   const calls={acquire:0};
-  const c=context(['geoStart'],{
+  const c=context(['geoStart','geoPermQuery'],{
+    setTimeout:()=>1, clearTimeout:()=>{},
     navigator:{geolocation:{}},          /*žádné permissions API jako na iOS < 16*/
     localStorage:{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},
     lastJ:null, cur:null,
@@ -1727,7 +1730,8 @@ test('kolo 21: behaviorálně — rychlý start z uložené lokality: žádná c
      nevyrušuje — tlačítková clona smí přijít jen na skutečném
      studeném startu bez dat. */
   const calls={acquire:0,overlay:0}; let resolveQ=null;
-  const c=context(['geoStart'],{
+  const c=context(['geoStart','geoPermQuery'],{
+    setTimeout:()=>1, clearTimeout:()=>{},
     navigator:{geolocation:{},
       permissions:{query:()=>new Promise(r=>{resolveQ=r;})}},
     localStorage:{getItem:(k)=> k==='bpPlace_v1'
@@ -1747,4 +1751,51 @@ test('kolo 21: behaviorálně — rychlý start z uložené lokality: žádná c
     's uloženou lokalitou se žádná tlačítková clona neukazuje');
   assert.equal(calls.acquire,0,
     've stavu „prompt“ se geolokace sama nespouští (žádost bez dotazu)');
+});
+
+test('kolo 23: pojistka proti visícímu dotazu na oprávnění (3 s)',()=>{
+  /* Dave 21. 11.: na mobilu v22 clona 2 minuty beze změny, přestože
+     Nastavení hlásí „Při používání“; na desktopu testy zelené. Jediné
+     vysvětlení sedící na všechna pozorování: WebKit na iOS nenechá
+     navigator.permissions.query({name:"geolocation"}) DOŘEŠIT — slib
+     visí, geoStart se nikdy nedostane k acquirePosition a žádný
+     časovač kol 17/18 se nenasadí. Lék kola 23: geoPermQuery s
+     pojistkou 3 s; nedořeší-li se, jede stará automatická žádost s
+     pojistkami. Strukturní zábrany: */
+  const gp=fn('geoPermQuery');
+  assert.ok(gp.includes('3000'),'dotaz na oprávnění má pojistku 3 s');
+  assert.ok(gp.includes('resolve({state:"unknown"})'),
+    'pojistka dořeší slib sama — start nikdy nezamrzne na čekání');
+  assert.ok(fn('geoStart').includes('state === "unknown"'),
+    'nezměřený stav jede dál automaticky (ne visí)');
+  assert.ok(script.includes('Start se nepovedl'),
+    'havárie init() se vypíše na clonu, ne němá smrt skriptu');
+  assert.ok(script.includes('geoPermTxt()'),
+    'nápovědy clony nesou stav oprávnění (diagnostika z mobilu)');
+  assert.ok(html.includes('>v23<'),'aktuální verze: v23');
+});
+
+test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spustí žádost',async()=>{
+  const timers=[]; const calls={acquire:0,overlay:0};
+  const c=context(['geoStart','geoPermQuery'],{
+    setTimeout:(f,delay)=>{ timers.push({f,delay}); return timers.length; },
+    clearTimeout:()=>{},
+    navigator:{geolocation:{},
+      permissions:{query:()=>new Promise(()=>{})}},   /* WebKit: nikdy nedořeší */
+    localStorage:{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},
+    lastJ:null, cur:null,
+    acquirePosition:()=>{calls.acquire++;},
+    noGeo:()=>{},
+    geoAskOverlay:()=>{calls.overlay++;},
+    status:()=>{}
+  });
+  c.geoStart(false);
+  await new Promise(r=>setTimeout(r,5));
+  assert.equal(calls.acquire,0,'před pojistkou žádost neletí (čeká se na stav)');
+  assert.ok(timers.some(t=>t.delay===3000),'pojistka 3 s je nasazena hned');
+  timers.filter(t=>t.delay===3000).forEach(t=>t.f());   /* WebKit mlčí 3 s */
+  await new Promise(r=>setTimeout(r,5));
+  assert.equal(calls.acquire,1,
+    'po vypršení pojistky jede automatická žádost (stará cesta s hint 10 s, pozorovatel 17 s, hláška 100 s)');
+  assert.equal(calls.overlay,1,'studený start má i tlačítkovou clonu s cestou ven');
 });
