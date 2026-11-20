@@ -381,6 +381,13 @@ footer{display:flex;justify-content:space-between;align-items:center;font-family
 .pulse{color:var(--rain);animation:pl 1.2s infinite}
 @keyframes pl{50%{opacity:.35}}
 #offlineBar.show{display:block;animation:riseIn .35s ease both}
+/* KOLO 26: přepínač pohledu radaru (Kompozit / ČHMÚ) v panelu Radar.
+   Malý segment vedle labelu; aktivní tlačítko dešťová modř, přechody
+   0,2 s (plynulost z kola 25 platí dál). */
+.radseg{display:inline-flex;gap:2px;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:7px;padding:2px;margin-left:8px;vertical-align:middle}
+.radseg button{background:none;border:none;color:var(--muted);font-family:var(--sans);font-weight:700;font-size:clamp(8px,1.2vh,9.5px);padding:3px 9px;border-radius:5px;cursor:pointer;opacity:.75;transition:background .2s,color .2s,opacity .2s}
+.radseg button.on{background:var(--rain-deep);color:#fff;opacity:1}
+.radseg button:not(.on):hover{color:var(--text)}
 #offlineBar{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:calc(clamp(8px,1.4vh,18px) + env(safe-area-inset-bottom,0px));z-index:60;background:var(--warn);color:#141005;font-family:var(--sans);font-weight:800;font-size:12px;padding:9px 16px;border-radius:999px;box-shadow:0 8px 24px rgba(0,0,0,.5);white-space:nowrap}
 #offlineBar.show{display:block}
 #dataMeter{display:none}
@@ -724,7 +731,7 @@ html.compact table{border-spacing:1.5px}
 
 <div id="offlineBar">Jsi offline — zobrazená data můžou být stará</div>
 <div id="status" class="show"><div><span class="pulse">●</span><br>Zjišťuji tvou polohu…</div></div>
-<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v25</div>
+<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v26</div>
 
 <script>/*__BP_MAIN__*/</script>
 </body>

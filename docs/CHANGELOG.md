@@ -672,6 +672,43 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 26 — panel Kdy říká čas od modelů, přepínač Kompozit/ČHMÚ (21. 11.)
+
+Dave (snímek PC verze, Jihlava): „Tohle mě vytáčí. Je tam 89 procent,
+že zaprší, tak chci vědět kdy. Informace, že nic do hodiny je slabá.
+Chci tedy říct, kdy to odhaduješ. Proč tam není to přepínání na ČHMÚ
+radar. Podotykám, že se teď dívám na PC verzi.“ Snímek ukazoval
+právě ten rozpor: verdikt nahoře 89 % („Téměř jistě zaprší“), shoda
+8/10 agentur, modelové srážky ≥ 0,2 mm/h kolem 19:00 — a panel Kdy
+odpovídal jen „Nic do hodiny. Radar v příští hodině nic nevidí.“
+
+Panel Kdy: když pozorovací zdroje hodinového horizontu (radar,
+minutecast) mlčí, ale modely mají SILNÝ signál za hranicí hodiny,
+panel nyní řekne odhadovaný čas začátku: „od 19:00“ s podtitulem
+„za ~5 h 25 min — shoda 8/10 (68 %), ~0,3 mm/h“. Prioritu má špička
+agentur (ms.peak s předstihovou váhou, pravděpodobnost ≥ 50 %),
+jinak tabulkový konsensus se stejným prahem 50 %. Práh 50 % drží
+kolo 9c: osamocený model nesmí slibovat déšť. Mobilní
+solo panel nese tentýž čas („déšť se blíží“ s „od 19:00“), takže
+mobil i PC říkají totéž. Nový stav „later“ ve whenState.
+
+Přepínač radaru Kompozit/ČHMÚ: vrací se jako segment v panelu Radar
+(na PC i mobilu), bez rozkliknutí a bez skoku — přepnutí překreslí
+jeden panel (v souladu s plynulostí kola 25), volba se
+pamatuje v localStorage (bpRadarView). Stará jména z kola 14
+zůstávají pohřbena (test kol 22 to hlídá); nová implementace používá
+radView/radViewSeg/wireRadSeg/radseg. Pohled ČHMÚ kreslí
+národní 1×1 km pole výrazně (PseudoCAPPI 2 km, forChmi=true), kompozit
+zůstává jemný; elipsa buňky a trajektorie zůstávají v obou pohledech.
+Přepínač se ukazuje jen s čerstvým snímkem ČHMÚ (≤ 45 min, stejné
+pravidlo jako hlasování ve verdiktu) a v dosahu českého radaru;
+jinak panel zůstává u kompozitu.
+
+Verze v rohu: v26; service worker v12. Testy: 154/154 (99 + 1 nový
+strukturní test kola 26 + 1 upravený test kola 25 + 1 rozšířené
+okno testu kola 12 + upravený test kola 22 komentářem o nových
+jménech; worker 54 nezměněn). Build 513 954 B.
+
 ## Kolo 25 — radar ČHMÚ v pohledu a plynulost všude (20. 11., Dave po zeleném startu)
 
 Dave: „Tak a teď tam zase doděj ten ČHMÚ radar, jak jsme to měli
