@@ -1987,7 +1987,20 @@ function fmtHrHead(d){ return NARROW.matches ? String(+placeParts(d).hour) : fmt
 /* ================= START ================= */
 var curFromGeo = false;
 var manualPickAt = 0;      /* kdy si uživatel naposledy ručně vybral obec */
-init();
+/* KOLO 23: pojistka havárie startu. Kdyby cokoliv v init() na mobilu
+   vyhodilo výjimku, skript by se na tom místě zastavil a clona by
+   zůstala statická navěky (badge je statické HTML, takže vypovídá
+   jen o souboru, ne o běžícím kódu). Výjimka se teď neumlčí, ale
+   napíše se NA CLONU — další hlášení z mobilu tak řekne přesnou
+   příčinu, místo „beze změny“. */
+try{
+  init();
+}catch(e){
+  try{
+    status("Start se nepovedl — chyba: " + (e && e.message ? e.message : e)
+      + "<br><span style=\"font-size:11px\">Clonu zavřeš klepnutím do pozadí; aplikaci lze zachránit ručním výběrem obce ve vyhledávání.</span>");
+  }catch(e2){}
+}
 function init(){
   /* KOLO 15: okamžitý start z poslední lokality. Na prvním načtení
      appka čekala na GPS fix a teprv potom začala stahovat data —
@@ -2115,21 +2128,68 @@ function geoWatchStop(){
    žádosti s pojistkami (kolo 17/18) a tlačítkem v nápovědě po 10 s.
    První úspěšný fix si appka zapamatuje (bpGeoOk) — s uloženou
    lokalitou pak start nikdy nevyrušuje clonou s tlačítky. */
+/* KOLO 23 (Dave 21. 11.: na mobilu v22 za 2 minuty clona nezměnila ani
+   slovo, přestože Nastavení uvádí „Při používání“; na desktopu vše jede):
+   WebKit umí navigator.permissions.query({name:"geolocation"}) na iOS
+   nechat bez odpovědi — slib se nedořeší nikdy, geoStart visí před
+   acquirePosition NEŽ se nasadí jediný časovač, a clona tak zůstane
+   statická navěky. Lék: dotaz na stav dostane pojistku 3 s
+   (geoPermQuery). Nedořeší-li se, jede stará automatická žádost
+   s pojistkami kol 17/18 (hint 10 s, pozorovatel 17 s, hláška 100 s).
+   Stav navíc zůstává vidět v nápovědách (bpPermState), aby další
+   hlášení z mobilu řeklo, co systém skutečně hlásí. */
+var bpPermState = "unknown";   /* granted / denied / prompt / unknown */
+/* Kolo 23: lidský popis stavu oprávnění do nápověd clony — další
+   hlášení z mobilu tak rozliší systém „povoleno“ od visícího WebKitu. */
+function geoPermTxt(){
+  if(bpPermState === "granted") return "povoleno";
+  if(bpPermState === "denied") return "zamítnuto";
+  if(bpPermState === "prompt") return "nerozhodnuto (systém by se měl zeptat)";
+  return "systém neodpověděl do 3 s (pojistka kola 23)";
+}
+function geoPermQuery(){
+  return new Promise(function(resolve){
+    var done = false;
+    var t = setTimeout(function(){
+      if(done) return;
+      done = true;
+      resolve({state:"unknown"});      /* WebKit visí → nezastavíme kvůli němu start */
+    }, 3000);
+    try{
+      navigator.permissions.query({name:"geolocation"}).then(function(st){
+        if(done) return;
+        done = true; clearTimeout(t);
+        resolve(st || {state:"unknown"});
+      }, function(){
+        if(done) return;
+        done = true; clearTimeout(t);
+        resolve({state:"unknown"});
+      });
+    }catch(e){
+      if(done) return;
+      done = true; clearTimeout(t);
+      resolve({state:"unknown"});
+    }
+  });
+}
 function geoStart(silent){
   if(!navigator.geolocation){ if(!silent) noGeo(); return; }
   var known = null;
   try{ known = localStorage.getItem("bpGeoOk"); }catch(e){}
   if(!navigator.permissions || !navigator.permissions.query){
+    bpPermState = "unknown";
     acquirePosition(silent);          /* staré iOS: chování jako dřív + pojistky */
     return;
   }
-  navigator.permissions.query({name:"geolocation"}).then(function(st){
+  geoPermQuery().then(function(st){
     var state = st && st.state;
+    bpPermState = state || "unknown";
     if(state === "granted" || known === "1"){ acquirePosition(silent); return; }
     if(state === "denied"){ if(!silent) noGeo({code:1}); return; }
-    /* Stav „prompt“: automatická žádost NELÍTÍ (WebKit by ji spolkl).
-       Bez dat (a bez čerstvě uložené lokality) nabídneme tlačtko;
-       s daty uživatele nevyrušujeme. */
+    /* Stav „prompt“ i „unknown“ po vypršení pojistky: automatická
+       žádost čeká (WebKit by ji mohl spolknout, viz kolo 18/21), ale
+       pojistky kol 17/18 zajistí, že clona se vždy ozve — 10 s hint,
+       17 s pozorovatel, 100 s hláška „Polohu se nepodařilo zjistit“. */
     var maUlozenou = false;
     try{
       var lp = JSON.parse(localStorage.getItem("bpPlace_v1") || "null");
@@ -2137,6 +2197,7 @@ function geoStart(silent){
                      && Date.now() - (lp.t || 0) < 24*3600*1000);
     }catch(e){}
     if(!cur && !lastJ && !maUlozenou) geoAskOverlay();
+    if(state === "unknown") acquirePosition(silent);   /* neměřený stav: jedeme jako dřív */
   }).catch(function(){ acquirePosition(silent); });
 }
 /* KOLO 21: napojení tlačítek clony. „Povolit polohu“ volá
@@ -2241,7 +2302,7 @@ function acquirePosition(silent){
   if(report && !lastJ){
     geoHintT = setTimeout(function(){
       if(lastJ) return;      /* data mezitím dojela z jiné lokality — nic neřešit */
-      status("Zjišťuji tvou polohu…<br><span style=\"font-size:11px\">Čekám na přesné GPS z družic — v budově to může trvat až minutu.</span><br><span style=\"font-size:11px\">Nezobrazil se dotaz na povolení polohy? Klepni na „Povolit polohu“ — žádost z dotyku iOS vždy zobrazí. Nebo Nastavení → Polohové služby → tato aplikace → „Při používání“.</span><div style=\"margin-top:10px\"><button id=\"btnGeoTry\" style=\"background:var(--rain-deep);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-weight:700;font-family:var(--sans);cursor:pointer\">Povolit polohu</button> <button id=\"btnGeoManual\" style=\"background:transparent;color:var(--text);border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:10px 16px;font-family:var(--sans);cursor:pointer;font-size:12px\">Napiš obec ručně</button></div>");
+      status("Zjišťuji tvou polohu…<br><span style=\"font-size:11px\">Čekám na přesné GPS z družic — v budově to může trvat až minutu.</span><br><span style=\"font-size:11px\">Nezobrazil se dotaz na povolení polohy? Klepni na „Povolit polohu“ — žádost z dotyku iOS vždy zobrazí. Nebo Nastavení → Polohové služby → tato aplikace → „Při používání“.</span><span style=\"font-size:11px\"> [kolo 23 · stav oprávnění: " + geoPermTxt() + "]</span><div style=\"margin-top:10px\"><button id=\"btnGeoTry\" style=\"background:var(--rain-deep);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-weight:700;font-family:var(--sans);cursor:pointer\">Povolit polohu</button> <button id=\"btnGeoManual\" style=\"background:transparent;color:var(--text);border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:10px 16px;font-family:var(--sans);cursor:pointer;font-size:12px\">Napiš obec ručně</button></div>");
       geoBindHelp();
     }, 10000);
   }
@@ -2255,7 +2316,7 @@ function acquirePosition(silent){
     watchOtevren = true;
     if(report && !lastJ){
       clearTimeout(geoHintT);
-      status("Zjišťuji tvou polohu přesným GPS…<br><span style=\"font-size:11px\">Přesné GPS trvá déle — čekám na první fix z družic, můžou to být i desítky sekund.</span><br><span style=\"font-size:11px\">Nezobrazil se dotaz na povolení polohy? Klepni na „Povolit polohu“ — žádost z dotyku iOS vždy zobrazí. Nebo Nastavení → Polohové služby → tato aplikace → „Při používání“.</span><div style=\"margin-top:10px\"><button id=\"btnGeoTry\" style=\"background:var(--rain-deep);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-weight:700;font-family:var(--sans);cursor:pointer\">Povolit polohu</button> <button id=\"btnGeoManual\" style=\"background:transparent;color:var(--text);border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:10px 16px;font-family:var(--sans);cursor:pointer;font-size:12px\">Napiš obec ručně</button></div>");
+      status("Zjišťuji tvou polohu přesným GPS…<br><span style=\"font-size:11px\">Přesné GPS trvá déle — čekám na první fix z družic, můžou to být i desítky sekund.</span><br><span style=\"font-size:11px\">Nezobrazil se dotaz na povolení polohy? Klepni na „Povolit polohu“ — žádost z dotyku iOS vždy zobrazí. Nebo Nastavení → Polohové služby → tato aplikace → „Při používání“.</span><span style=\"font-size:11px\"> [kolo 23 · stav oprávnění: " + geoPermTxt() + "]</span><div style=\"margin-top:10px\"><button id=\"btnGeoTry\" style=\"background:var(--rain-deep);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-weight:700;font-family:var(--sans);cursor:pointer\">Povolit polohu</button> <button id=\"btnGeoManual\" style=\"background:transparent;color:var(--text);border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:10px 16px;font-family:var(--sans);cursor:pointer;font-size:12px\">Napiš obec ručně</button></div>");
       geoBindHelp();
     }
     geoWatchId = navigator.geolocation.watchPosition(function(p){
