@@ -2170,7 +2170,7 @@ function acquirePosition(silent){
   if(report && !lastJ){
     geoHintT = setTimeout(function(){
       if(lastJ) return;      /* data mezitím dojela z jiné lokality — nic neřešit */
-      status("Zjišťuji tvou polohu…<br><span style=\"font-size:11px\">Trvá to déle, než čeká poloha z Wi-Fi a vysílačů — přecházím na pomalejší přesné GPS (může to trvat až minutu).</span><br><span style=\"font-size:11px\">Nezobrazil se dotaz na povolení polohy? Na iPhonu: Nastavení → Polohové služby → tato aplikace → „Při používání“.</span><br><span style=\"font-size:11px\">Nechceš-li čekat, klepnutím tuto hlášku zavřeš a napiš obec ručně.</span>");
+      status("Zjišťuji tvou polohu…<br><span style=\"font-size:11px\">Čekám na přesné GPS z družic — v budově to může trvat až minutu.</span><br><span style=\"font-size:11px\">Nezobrazil se dotaz na povolení polohy? Na iPhonu: Nastavení → Polohové služby → tato aplikace → „Při používání“.</span><br><span style=\"font-size:11px\">Nechceš-li čekat, klepnutím tuto hlášku zavřeš a napiš obec ručně.</span>");
     }, 10000);
   }
   /* Fallback: pozorovatel drží GPS kanál otevřený dlouho po tom,
@@ -2183,7 +2183,7 @@ function acquirePosition(silent){
     watchOtevren = true;
     if(report && !lastJ){
       clearTimeout(geoHintT);
-      status("Zjišťuji tvou polohu přesným GPS…<br><span style=\"font-size:11px\">Rychlá metoda (Wi-Fi/vysílače) neodpověděla — čekám na GPS, to může trvat i minutu.</span><br><span style=\"font-size:11px\">Nezobrazil se dotaz na povolení polohy? Na iPhonu: Nastavení → Polohové služby → tato aplikace → „Při používání“.</span><br><span style=\"font-size:11px\">Nechceš-li čekat, klepnutím zavřeš a napiš obec ručně.</span>");
+      status("Zjišťuji tvou polohu přesným GPS…<br><span style=\"font-size:11px\">Přesné GPS trvá déle — čekám na první fix z družic, můžou to být i desítky sekund.</span><br><span style=\"font-size:11px\">Nezobrazil se dotaz na povolení polohy? Na iPhonu: Nastavení → Polohové služby → tato aplikace → „Při používání“.</span><br><span style=\"font-size:11px\">Nechceš-li čekat, klepnutím zavřeš a napiš obec ručně.</span>");
     }
     geoWatchId = navigator.geolocation.watchPosition(function(p){
       pouzij(p.coords.latitude, p.coords.longitude, p.coords.accuracy,
@@ -2193,9 +2193,9 @@ function acquirePosition(silent){
       if(report) noGeo(err2);
     }, {timeout:75000, maximumAge:0, enableHighAccuracy:true});
   }
-  /* Fáze 1 — rychlá poloha, ať se něco ukáže hned. Kolo 18 hlídá i
-     stav, kdy se neozve ani chybový callback (visící dotaz na
-     povolení): pojistka po 17 s otevře pozorovatel stejně. */
+  /* Fáze 1 (kolo 20) — rovnou přesné GPS. Kolo 18 hlídá i stav, kdy
+     se neozve ani chybový callback (visící dotaz na povolení):
+     pojistka po 17 s otevře pozorovatel stejně. */
   var hrubaOdpovedela = false;
   geoCoarseT = setTimeout(function(){
     if(!hrubaOdpovedela && !watchOtevren) openWatch();
@@ -2210,6 +2210,12 @@ function acquirePosition(silent){
       noGeo({code:3});
     }, 100000);
   }
+  /* KOLO 20 (Dave 20. 11. 12:20: „Je nutné tam mít to Wi-Fi hledání
+     lokace?“): není. Wi-Fi poloha byla rychlá, ale nepřesná — Daveův
+     telefon ji měl až 2,9 km vedle — a pro radar s pixelem ~1,2 km
+     stejně nepoužitelná; rychlost každodenních startů dnes kryje
+     rychlý start z uložené lokality. První dotaz jde rovnou po
+     přesném GPS (20 s), dál fallback na pozorovatel z kola 17. */
   navigator.geolocation.getCurrentPosition(function(p){
     hrubaOdpovedela = true;
     clearTimeout(geoCoarseT);
@@ -2224,7 +2230,7 @@ function acquirePosition(silent){
     } else {
       if(report) noGeo(err);
     }
-  }, {timeout:15000, maximumAge:60000, enableHighAccuracy:false});
+  }, {timeout:20000, maximumAge:0, enableHighAccuracy:true});
 }
 
 /* Fáze 2 — přesná poloha na pozadí. Přenačte se jen tehdy, když se
