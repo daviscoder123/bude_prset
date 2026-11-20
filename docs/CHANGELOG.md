@@ -671,3 +671,28 @@ Rozbor historie ukázal dvě věci:
 Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
+
+## Kolo 23 — pojistka proti visícímu dotazu na oprávnění (klíč k mobilu) (21. 11.)
+Dave 21. 11.: na mobilu běží v22 (badge potvrzen), Nastavení hlásí
+„Při používání“, ale clona za 2 minuty nezměnila ani slovo; na
+desktopu a v CI vše zelené. Jediné vysvětlení sedící na všechna
+pozorování: WebKit na iOS nedořeší slib
+navigator.permissions.query({name:"geolocation"}) — geoStart visí
+před acquirePosition, žádný časovač kol 17/18 se nenasadí a clona
+zůstane statická navěky.
+Změny:
+- geoPermQuery: dotaz na stav oprávnění dostává pojistku 3 s.
+  Nedořeší-li se (nebo vyhodí-li výjimku), appka jede dál starou
+  cestou: automatická žádost + hint po 10 s + pozorovatel po 17 s +
+  hláška po 100 s. Start už nikdy nezamrzne na čekání na WebKit.
+- havárie init() se nenechá mlčet: výjimka se vypíše na clonu
+  („Start se nepovedl — chyba: …“), aby další hlášení z mobilu
+  řeklo přesnou příčinu, ne jen „beze změny“,
+- nápovědy clony (10 s, pozorovatel) nesou stav oprávnění
+  ([kolo 23 · stav oprávnění: povoleno/zamítnuto/…]) — z mobilu tak
+  vidíme, co systém skutečně hlásí,
+- verze v rohu v23; service worker v8 → v9.
+Testy: 2 nové (1 strukturní, 1 behaviorální — WebKit nechá dotaz
+viset, pojistka spustí žádost), 4 testy kola 21 upraveny na novou
+strukturu (geoPermQuery + timerové stuby), 3 kontexty kol 17b/18
+dostaly geoPermTxt stub. Celkem 151/151. Build 503 691 B.
