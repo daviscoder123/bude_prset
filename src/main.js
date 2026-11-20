@@ -4935,7 +4935,11 @@ function renderCompassBase(){
   if(!viaSat && radarState && radarState !== "error" && radarState.ageMin != null) src += " · snímek " + Math.round(radarState.ageMin) + " min";
   if(C.motionSrc === "drift") src += " · pohyb z dráhy buňky";
   if(C.motionSrc === "field7") src += " · pohyb z jemného zoomu (0,8 km/px)";
-  if(!viaSat && radViewCur === "chmu" && chmiReady){
+  /* KOLO 28: zdroj říká ČHMÚ jen tehdy, když opravdu kreslí jeho pole;
+     s prázdným polem (sucho) i s polem pod práhem 3. úrovně klesá
+     kreslení na kompozit a zdroj musí říkat kompozit — jinak by
+     řádka lhala o tom, co uživatel vidí. */
+  if(!viaSat && radViewCur === "chmu" && chmiReady && chmiCells){
     src = "radar ČHMÚ · PseudoCAPPI 2 km · 1×1 km · snímek " + Math.round(chmiState.ageMin) + " min"
       + (C.motionSrc === "drift" ? " · pohyb z dráhy buňky (kompozit)"
          : C.motionSrc === "field7" ? " · pohyb z jemného zoomu (kompozit)" : "");
@@ -6178,6 +6182,16 @@ function loadChmi(lat, lon, myId, attempt){
            Národní radar dál hlasuje v recomputeWhen, v kompasu
            (chmiSolo) a mezi svědky verdiktu — jen už není sloupcem
            mezi předpověďmi. */
+        /* KOLO 28 (Dave, mobil: „na mobilu se po prvním otevření
+           nezobrazí možnost přepnout radar, až po vyhledání lokality
+           jiné“): když ČHMÚ dorazí PO prvním vykreslení kompasu
+           (rychlý start má radarové dlaždice ve SW cache, kompas se
+           nakreslí hned, ČHMÚ má vlastní worker a trvá déle),
+           nikdo kompas znovu nepřekreslil: přepínač Kompozit/ČHMÚ
+           se ukáže až při další příležitosti (jiná lokalita, dotah).
+           Panel musí překreslit hned, jak má ČHMÚ data — stejně
+           jako to dělá chybná větv (scheduleChmiRetry). */
+        renderCompass();
         recomputeWhen();
       }
     }
