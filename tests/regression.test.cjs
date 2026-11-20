@@ -1157,7 +1157,7 @@ test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
     'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
   assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
     'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
-  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
+  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
@@ -1607,7 +1607,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
+  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1657,7 +1657,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
+  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
@@ -1776,7 +1776,7 @@ test('kolo 23: pojistka proti visícímu dotazu na oprávnění (3 s)',()=>{
     'havárie init() se vypíše na clonu, ne němá smrt skriptu');
   assert.ok(script.includes('geoPermTxt()'),
     'nápovědy clony nesou stav oprávnění (diagnostika z mobilu)');
-  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
+  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
 });
 
 test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spustí žádost',async()=>{
@@ -1828,7 +1828,7 @@ test('kolo 24: start aplikace — init() až po všech deklaracích, load() null
     'init() běží až po deklaraci vyhledávacího pole (na konci skriptu)');
   assert.ok(script.slice(initCall).includes('catch'),
     'pojistka havárie z kola 23 (chyba na clonu) zůstává');
-  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
+  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
 });
 
 test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
@@ -1862,7 +1862,7 @@ test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
     'statické HTML startuje s viditelnou clonou — úvod bez bliknutí');
   assert.ok(html.includes('@keyframes riseIn') && html.includes('.compass{animation:riseIn'),
     'panely vplouvají animací riseIn');
-  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
+  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
 });
 
 test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit/ČHMÚ',()=>{
@@ -1893,8 +1893,8 @@ test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit
     'volba pohledu se pamatuje v localStorage, nikam se neposílá');
   assert.ok(script.includes('function humanDur('),
     'lidský formát trvání existuje jako sdílený pomocník');
-  assert.ok(html.includes('.radseg') && html.includes('>v27<'),
-    'CSS segmentu je v šabloně, verze v27');
+  assert.ok(html.includes('.radseg') && html.includes('>v28<'),
+    'CSS segmentu je v šabloně, verze v28');
 });
 
 test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
@@ -1920,5 +1920,26 @@ test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
   assert.ok(rc.includes('Odsud déšť nečekej') && rc.includes('Intenzitu dopředu neodhadnu')
     && rc.includes('skoro stojí'),
     'vysvětlení v úzkém panelu jsou zkrácená (málo místa = kratší text)');
-  assert.ok(html.includes('>v27<'),'aktuální verze: v27');
+  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
+});
+
+test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start mobilu)',()=>{
+  /* Dave (21. 11., mobil): „Na mobilu se po prvním otevření nezobrazí
+     možnost přepnout radar. Až po vyhledání lokality jiné.“ Rychlý
+     start má radarové dlaždice ve SW cache → kompas se vykreslí hned,
+     ČHMÚ jede vlastním workerem a dorazí později — a nikdo kompas
+     znovu nepřekreslil, takže přepínač čekal na další příležitost
+     (až vyhledání jiné lokality přeložilo celý řetězec znovu).
+     Oprava: loadChmi po dosazení chmiState překreslí kompas hned,
+     stejně jako to dělá chybová větv (scheduleChmiRetry). */
+  const lc=fn('loadChmi');
+  assert.ok(lc.includes('renderCompass();'),
+    'loadChmi překreslí kompas, když ČHMÚ data dorazí (ne čekat na jinou příležitost)');
+  const lcAfter=lc.slice(lc.indexOf('chmiState = {'));
+  assert.ok(lcAfter.includes('renderCompass();') && lcAfter.indexOf('renderCompass();') < lcAfter.indexOf('recomputeWhen();'),
+    'překreslení kompasu patří za dosazením chmiState, spolu s přepočtem verdiktu');
+  const rc=fn('renderCompassBase');
+  assert.ok(rc.includes('radViewCur === "chmu" && chmiReady && chmiCells'),
+    'zdroj tvrdí ČHMÚ jen tehdy, když kompas opravdu kreslí jeho pole (jinak kompozit)');
+  assert.ok(html.includes('>v28<'),'aktuální verze: v28');
 });
