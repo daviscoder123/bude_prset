@@ -649,3 +649,25 @@ Změny:
 Testy: 5 nových v regresích (1 strukturní, 4 behaviorální) +
 aktualizace kola 17/18 (init používá geoStart) + browser test
 nové tlačítkové cesty. Celkem 151/151. Build 507 389 B.
+
+## Kolo 22 — rozklikávací radar ČHMÚ pryč: panel jako v době, kdy appka fungovala (21. 11.)
+Dave 20. 11. večer: „Co kdybys vrátil kód do doby, kdy to fungovalo.
+Tedy kdy nebyl radar ČHMÚ rozklikávací.“
+Rozbor historie ukázal dvě věci:
+1. Přepínač kompozit/ČHMÚ (kolo 14, přidáno 19. 11. na Daveův tehdejší
+   požadavek) je čistě vizuální zásah — u geolokace ani startu nic
+   nemění. Kolo 22 ho celý ruší: panel radar se vrací do podoby
+   z doby před ním (jediný pohled: kompozit RainViewer, mimo dosah
+   satelit), žádné tlačítko, žádný přepínatelný pohled ČHMÚ.
+   Hlasování ČHMÚ ve verdiktu (kolo 12) zůstává — jde o datovou
+   nohu na pozadí, ne o rozklikávací panel.
+2. Plné vrácení na stav kola 13 by oživilo chyby, které Dave sám
+   hlásil dál (kolo 16: „nenačítají se věci“, kolo 17: „nejede
+   zjišťování polohy“, kolo 18: „clona visí bez odezvy“). Geolokační
+   opravy kol 15–21 proto zůstávají — právě kolo 21 mění způsob,
+   jak iOS povolení k poloze vyžaduje (žádost z dotyku prstu).
+   Verze v rohu: v22; service worker v7 → v8 (vynucená aktualizace
+   i u nainstalované PWA).
+Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
+(funkce přepínače už neexistují), kolo 15 strukturní test upraven.
+Celkem 149/149. Build 500 799 B.
