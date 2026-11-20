@@ -739,7 +739,7 @@ html.compact table{border-spacing:1.5px}
 
 <div id="offlineBar">Jsi offline — zobrazená data můžou být stará</div>
 <div id="status" class="show"><div><span class="pulse">●</span><br>Zjišťuji tvou polohu…</div></div>
-<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v30</div>
+<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v31</div>
 
 <script>
 "use strict";
@@ -5599,6 +5599,70 @@ function wireRadSeg(el){
     renderCompass();
   });
 }
+/* KOLO 31 (Dave, 20. 11.: „když přepínám radar, tak chci jiný popisek
+   podle dat daného radaru“): pohled ČHMÚ měl od kola 26 jiné POZADÍ
+   (1×1 km pole národního radaru) a jiný src řádek, ale verdikt a
+   věta pod ním pořád pocházely z kompozitní geometrie. Kompas kreslil
+   národní radar a slova přitom citovala cizí mozaiku („Tě mine.
+   Prolétne 39 km V od tebe…“). Tady se popisek počítá z dat radaru,
+   který je zrovna vybraný: nejbližší echo z reálných buněk 1×1 km
+   pole, čas důchodu z COTREC osy (extrapolace provozovatele sítě),
+   intenzita jen s načtenou legendou (kolo 8ba: bez škály se čísla
+   nevyhánějí). Pozemní pravda (kolo 12) platí i tady: stanice měří
+   srážky pod prahem echa → verdikt to přizná, nechá vypadat, že
+   u uživatele nic není. Vrací {cls, verd, expl} nebo null. */
+function chmiNarrative(cells){
+  var S = chmiState;
+  if(!S || S === "off" || S === "error" || !cells || !cells.length) return null;
+  /* Pojmenování intenzity jen z ověřené legendy; jinak se přidá nic. */
+  var sil = function(o){
+    if(!S.scale || o == null) return "";
+    return o >= 0.75 ? "silné " : o >= 0.4 ? "středně silné " : "slabé ";
+  };
+  /* Nejbližší buňka reálného pole k uživateli (e/n v km, rkm je
+     poloměr bloku, takže hraniční dotyk se počítá od kraje echa). */
+  var best = null;
+  for(var i=0;i<cells.length;i++){
+    var c = cells[i], d = Math.sqrt(c.e*c.e + c.n*c.n) - (c.rkm || 0);
+    if(!best || d < best.d) best = {d:d, e:c.e, n:c.n, o:c.o};
+  }
+  best.d = Math.max(1, Math.round(best.d));
+  var bestTxt = sil(best.o) + "echo <b>" + best.d + " km "
+    + smer8(best.e, best.n) + "</b> od tebe";
+  /* Echo přímo nad tebou: hit; COTREC řekne, jak dlouho vydrží. */
+  if(S.nowWet){
+    var odchod = (S.steps && S.steps.length && !S.steps[0].wet) ? S.steps[0].dt : null;
+    return { cls:"hit", verd:"Právě nad tebou.",
+      expl:sil(S.nowOrd) + "echo radaru ČHMÚ je přímo nad tebou"
+        + (odchod != null
+           ? ", COTREC čeká jeho konec za ~<b>" + odchod + " min</b>."
+           : (S.steps && S.steps.length
+              ? ", COTREC ho drží nad tebou celou další hodinu." : ".")) };
+  }
+  /* Kolo 12 i v tomhle pohledu: stanice měří, radar nevidí → pravda
+     z pozorování, ne „nic u tebe“. */
+  if(stanicePotvrzujeSelf()){
+    return { cls:"hit", verd:"Nad tebou mrholí.",
+      expl:"Stanice měří slabé srážky, které se pod práh echa radaru"
+         + " ČHMÚ ztrácí; jeho nejbližší " + bestTxt + "." };
+  }
+  /* COTREC čeká srážky u tebe → příchod z osy provozovatele sítě. */
+  if(S.first){
+    return { cls:"hit", verd:"Přiletí k tobě.",
+      expl:"Nejbližší " + bestTxt + "; COTREC národního radaru čeká"
+         + " srážky u tebe za ~<b>" + S.first.dt + " min</b>." };
+  }
+  /* Kroky jsou, ale žádný mokrý: národní radar na hodinu mlčí. */
+  if(S.steps && S.steps.length){
+    return { cls:"miss", verd:"Nic do hodiny.",
+      expl:"Nejbližší " + bestTxt + ", ale COTREC do +60 min srážky"
+         + " u tebe nečeká. Odsud déšť nečekej." };
+  }
+  /* Bez extrapolace se slibovat čas nedá. */
+  return { cls:"miss", verd:"Echo v dosahu.",
+    expl:"Nejbližší " + bestTxt + "; bez COTREC kroků ale odhad"
+       + " příchodu u tebe nedám." };
+}
 function renderCompassBase(){
   var el = document.getElementById("compass");
   if(!el) return;
@@ -5851,6 +5915,21 @@ function renderCompassBase(){
                : " Jedno výraznější echo kompozitu (" + C.distKm + " km "
                + C.bearingFrom + ") tam dál stojí."));
     src += " · kompozit mlčí, pravdu říká pozorování";
+  }
+  /* KOLO 31 (Dave, 20. 11.): v pohledu ČHMÚ musí popisek mluvit daty
+     radaru, který je vybraný. Verdikt a věta pod ním se přepočítají
+     z pole 1×1 km a COTREC osy národního radaru (chmiNarrative);
+     elipsa a trajektorie zůstávají vizuálním doplňkem z kompozitu,
+     protože pohyb buňky se počítá z kompozitní osy. Přepis přijde
+     až za pozemní pravdou (kolo 12), ale chmiNarrative tuhle vrstvu
+     ošetřuje taky: stanice nad tebou měří i tehdy, když národní
+     radar echo nevidí. */
+  if(!viaSat && radViewCur === "chmu" && chmiReady && chmiCells){
+    var n31 = chmiNarrative(chmiCells);
+    if(n31){
+      verd = n31.verd; expl = n31.expl; cls = n31.cls;
+      src += " · popisek z tohoto radaru (pole 1×1 km + COTREC)";
+    }
   }
   svg += '</svg>';
   /* KOLO 25/26: stejný obsah se nepřepisuje (guard proti probliknutí);
