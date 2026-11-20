@@ -576,3 +576,24 @@ hlášku, ale samo nehlásilo nic. Opravy:
 - ruční volba obce (pick) vypíná i nové pojistné časovače.
 Testy: 3 nové (1 strukturní, 2 behaviorální, vykonávají acquirePosition
 v izolovaném kontextu), celkem 141/141. Build 500 678 B.
+
+## Kolo 19 — konec ping-pongu lokalit: nula přenačtení na stejném místě (20. 11.)
+Dave 20. 11. odpoledne: „První načtení to načte správně a při druhém se
+ta poloha opět načítá. To bude nějaký hlubší problém.“ Změřeno na
+skutečném kódu v izolovaném kontextu: uložená přesná GPS lokalita P,
+hrubý Wi-Fi fix W vzdálený 2,9 km (v budově běžné) — tehdejší logika
+přenačetla na W vše (viditelné „Stahuji předpovědi modelů…“), přesná
+fáze vzápětí přehodila lokalitu zpět na P (d(P,P') = 13 m, přesto DVĚ
+přenačtení) a uložená lokalita se přehazela sem a tam při KAŽDÉM
+dalším otevření. Opravy:
+- pouzij: HRUBÝ fix nikdy sám nepřenačítá, ať je od načtené lokality
+  kdekoli — jen požádá přesnou fázi (upresni), která rozhodne
+  spravedlivě; PŘESNÝ fix (accuracy do 150 m) přenačte jen při pohybu
+  nad 1 km od načtené lokality,
+- upresni: přesný fix srovnává s NAČTENOU lokalitou (cur), ne s hrubou
+  kotvou — zmizelo i druhé, dřív zbytečné tiché přenačtení,
+- skutečné přesunutí o kilometry se proježí právě jedním přenačtením
+  (testovaný scénář 3,4 km).
+Měření po opravě: stejný scénář druhého otevření nyní vyvolá 0
+přenačtení. Testy: 3 nové (1 strukturní, 2 behaviorální), celkem
+144/144. Build 501 780 B.

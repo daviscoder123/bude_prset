@@ -2839,9 +2839,19 @@ function acquirePosition(silent){
        přesná fáze (upresni) sama rozhodne, kdy se uživatel doopravdy
        pohnul (tam je tentýž 1km práh na přesnějších souřadnicích). */
     var manualFresh = manualPickAt && (Date.now() - manualPickAt < 5*60*1000);
-    if(cur && !manualFresh && distKm(cur.lat, cur.lon, lat, lon) < 1){
-      if(!jePresna) upresni(lat, lon, silent);
-      return;
+    /* KOLO 19 (Dave 20. 11. odpoledne: „první načtení načte správně,
+       při druhém se poloha opět načítá“): fix ping-pong, změřeno na
+       skutečném kódu: uložená P (přesné GPS) a hrubý Wi-Fi fix W 2,9 km
+       daleko → start přenačetl vše na W, přesná fáze vzápětí zpět na P
+       (d(P,P') = 13 m, přesto DVĚ přenačtení), uložená lokalita se tak
+       házela sem a tam při každém otevření. Lék: HRUBÝ fix nikdy sám
+       nepřenačítá, ať je od načtené lokality kdekoli — jen požádá
+       přesnou fázi, která rozhodne spravedlivě (přesný fix proti
+       uložené lokalitě). PŘESNÝ fix přenačte, jen když je od načtené
+       lokality dál než 1 km (uživatel se doopravdy pohnul). */
+    if(cur && !manualFresh){
+      if(!jePresna){ upresni(lat, lon, silent); return; }
+      if(distKm(cur.lat, cur.lon, lat, lon) < 1) return;
     }
     pojmenujMisto(lat, lon).then(function(o){
       if(silent && !curFromGeo) return;      /* uživatel mezitím zvolil obec ručně */
@@ -2946,7 +2956,13 @@ function upresni(hrubaLat, hrubaLon, silent){
   geoRefineT = setTimeout(function(){
     navigator.geolocation.getCurrentPosition(function(p){
       if(!curFromGeo) return;                /* mezitím ruční volba */
-      var d = distKm(hrubaLat, hrubaLon, p.coords.latitude, p.coords.longitude);
+      /* KOLO 19: srovnávej přesný fix s NAČTENOU lokalitou (cur), ne
+         s hrubou kotvou — jinak se appka přenačítala i tehdy, když
+         přesný fix sedl těsně na místo, které už je načtené (to bylo
+         druhé z obou přenačtení v měření kola 19). Bez načtené
+         lokality zůstává kotvou hrubý fix jako dřív. */
+      var aLat = cur ? cur.lat : hrubaLat, aLon = cur ? cur.lon : hrubaLon;
+      var d = distKm(aLat, aLon, p.coords.latitude, p.coords.longitude);
       if(d < 1) return;                      /* posun pod kilometr nic nezmění */
       curFromGeo = true;
       pojmenujMisto(p.coords.latitude, p.coords.longitude).then(function(o){
