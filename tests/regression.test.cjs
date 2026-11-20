@@ -1537,3 +1537,91 @@ test('kolo 18: behaviorálně — visící hrubá fáze: pojistka 17 s otevře p
     'po 100 s čekání končí hláškou — nikdy němou clonou');
   assert.equal(noGeoCalls[0].code,3);
 });
+
+test('kolo 19: hrubý fix nepřenačítá, rozhoduje přesný proti uložené lokalitě',()=>{
+  /* Dave 20. 11. odpoledne: „první načtení načte správně a při druhém
+     se poloha opět načítá — hlubší problém“. Změřeno na skutečném kódu:
+     uložená přesná lokalita P, hrubý Wi-Fi fix W 2,9 km daleko → DVĚ
+     přenačtení (na W a zase zpět), a při každém dalším otevření znovu.
+     Strukturální pojistky kola 19: */
+  const ap=fn('acquirePosition');
+  assert.ok(ap.includes('if(!jePresna){ upresni(lat, lon, silent); return; }'),
+    'hrubý fix načtenou lokalitu NIKDY nepřenačte, jen požádá přesnou fázi');
+  assert.ok(ap.includes('if(distKm(cur.lat, cur.lon, lat, lon) < 1) return;'),
+    'přesný fix přenačte jen při pohybu nad 1 km');
+  assert.ok(fn('upresni').includes('cur ? cur.lat : hrubaLat'),
+    'přesná fáze srovnává s NAČTENOU lokalitou, ne s hrubou kotvou');
+});
+
+test('kolo 19: behaviorálně — druhé otevření na stejném místě: nula přenačtení (konec ping-pongu)',async()=>{
+  /* Vykonaná simulace Daveova telefonu: uložená přesná lokalita P
+     (50.0750, 14.4150), hrubý Wi-Fi fix W 2,9 km daleko, přesný fix P'
+     13 m od uložené. Kolo 18 dělalo DVĚ přenačtení; kolo 19 musí dělat
+     NULU — uživatel se nepohnul, tak se nesmí přenačíst vůbec nic. */
+  const P={lat:50.0750,lon:14.4150}, W={lat:50.1010,lon:14.4200}, P2={lat:50.0751,lon:14.4151};
+  const timers=[], loads=[], statusMsgs=[]; let gpCall=0;
+  const c=context(['acquirePosition','upresni','geoWatchStop','distKm','skladejNazev'],{
+    navigator:{geolocation:{
+      getCurrentPosition:(ok)=>{
+        gpCall++;
+        ok({coords: gpCall===1
+          ? {latitude:W.lat, longitude:W.lon, accuracy:350}
+          : {latitude:P2.lat, longitude:P2.lon, accuracy:20}});
+      },
+      watchPosition:()=>7, clearWatch:()=>{}
+    }},
+    clearTimeout:()=>{},
+    setTimeout:(f,delay)=>{ timers.push({f,delay}); return timers.length; },
+    geoRefineT:null, geoHintT:null, geoWatchId:null,
+    geoCoarseT:null, geoFailT:null, geoFailShown:false,
+    lastJ:{nacteno:true}, cur:{lat:P.lat,lon:P.lon,name:'Praha 5, Praha, CZ'},
+    curFromGeo:false, manualPickAt:0,
+    status:(m)=>{ statusMsgs.push(m); },
+    pojmenujMisto:()=>Promise.resolve({district:'Praha 5',city:'Praha',cc:'CZ'}),
+    load:(place,silent)=>{ loads.push({place,silent}); }, noGeo:()=>{}
+  });
+  c.acquirePosition(false);                    /* hrubá fáze přinesla W */
+  await new Promise(r=>setTimeout(r,10));      /* pojmenujMisto().then by byl starý reload */
+  timers.filter(t=>t.delay===400).forEach(t=>t.f());   /* přesná fáze přinesla P' */
+  await new Promise(r=>setTimeout(r,10));
+  assert.equal(loads.length,0,
+    'na stejném místě se nepřenačtuje NIC (původně 2 přenačtení: ' +
+    'load na W ' + (50.1010).toFixed(4) + ' a zpět na P\')');
+  assert.equal(statusMsgs.filter(m=>String(m).includes('Stahuji')).length,0,
+    'uživatel nevidí žádné „Stahuji předpovědi modelů…“');
+});
+
+test('kolo 19: behaviorálně — skutečné přesunutí o kilometry: přenačtení proběhne',async()=>{
+  /* Obranná strana opravy: když se uživatel doopravdy přesune (přesný
+     fix 3,4 km od uložené lokality), aplikace musí lokalitu přehodit. */
+  const P={lat:50.0750,lon:14.4150};            /* uložená: Praha 5 */
+  const N={lat:50.1030,lon:14.3900};            /* nová: ~3,4 km daleko */
+  const timers=[], loads=[]; let gpCall=0;
+  const c=context(['acquirePosition','upresni','geoWatchStop','distKm','skladejNazev'],{
+    navigator:{geolocation:{
+      getCurrentPosition:(ok)=>{
+        gpCall++;
+        ok({coords: gpCall===1
+          ? {latitude:N.lat, longitude:N.lon, accuracy:500}   /* hrubý fix už u nové adresy */
+          : {latitude:N.lat, longitude:N.lon, accuracy:20}});
+      },
+      watchPosition:()=>7, clearWatch:()=>{}
+    }},
+    clearTimeout:()=>{},
+    setTimeout:(f,delay)=>{ timers.push({f,delay}); return timers.length; },
+    geoRefineT:null, geoHintT:null, geoWatchId:null,
+    geoCoarseT:null, geoFailT:null, geoFailShown:false,
+    lastJ:{nacteno:true}, cur:{lat:P.lat,lon:P.lon,name:'Praha 5, Praha, CZ'},
+    curFromGeo:false, manualPickAt:0,
+    status:()=>{},
+    pojmenujMisto:()=>Promise.resolve({district:null,city:'Praha',cc:'CZ'}),
+    load:(place,silent)=>{ loads.push({place,silent}); }, noGeo:()=>{}
+  });
+  c.acquirePosition(false);
+  await new Promise(r=>setTimeout(r,10));
+  timers.filter(t=>t.delay===400).forEach(t=>t.f());
+  await new Promise(r=>setTimeout(r,10));
+  assert.equal(loads.length,1,'přesun se projeví právě jedním přenačtením');
+  assert.equal(loads[0].place.lat.toFixed(4),N.lat.toFixed(4),
+    'aplikace skončí na nové poloze, ne na uložené');
+});
