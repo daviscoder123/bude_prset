@@ -315,7 +315,15 @@ html.compact .ensrow{font-size:9px;margin-top:4px}
 .when .until b{color:var(--rain)}
 
 /* ---------- RADAROVÝ KOMPAS ---------- */
-.compass{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(8px,1.4vh,14px);display:flex;flex-wrap:wrap;gap:clamp(8px,1vw,14px);align-items:center;overflow:hidden}
+/* KOLO 27 (Dave, PC Líšeň, snímek: „nesedí ty věci do těch polí…
+   radar vždy vycentrovat, případně zmenšit“): starý desktopový flex s
+   wrapem stavěl cifernák a text vedle sebe; v úzkém panelu (aside měří
+   jen 210–310 px) dostal sloupec textu zbylých ~60–90 px a vysvětlení
+   se lámalo slovo od slova. Nově panel vede do sloupce jako na mobilu
+   (kolo 8w fix4): label s přepínačem v jedné řádce nahoře, cifernák
+   vždy centrovaný (menší, ať text níž zbyde místo), vysvětlení a
+   zdroj přes celou šířku pod ním — nikdy vedle. */
+.compass{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:clamp(8px,1.4vh,14px);display:block;overflow:hidden;overflow-wrap:anywhere;hyphens:auto}
 .compass[hidden]{display:none}
 /* KOLO 25: panely vplouvají, ne vyskočí. Animace proběhne vždy, když se
    element objeví (display none → flex restartuje animaci) — při
@@ -343,9 +351,9 @@ html.compact .compass .ct{flex:none}
 html.compact .compass .ct .verd{font-size:calc(clamp(11.5px,3.2vw,13px)*var(--fit,1))}
 html.compact .compass .ct .expl{font-size:calc(clamp(9.5px,2.7vw,10.5px)*var(--fit,1))}
 html.compact .compass .ct .src{font-size:calc(clamp(8px,2.2vw,9px)*var(--fit,1))}
-.compass .label{flex:0 0 100%;font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-.compass svg{flex:none}
-.compass .ct{min-width:0;flex:1}
+.compass .label{display:flex;align-items:center;gap:8px;width:100%;font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.compass svg{display:block;width:clamp(78px,10vh,102px);height:clamp(78px,10vh,102px);margin:6px auto 8px}
+.compass .ct{width:100%;min-width:0}
 .compass .ct .verd{font-weight:800;font-size:clamp(11px,1.65vh,14px);letter-spacing:-.01em}
 .compass .ct .verd.hit{color:var(--rain)}
 .compass .ct .verd.miss{color:var(--nat)}
@@ -384,7 +392,7 @@ footer{display:flex;justify-content:space-between;align-items:center;font-family
 /* KOLO 26: přepínač pohledu radaru (Kompozit / ČHMÚ) v panelu Radar.
    Malý segment vedle labelu; aktivní tlačítko dešťová modř, přechody
    0,2 s (plynulost z kola 25 platí dál). */
-.radseg{display:inline-flex;gap:2px;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:7px;padding:2px;margin-left:8px;vertical-align:middle}
+.radseg{display:inline-flex;gap:2px;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:7px;padding:2px;margin-left:auto;vertical-align:middle}
 .radseg button{background:none;border:none;color:var(--muted);font-family:var(--sans);font-weight:700;font-size:clamp(8px,1.2vh,9.5px);padding:3px 9px;border-radius:5px;cursor:pointer;opacity:.75;transition:background .2s,color .2s,opacity .2s}
 .radseg button.on{background:var(--rain-deep);color:#fff;opacity:1}
 .radseg button:not(.on):hover{color:var(--text)}
@@ -731,7 +739,7 @@ html.compact table{border-spacing:1.5px}
 
 <div id="offlineBar">Jsi offline — zobrazená data můžou být stará</div>
 <div id="status" class="show"><div><span class="pulse">●</span><br>Zjišťuji tvou polohu…</div></div>
-<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v26</div>
+<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v27</div>
 
 <script>
 "use strict";
@@ -5618,7 +5626,7 @@ function renderCompassBase(){
     if(gtPendingHas("radar")){
       el.hidden = false;
       htmlIfChanged(el, '<div class="label">Radar</div>'
-        + '<svg viewBox="0 0 100 100" width="clamp(86px,15vh,120px)" height="clamp(86px,15vh,120px)" aria-hidden="true">'
+        + '<svg viewBox="0 0 100 100" width="clamp(78px,10vh,102px)" height="clamp(78px,10vh,102px)" aria-hidden="true">'
         + '<circle cx="50" cy="50" r="46" fill="rgba(255,255,255,.03)" stroke="rgba(255,255,255,.25)" stroke-width=".8"/>'
         + '<circle cx="50" cy="50" r="15.3" fill="none" stroke="rgba(255,255,255,.14)" stroke-width=".7"/>'
         + '<circle cx="50" cy="50" r="30.7" fill="none" stroke="rgba(255,255,255,.14)" stroke-width=".7"/>'
@@ -5640,7 +5648,7 @@ function renderCompassBase(){
     if(km < C.reachKm) rings += '<circle cx="50" cy="50" r="' + (km/C.reachKm*RE).toFixed(1)
       + '" fill="none" stroke="rgba(255,255,255,.14)" stroke-width=".7"/>';
   });
-  var svg = '<svg viewBox="0 0 100 100" width="clamp(86px,15vh,120px)" height="clamp(86px,15vh,120px)" aria-hidden="true">'
+  var svg = '<svg viewBox="0 0 100 100" width="clamp(78px,10vh,102px)" height="clamp(78px,10vh,102px)" aria-hidden="true">'
     + '<circle cx="50" cy="50" r="46" fill="rgba(255,255,255,.03)" stroke="rgba(255,255,255,.25)" stroke-width=".8"/>'
     + rings
     + '<text x="50" y="9.5" text-anchor="middle" font-size="7" fill="rgba(255,255,255,.6)">S</text>'
@@ -5688,7 +5696,7 @@ function renderCompassBase(){
       if(radarTimeline[ti].dt > 60) break;
       if(radarTimeline[ti].mmh >= 0.1){
         recon = " Radarová osa ale čeká " + (radarTimeline[ti].mmh >= 0.2 ? "déšť" : "slabé srážky")
-              + " za ~<b>" + radarTimeline[ti].dt + " min</b> — nejspíš se staví nová buňka nad tebou.";
+              + " za ~<b>" + radarTimeline[ti].dt + " min</b> — nejspíš nová buňka nad tebou.";
         break;
       }
     }
@@ -5718,7 +5726,7 @@ function renderCompassBase(){
         expl += " Silnější buňka <b>" + C.distKm + " km " + C.bearingFrom + "</b> přiletí za ~<b>"
               + (C.etaMin <= 60 ? C.etaMin + " min" : (Math.round(C.etaMin/6)/10) + " h") + "</b>.";
       else if(C.geo === "over" && C.leaveMin != null && C.speedKmh > 0)
-        expl += " Pole odchází k " + C.heading + " — u tebe to odezní za ~<b>" + C.leaveMin + " min</b>.";
+        expl += " Pole odchází k " + C.heading + " — odezní za ~<b>" + C.leaveMin + " min</b>.";
       else if(C.geo === "standing")
         expl += " Nejsilnější buňka <b>" + C.distKm + " km " + C.bearingFrom + "</b> stojí — tohle je jinde.";
     } else if(C.state === "hit"){
@@ -5732,11 +5740,11 @@ function renderCompassBase(){
       var etaTxt = C.etaMin <= 60 ? "~" + C.etaMin + " min" : "~" + (Math.round(C.etaMin/6)/10) + " h";
       expl = "Nejsilnější echo <b>" + C.distKm + " km " + C.bearingFrom
         + "</b> od tebe letí <b>" + C.speedKmh + " km/h</b> k " + C.heading
-        + " — nad tebou za <b>" + etaTxt + "</b>";
+        + ", nad tebou za <b>" + etaTxt + "</b>";
       if(C.hiMin > C.loMin && C.hiMin !== C.etaMin) expl += " (" + C.loMin + "–" + C.hiMin + ")";
       expl += mmh != null
-        ? ". U tebe čekám ~<b>" + fmtMM(mmh) + " mm/h</b>" + snowTxt + "."
-        : ". Intenzitu takhle daleko dopředu už neumím odhadnout.";
+        ? ". U tebe ~<b>" + fmtMM(mmh) + " mm/h</b>" + snowTxt + "."
+        : ". Intenzitu dopředu neodhadnu.";
     } else if(C.state === "over"){
       verd = "Právě nad tebou."; cls = "hit";
       expl = "Echo je přímo nad tebou, ~<b>" + fmtMM(C.mmh) + " mm/h</b>" + snowTxt + ".";
@@ -5744,8 +5752,8 @@ function renderCompassBase(){
     } else if(C.state === "miss"){
       verd = "Tě mine."; cls = "miss";
       expl = "Prolétne <b>" + C.missKm + " km " + C.missBearing + "</b> od tebe";
-      if(C.etaMin > 0) expl += ", nejbližší průlet za ~<b>" + C.etaMin + " min</b>";
-      expl += ". Z tohohle echa u tebe déšť nečekám" + (C.heading ? " — jde to k " + C.heading : "") + "." + recon;
+      if(C.etaMin > 0) expl += ", nejbližší za ~<b>" + C.etaMin + " min</b>";
+      expl += ". Odsud déšť nečekej" + (C.heading ? " — jde to k " + C.heading : "") + "." + recon;
       /* Přerušovaná trať k nejbližšímu bodu průletu + značka tam. */
       var mx2 = px(C.pe), my2 = py(C.pn);
       svg += '<line x1="' + ex.toFixed(1) + '" y1="' + ey.toFixed(1) + '" x2="' + mx2.toFixed(1)
@@ -5753,7 +5761,7 @@ function renderCompassBase(){
         + '<circle cx="' + mx2.toFixed(1) + '" cy="' + my2.toFixed(1) + '" r="1.6" fill="rgba(255,255,255,.55)"/>';
     } else { /* standing: ani pole, ani buňka se nepohybují */
       verd = "Ta buňka k tobě nedoletí."; cls = "miss";
-      expl = "Echo <b>" + C.distKm + " km " + C.bearingFrom + "</b> od tebe se prakticky nepohybuje"
+      expl = "Echo <b>" + C.distKm + " km " + C.bearingFrom + "</b> skoro stojí"
         + (C.speedKmh > 0 ? " (~" + C.speedKmh + " km/h)" : "")
         + " — k tobě za hodinu nedojde." + recon;
     }
@@ -5800,10 +5808,12 @@ function renderCompassBase(){
   }
   svg += '</svg>';
   /* KOLO 25/26: stejný obsah se nepřepisuje (guard proti probliknutí);
-   se vypsaným segmentem přijde i jeho posluchač. */
+   se vypsaným segmentem přijde i jeho posluchač. KOLO 27: segment
+   patří dovnitř labelu (label je flex, margin-left:auto ho přitiskne
+   k pravému okraji) - vedle labelu zabíral vlastní řádek. */
   if(htmlIfChanged(el,
-    '<div class="label">' + (viaSat ? "Satelit" : "Radar") + '</div>'
-    + radViewSeg(radViewCur, !viaSat && chmiReady) + svg
+    '<div class="label">' + (viaSat ? "Satelit" : "Radar")
+    + radViewSeg(radViewCur, !viaSat && chmiReady) + '</div>' + svg
     + '<div class="ct"><div class="verd ' + cls + '">' + verd + '</div>'
     + '<div class="expl">' + expl + '</div>'
     + '<div class="src">' + src + '</div></div>')){
