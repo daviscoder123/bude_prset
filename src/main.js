@@ -942,6 +942,13 @@ function fmtMM(v){
   var s = v.toFixed(2);
   return s === "0.00" ? "0" : s.replace(/0$/,"");
 }
+/* KOLO 26: lidský formát trvání ("5 h 25 min"), pro odhad času začátku
+   srážek z modelů, když jsou dál než hodina. */
+function humanDur(minM){
+  var h = Math.floor(minM/60), m = minM%60;
+  if(h <= 0) return m + " min";
+  return h + " h" + (m > 0 ? " " + m + " min" : "");
+}
 /* Fyzikální kontrolor: světové extrémy krátkodobé intenzity jsou ~120–300 mm/h.
    Cokoliv nad 150 mm/h nebo záporného/nečíselného je chyba dat → zahodit. */
 var MAX_SANE_MMH = 150;
@@ -4765,6 +4772,48 @@ function renderCompass(){
     if(komp) document.documentElement.classList.toggle("sKompasem", !komp.hidden);
   }
 }
+/* ================= KOLO 26: PŘEPÍNAČ POHLEDU RADARU =================
+   Dave (20. 11., PC): „Proč tam není to přepínání na ČHMÚ radar?“
+   Kolo 14 mělo rozklikávací pohled (tlačítko + vlastní pohled, obě
+   stará jména zůstávají pohřbena), kolo 22 ho na Daveův tehdejší
+   požadavek pohřbilo, kolo 25 nakreslilo
+   pole ČHMÚ do jediného pohledu. Dave chce přepínač zpět — nová
+   implementace tedy používá NOVÁ jména (stará zůstávají pohřbena,
+   strukturní test kol 22/26 to hlídá) a respektuje plynulost kola 25:
+   přepnutí překreslí jeden panel, žádné skoky, žádné rozkliknutí.
+   Volba se pamatuje v localStorage (bpRadarView: „chmu“/nic), nikam
+   se neposílá. ČHMÚ je dostupné jen s čerstvým snímkem (do 45 min,
+   stejné pravidlo jako hlasování ve verdiktu) a v dosahu českého
+   radaru; jinak se přepínač nezobrazí a panel zůstává u kompozitu. */
+function radView(){
+  try{ return localStorage.getItem("bpRadarView") === "chmu" ? "chmu" : "kompozit"; }
+  catch(e){ return "kompozit"; }
+}
+function setRadView(v){
+  try{ if(v === "chmu") localStorage.setItem("bpRadarView","chmu");
+       else localStorage.removeItem("bpRadarView"); }catch(e){}
+}
+function radViewSeg(view, chmiReady){
+  if(!chmiReady) return "";   /* bez čerstvého ČHMÚ se nic nepřepíná */
+  return '<div class="radseg" id="radSeg">'
+    + '<button type="button" data-rad="kompozit"'
+    +   (view === "kompozit" ? ' class="on"' : '') + '>Kompozit</button>'
+    + '<button type="button" data-rad="chmu"'
+    +   (view === "chmu" ? ' class="on"' : '') + '>ČHMÚ</button>'
+    + '</div>';
+}
+function wireRadSeg(el){
+  var seg = el.querySelector("#radSeg");
+  if(!seg || seg._bpWired) return;
+  seg._bpWired = true;
+  seg.addEventListener("click", function(ev){
+    var t = ev.target;
+    var b = (t && t.closest) ? t.closest("button[data-rad]") : null;
+    if(!b) return;
+    setRadView(b.getAttribute("data-rad"));
+    renderCompass();
+  });
+}
 function renderCompassBase(){
   var el = document.getElementById("compass");
   if(!el) return;
@@ -4786,14 +4835,14 @@ function renderCompassBase(){
   }
   var viaSat = (radarCoverage === "none" && imergCompass) && !radarCompass;
   var C = viaSat ? imergCompass : radarCompass;
-  /* KOLO 25: čerstvé pole národního radaru ČHMÚ (1 km na pixel, výřez
-     ±48 km, uložené v chmiState.field od kola 15). Kreslí se VÝRAZNĚ
-     přes kompozit jako primární produkt pohledu; globální kompozit
-     zůstává jemným pozadím, takže obraz nezmizí za hranicí českého
-     radaru. Rozklikávací tlačítko se nevrací (kolo 22) — jediný pohled
-     bez přepínání je zároveň pohyb bez skoků. */
+  /* KOLO 26: pole ČHMÚ (1 km na pixel, ±48 km, chmiState.field od
+     kola 15) se kreslí jen v pohledu ČHMÚ; kompozit má svůj pohled
+     jemný (kolo 15). Přepínač je nad kreslením, volba se pamatuje. */
   var chmiCells = (chmiState && chmiState !== "off" && chmiState !== "error"
                    && chmiState.field && chmiState.field.length) ? chmiState.field : null;
+  var chmiReady = !!(chmiState && chmiState !== "off" && chmiState !== "error"
+                     && chmiState.ageMin != null && chmiState.ageMin <= 45);
+  var radViewCur = (chmiReady && !viaSat) ? radView() : "kompozit";
   /* KOLO 11: selhání radaru NESMÍ být tiché. Dřív kompas prostě zmizel
      a Dave (18. 11.) musel hádat, jestli „radar nic nevidí“, nebo
      „radar spadl“. Teď je na místě kompasu vidět, co se stalo —
@@ -4865,14 +4914,16 @@ function renderCompassBase(){
     + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF"/>';
   /* KOLO 15: za středem se vykreslí REÁLNÉ pole srážek z posledního
      snímku — jemné, ať elipsa buňky a trajektorie zůstanou hlavní. */
-  if(!viaSat && radarField && radarField.length){
-    svg += compassFieldSvg(radarField, C.reachKm, false)
-         + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF" stroke="rgba(255,255,255,.6)" stroke-width=".6"/>';
-  }
-  /* KOLO 25: pole ČHMÚ nad kompozit — výraznější alfa (forChmi=true),
-     tečka pozice se kreslí znovu, ať zůstane čitelná nad poli. */
-  if(!viaSat && chmiCells){
+  /* KOLO 26: dva pohledy. „Kompozit“ kreslí globální pole jemně
+     (kolo 15); „ČHMÚ“ kreslí národní 1×1 km pole výrazně a kompozitové
+     tečky potlačí, aby se obě pole neslila v nečitelný shluk. Elipsa
+     a trajektorie zůstávají v obou: pohyb buňky je počítán z
+     kompozitní osy a je to stejný verdikt, jen jiné pozadí. */
+  if(!viaSat && radViewCur === "chmu" && chmiCells){
     svg += compassFieldSvg(chmiCells, C.reachKm, true)
+         + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF" stroke="rgba(255,255,255,.6)" stroke-width=".6"/>';
+  } else if(!viaSat && radarField && radarField.length){
+    svg += compassFieldSvg(radarField, C.reachKm, false)
          + '<circle cx="50" cy="50" r="2.4" fill="#A8E4FF" stroke="rgba(255,255,255,.6)" stroke-width=".6"/>';
   }
   var verd = "", expl = "", cls = "";
@@ -4884,8 +4935,11 @@ function renderCompassBase(){
   if(!viaSat && radarState && radarState !== "error" && radarState.ageMin != null) src += " · snímek " + Math.round(radarState.ageMin) + " min";
   if(C.motionSrc === "drift") src += " · pohyb z dráhy buňky";
   if(C.motionSrc === "field7") src += " · pohyb z jemného zoomu (0,8 km/px)";
-  if(!viaSat && chmiCells && chmiState.ageMin != null)
-    src += " · pole radaru ČHMÚ 1×1 km, snímek " + chmiState.ageMin + " min";
+  if(!viaSat && radViewCur === "chmu" && chmiReady){
+    src = "radar ČHMÚ · PseudoCAPPI 2 km · 1×1 km · snímek " + Math.round(chmiState.ageMin) + " min"
+      + (C.motionSrc === "drift" ? " · pohyb z dráhy buňky (kompozit)"
+         : C.motionSrc === "field7" ? " · pohyb z jemného zoomu (kompozit)" : "");
+  }
   /* REKONCILIACE: když geometrie říká „mine/stojí“, ale vlastní radarová
      osa (advekce + růst pole) práh překročí, spor se nezamlčí — přiletá
      jiná (nová) buňka, ne ta naměřená. Přesně ten rozpor z pravého
@@ -5010,13 +5064,16 @@ function renderCompassBase(){
     src += " · kompozit mlčí, pravdu říká pozorování";
   }
   svg += '</svg>';
-  /* KOLO 25: stejný obsah se nepřepisuje (guard proti probliknutí);
-   změna přijde, až když se něco doopravdy změnilo. */
-  htmlIfChanged(el,
-    '<div class="label">' + (viaSat ? "Satelit" : "Radar") + '</div>' + svg
+  /* KOLO 25/26: stejný obsah se nepřepisuje (guard proti probliknutí);
+   se vypsaným segmentem přijde i jeho posluchač. */
+  if(htmlIfChanged(el,
+    '<div class="label">' + (viaSat ? "Satelit" : "Radar") + '</div>'
+    + radViewSeg(radViewCur, !viaSat && chmiReady) + svg
     + '<div class="ct"><div class="verd ' + cls + '">' + verd + '</div>'
     + '<div class="expl">' + expl + '</div>'
-    + '<div class="src">' + src + '</div></div>');
+    + '<div class="src">' + src + '</div></div>')){
+    wireRadSeg(el);
+  }
   el.hidden = false;
 }
 /* Vícesnímkový odhad rychlosti postupu srážek — medián z několika párů
@@ -6528,7 +6585,8 @@ function soloArtKind(){
     return (mmh != null && mmh < 0.6) ? "drizzle" : "rain";
   }
   if(W && W.mode === "maybe") return "drizzle";
-  if(W && (W.mode === "soon" || (W.mode === "model" && W.etaMin != null && W.etaMin < 90)))
+  if(W && (W.mode === "soon" || W.mode === "later"
+           || (W.mode === "model" && W.etaMin != null && W.etaMin < 90)))
     return boure ? "storm" : "soon";
 
   /* Neprší. Když modely déšť během výhledu čekají, je pod mrakem —
@@ -6882,15 +6940,19 @@ function renderSolo(){
   }
 
   /* ================= 3. DÉŠŤ SE BLÍŽÍ =================
-     (kolo 8bb: nebo SNÍH SE BLÍŽÍ — podle typu slibované srážky) */
-  if(W && (W.mode === "soon" || (W.mode === "model" && W.etaMin != null && W.etaMin < 90))){
+     (kolo 8bb: nebo SNÍH SE BLÍŽÍ — podle typu slibované srážky)
+     (kolo 26: mode „later“ = modely čekají srážky dál než hodinu
+     se silnou shodou — mobil říká tentýž čas jako panel Kdy) */
+  if(W && (W.mode === "soon" || W.mode === "later"
+           || (W.mode === "model" && W.etaMin != null && W.etaMin < 90))){
     box.classList.add("soon");
     var snihSoon = !!(W.type && /sněž|sníh|sněh/i.test(W.type.t));
     pill.textContent = snihSoon ? "Verdikt · sníh se blíží" : "Verdikt · déšť se blíží";
     var m = Math.round(W.etaMin == null ? 30 : W.etaMin);
     big.innerHTML = m <= 0 ? "Každou chvíli"
-      : m < 60 ? ("za " + m + " min")
-      : ("za " + Math.floor(m/60) + " h " + (m%60 ? (m%60)+" min" : ""));
+      : m < 60 ? (W.mode === "later" ? "od " + fmtHr(W.at) : "za " + m + " min")
+      : (W.mode === "later" ? "od " + fmtHr(W.at) + " <small>(" + humanDur(m) + ")</small>"
+         : "za " + Math.floor(m/60) + " h " + (m%60 ? (m%60)+" min" : ""));
     if(word) word.textContent = W.mmh == null ? "Slabé srážky"
       : snihSoon
         ? (W.mmh >= 4 ? "Vydatné sněžení" : W.mmh >= 1 ? "Mírné sněžení" : "Slabé sněžení")
@@ -9159,15 +9221,52 @@ function recomputeWhen(){
     var vidici = [];
     if(radOk) vidici.push("radar");
     if(mcOk) vidici.push("minutecast");
-    big.className = "big none";
-    big.textContent = "Nic do hodiny";
-    sub.innerHTML = cap(vidici.join(" ani ")) + " v příští hodině nic nevidí."
-      + (chmiSaysDry() ? " Český radar také nevidí žádné echo." : "");
-    if($("whenLabel")) $("whenLabel").textContent = "Kdy začne pršet v horizontu 60 min";
-    srcEl.textContent = "zdroj: " + vidici.join(" + ")
-      + " · horizont 60 min · modely mluví v verdiktu" + sourceCaveat();
-    if($("whenUntil")) $("whenUntil").innerHTML = "";
-    whenState = {mode:"hour-dry", now: now};
+    /* KOLO 26 (Dave, snímek Jihlava: 89 % shody nahoře, dole jen
+       „Nic do hodiny“ — slabé; chci vědět kdy): když 60minutové
+       zdroje mlčí, ale modely mají SILNÝ signál později (za hranicí
+       hodiny souhlasí alespoň polovina), panel řekne odhadovaný čas
+       začátku. Kolo 9c zůstává v platnosti pro slabé signály: práh
+       50 % drží osamocené modely mimo hru. Špička agentur (ms.peak,
+       včetně předstihové váhy) má přednost, jinak tabulkový
+       konsensus s týmž práhem. */
+    var pk = null;
+    if(minM > 60){
+      if(ms.peak && ms.peak.idx >= 0 && ms.peak.prob >= 0.5){
+        pk = {t: ms.times[ms.peak.idx],
+              minM: Math.round((ms.times[ms.peak.idx].getTime() - now)/60000),
+              agreeTxt: ms.peak.count + "/" + ms.nAg,
+              pct: Math.round(ms.peak.prob*100),
+              mmh: ms.perHourMax[ms.peak.idx]};
+      } else if(pct >= 50){
+        pk = {t: ms.times[idx], minM: minM, agreeTxt: maxC + "/" + ms.N, pct: pct,
+              mmh: ms.perHourMax[idx]};
+      }
+    }
+    if(pk){
+      big.className = "big";
+      big.innerHTML = "od " + fmtHr(pk.t);
+      sub.innerHTML = cap(vidici.join(" ani ")) + " v příští hodině nic nevidí."
+        + (chmiSaysDry() ? " Český radar také nevidí žádné echo." : "")
+        + " Modely ale čekají srážky od <b>" + fmtHr(pk.t) + "</b> (za ~"
+        + humanDur(pk.minM) + ") — shoda <b>" + pk.agreeTxt + "</b> ("
+        + pk.pct + " %), ~" + fmtMM(pk.mmh) + " mm/h.";
+      if($("whenLabel")) $("whenLabel").textContent = "Kdy začne pršet";
+      srcEl.textContent = "zdroj: " + vidici.join(" + ")
+        + " (0–60 min) + modely (čas odhadu)" + sourceCaveat();
+      if($("whenUntil")) $("whenUntil").innerHTML = "";
+      whenState = {mode:"later", etaMin: pk.minM, now: now, at: pk.t,
+                   agree: pk.agreeTxt, pct: pk.pct, mmh: pk.mmh};
+    } else {
+      big.className = "big none";
+      big.textContent = "Nic do hodiny";
+      sub.innerHTML = cap(vidici.join(" ani ")) + " v příští hodině nic nevidí."
+        + (chmiSaysDry() ? " Český radar také nevidí žádné echo." : "");
+      if($("whenLabel")) $("whenLabel").textContent = "Kdy začne pršet v horizontu 60 min";
+      srcEl.textContent = "zdroj: " + vidici.join(" + ")
+        + " · horizont 60 min · modely mluví v verdiktu" + sourceCaveat();
+      if($("whenUntil")) $("whenUntil").innerHTML = "";
+      whenState = {mode:"hour-dry", now: now};
+    }
   } else {
     /* Výjimečný pád: radar nedostupný a minutecast bez dat. Panel nemá
        své zdroje — zbyde starý modelový odhad, jasně nahlášený. */
