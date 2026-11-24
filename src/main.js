@@ -4884,7 +4884,35 @@ function chmiNarrative(cells, short){
      pro tytéž situace; verdikt i klíčové údaje (vzdálenost, směr,
      čas) zůstávají, škrtá se jen omáčka okolo. */
   var S = chmiState;
-  if(!S || S === "off" || S === "error" || !cells || !cells.length) return null;
+  if(!S || S === "off" || S === "error") return null;
+  /* KOLO 34 (Dave, 24. 11. 13:19: „Nejede prepinani na ČHMÚ radar.
+     Nic to neprepne."): na suchý den je pole 1×1 km prázdné, takže
+     stará podmínka `!cells.length → null` vypnula celý přepis popisku
+     a pohled ČHMÚ vypadal i mluvil stejně jako kompozit — přepínač
+     působil nefunkčně, i když data (sucho v ±48 km + suchá osa
+     COTREC) v ruce byla. Prázdné pole je taky informace: mluví se
+     z chmiState stejně jako u buněk, jen bez vzdálenosti, protože
+     kruh 48 km je sucho celý. */
+  if(!cells || !cells.length){
+    if(S.nowWet) return { cls:"hit", verd:"Právě nad tebou.",
+      expl: short ? "Nad tebou padá." : "Nad tebou padá, širší okolí se nepovedlo vykreslit." };
+    if(stanicePotvrzujeSelf()) return { cls:"hit", verd:"Nad tebou mrholí.",
+      expl: short ? "Mrholení vidí jen stanice, radar ne."
+        : "Stanice u tebe naměřila tak slabé srážky, že je radar"
+          + " ještě nezachytí, ani v širším okolí." };
+    if(S.first) return { cls:"hit", verd:"Přiletí k tobě.",
+      expl: short ? "Podle radaru dorazí asi za <b>" + S.first.dt + " min</b>."
+        : "V širším okolí srážky nevidí, ale jeho předpověď říká,"
+          + " že k tobě dorazí asi za <b>" + S.first.dt + " min</b>." };
+    if(S.steps && S.steps.length) return { cls:"miss", verd:"Sucho okolo tebe.",
+      expl: short ? "Do 48 km žádný déšť a do hodiny nic nepřijde."
+        : "Národní radar v okruhu 48 km nevidí žádný déšť a jeho"
+          + " předpověď do hodiny žádný neslibuje." };
+    return { cls:"miss", verd:"Sucho okolo tebe.",
+      expl: short ? "Do 48 km žádný déšť."
+        : "Národní radar v okruhu 48 km nevidí žádný déšť; bez"
+          + " předpovědi čas příchodu neodhadnu." };
+  }
   /* Pojmenování intenzity jen z ověřené legendy; jinak se přidá nic. */
   var sil = function(o){
     if(!S.scale || o == null) return "";
@@ -5245,11 +5273,16 @@ function renderCompassBase(){
      až za pozemní pravdou (kolo 12), ale chmiNarrative tuhle vrstvu
      ošetřuje taky: stanice nad tebou měří i tehdy, když národní
      radar echo nevidí. */
-  if(!viaSat && radViewCur === "chmu" && chmiReady && chmiCells){
+  if(!viaSat && radViewCur === "chmu" && chmiReady){
     var n31 = chmiNarrative(chmiCells, narrow);
     if(n31){
       verd = n31.verd; expl = n31.expl; cls = n31.cls;
-      src += " · popisek z tohoto radaru";
+      /* KOLO 34: i bez buněk (sucho) pohled mluví daty ČHMÚ; src
+         přiznává, že cifernák kreslí kompozit, protože pole
+         1×1 km nemá co kreslit — viz kolo 28, řádka nelže o
+         tom, co uživatel vidí. */
+      src += " · popisek z tohoto radaru"
+           + (chmiCells ? "" : " (sucho do 48 km, cifra z kompozitu)");
     }
   }
   svg += '</svg>';
@@ -6139,14 +6172,29 @@ function chmiOrdinal(px){
   if(bestD > 3*45*45) return null;
   return chmiScale.length > 1 ? best/(chmiScale.length-1) : 0;
 }
+/* KOLO 34: ČHMÚ kreslí do datového PNG i dekorace — černý rám po
+   okrajích, texty vlevo nahoře a šedý panel vpravo (změřeno
+   24. 11. 12:10 UTC: 5984 černých a 1521 šedých pixelů; 23. 11.
+   12:10 UTC totožné ~5986/1521 → dekorace, ne data). Tyhle barvy
+   nejsou v srážkové škále (legenda dBZ nemá čistou černou ani
+   šedou 196/196/196), takže je nelze splést s echem: pixel se
+   počítá jako srážka jen tehdy, když se jeho barva podobá některé
+   barvě ověřené legendy. Bez legendy se vrací staré chování
+   (průhlednost a bílá jako jediné pásmo), aby modul nezůstal
+   slepý i na mokro. */
+function chmiEchoColor(p){
+  if(p[3] < 40) return false;
+  if(p[0]>245 && p[1]>245 && p[2]>245) return false;
+  if(chmiScale && chmiScale.length) return chmiOrdinal(p) != null;
+  return true;
+}
 /* Echo nad bodem: nejsilnější pixel výřezu. */
 function chmiReadPatch(patch){
   if(!patch) return null;
   var wet = false, ord = 0, seen = 0;
   for(var i=0;i<patch.px.length;i++){
     var p = patch.px[i];
-    if(p[3] < 40) continue;                                  /* průhledné = bez echa */
-    if(p[0]>245 && p[1]>245 && p[2]>245) continue;           /* podklad */
+    if(!chmiEchoColor(p)) continue;                        /* kolo 34: dekorace nejsou echo */
     seen++;
     wet = true;
     var o = chmiOrdinal(p);
@@ -6177,8 +6225,7 @@ function chmiReadNow(patch){
       var x = c+dx, y = c+dy;
       if(x < 0 || y < 0 || x >= n || y >= n) continue;
       var p = patch.px[y*n+x];
-      if(p[3] < 40) continue;                          /* průhledné = bez echa */
-      if(p[0]>245 && p[1]>245 && p[2]>245) continue;   /* podklad */
+      if(!chmiEchoColor(p)) continue;                      /* kolo 34: dekorace nejsou echo */
       seen++; wet = true;
       var o = chmiOrdinal(p);
       if(o != null && o > ord) ord = o;
@@ -6203,8 +6250,7 @@ function chmiFieldFromPatch(patch, reachKm, aggr){
         for(var yy=0; yy<ag && by+yy<n; yy++){
           for(var xx=0; xx<ag && bx+xx<n; xx++){
             var p = patch.px[(by+yy)*n + (bx+xx)];
-            if(p[3] < 40) continue;
-            if(p[0]>245 && p[1]>245 && p[2]>245) continue;
+            if(!chmiEchoColor(p)) continue;              /* kolo 34: rámy a texty PNG nejsou echo */
             seen++;
             var o = chmiOrdinal(p);
             if(o != null && o > ord) ord = o;
