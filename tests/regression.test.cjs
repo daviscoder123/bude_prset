@@ -1157,7 +1157,7 @@ test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
     'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
   assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
     'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
-  assert.ok(html.includes('>v33<'),'aktuální verze: v33');
+  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
@@ -1207,9 +1207,11 @@ test('kolo 15: modelové hlasy + měření běží → verdikt „ověřuji“, 
 
 test('kolo 15: chmiFieldFromPatch — severní blok se kreslí k severu, sucho je prázdné pole',()=>{
   /* patch 13×13 px (1 km/px), střed = uživatel; mokrý blok 3 px na sever,
-     alfa škála odrazí přes stub chmiOrdinal = červený kanál / 255. */
-  const c=context(['chmiFieldFromPatch','chmiReadNow'],
-    {chmiOrdinal:(px)=>px[3]>=40?px[0]/255:null});
+     alfa škála odrazí přes stub chmiOrdinal = červený kanál / 255.
+     KOLO 34: chmiFieldFromPatch/chmiReadNow čtou přes chmiEchoColor;
+     s chmiScale null se chová jako dřív (stub ordinál postačí). */
+  const c=context(['chmiFieldFromPatch','chmiReadNow','chmiEchoColor'],
+    {chmiOrdinal:(px)=>px[3]>=40?px[0]/255:null, chmiScale:null});
   const n=13, px=[];
   for(let y=0;y<n;y++) for(let x=0;x<n;x++){
     const wet = x>=3 && x<=5 && y>=3 && y<=5;   /* blok AGGR=3 severozápadně od středu */
@@ -1608,7 +1610,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v33<'),'aktuální verze: v33');
+  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1658,7 +1660,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v33<'),'aktuální verze: v33');
+  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
@@ -1777,7 +1779,7 @@ test('kolo 23: pojistka proti visícímu dotazu na oprávnění (3 s)',()=>{
     'havárie init() se vypíše na clonu, ne němá smrt skriptu');
   assert.ok(script.includes('geoPermTxt()'),
     'nápovědy clony nesou stav oprávnění (diagnostika z mobilu)');
-  assert.ok(html.includes('>v33<'),'aktuální verze: v33');
+  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
 });
 
 test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spustí žádost',async()=>{
@@ -1829,7 +1831,7 @@ test('kolo 24: start aplikace — init() až po všech deklaracích, load() null
     'init() běží až po deklaraci vyhledávacího pole (na konci skriptu)');
   assert.ok(script.slice(initCall).includes('catch'),
     'pojistka havárie z kola 23 (chyba na clonu) zůstává');
-  assert.ok(html.includes('>v33<'),'aktuální verze: v33');
+  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
 });
 
 test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
@@ -1863,7 +1865,7 @@ test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
     'statické HTML startuje s viditelnou clonou — úvod bez bliknutí');
   assert.ok(html.includes('@keyframes riseIn') && html.includes('.compass{animation:riseIn'),
     'panely vplouvají animací riseIn');
-  assert.ok(html.includes('>v33<'),'aktuální verze: v33');
+  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
 });
 
 test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit/ČHMÚ',()=>{
@@ -1894,8 +1896,8 @@ test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit
     'volba pohledu se pamatuje v localStorage, nikam se neposílá');
   assert.ok(script.includes('function humanDur('),
     'lidský formát trvání existuje jako sdílený pomocník');
-  assert.ok(html.includes('.radseg') && html.includes('>v33<'),
-    'CSS segmentu je v šabloně, verze v33');
+  assert.ok(html.includes('.radseg') && html.includes('>v34<'),
+    'CSS segmentu je v šabloně, verze v34');
 });
 
 test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
@@ -1921,7 +1923,7 @@ test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
   assert.ok(rc.includes('Odsud déšť nečekej') && rc.includes('Intenzitu dopředu neodhadnu')
     && rc.includes('skoro stojí'),
     'vysvětlení v úzkém panelu jsou zkrácená (málo místa = kratší text)');
-  assert.ok(html.includes('>v33<'),'aktuální verze: v33');
+  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
 });
 
 test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start mobilu)',()=>{
@@ -1942,7 +1944,7 @@ test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start 
   const rc=fn('renderCompassBase');
   assert.ok(rc.includes('radViewCur === "chmu" && chmiReady && chmiCells'),
     'zdroj tvrdí ČHMÚ jen tehdy, když kompas opravdu kreslí jeho pole (jinak kompozit)');
-  assert.ok(html.includes('>v33<'),'aktuální verze: v33');
+  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
 });
 
 test('kolo 29: široké rozpětí se hlásí jako časy dne, příčina se jmenuje',()=>{
@@ -1971,7 +1973,7 @@ test('kolo 29: široké rozpětí se hlásí jako časy dne, příčina se jmenu
     'mobilní solo panel mluví tentýmž jazykem (časy, ne „za 2 h 44 min“)');
   assert.ok(rs.includes('if(!winBig && W.lo != null'),
     'dodatek „mezi X. a Y. minutou“ se u časového okna neduplikuje');
-  assert.ok(html.includes('>v33<'),'aktuální verze: v33');
+  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
 });
 
 /* ==================== KOLO 30: VERDIKT ČEKÁ JEN NA POZOROVÁNÍ ==================== */
@@ -2039,7 +2041,7 @@ test('kolo 30: strukturální — čekání na pozorování, pojistná překresl
   assert.ok(script.includes('var GT_OBS'),
     'množina pozorovacích klíčů je pojmenovaná');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v19'),'service worker bump v17');
+  assert.ok(swSrc.includes('bude-prset-v20'),'service worker bump');
 });
 
 test('kolo 31: pohled ČHMÚ mluví daty národního radaru (Dave, 20. 11.)',()=>{
@@ -2108,10 +2110,10 @@ test('kolo 31: strukturální — přepínač radaru přepisuje i popisek',()=>{
   assert.ok(!nc.includes('Prolet')&&!nc.includes('Prolétne')
     &&!nc.includes('missKm')&&!nc.includes('speedKmh'),
     'chmiNarrative nepoužívá kompozitní geometrii');
-  assert.ok(html.includes('.radseg')&&html.includes('>v33<'),
-    'přepínač zůstává, verze v33');
+  assert.ok(html.includes('.radseg')&&html.includes('>v34<'),
+    'přepínač zůstává, verze v34');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v19'),'service worker bump v17');
+  assert.ok(swSrc.includes('bude-prset-v20'),'service worker bump');
 });
 
 test('kolo 32: popisek ČHMÚ je uživatelsky přívětivý (Dave, 20. 11.)',()=>{
@@ -2193,5 +2195,104 @@ test('kolo 33: úzký layout dostává stručné odpovědi (Dave, PC, 20. 11.)',
   assert.ok(script.includes('if(was !== NARROW.matches){ renderCompass();'),
     'přepnutí široký/úzký překreslí i kompas');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v19'),'service worker bump v19');
+  assert.ok(swSrc.includes('bude-prset-v20'),'service worker bump v19');
+});
+
+test('kolo 34: přepínač ČHMÚ se hlásí i při suchu, dekorace PNG nejsou echo (Dave, 24. 11.)',()=>{
+  /* Dave: „Nejede prepinani na ČHMÚ radar. Nic to neprepne.“ Na
+     suchý den je pole 1×1 km prázdné; stará podmínka (!cells.length
+     → null) vypnula přepis popisku, takže pohled ČHMÚ mluvil jako
+     kompozit a přepínač působil nefunkčně. Zároveň ČHMÚ nově kreslí
+     do datového PNG dekorace (24. 11.: 5984 černých + 1521 šedých
+     px, 23. 11. totožných 5986/1521), které legenda dBZ neobsahuje
+     a které by jinak založily falešné buňky. */
+  const SCALE=[[0,108,192],[0,160,0],[0,188,0],[52,216,0],[156,220,0],
+    [224,220,0],[252,176,0],[252,132,0],[252,88,0],[252,0,0],[160,0,0],
+    [0,0,252],[48,0,168],[56,0,112]].map(c=>({r:c[0],g:c[1],b:c[2]}));
+  const suchaOsa=[{dt:10,wet:false},{dt:20,wet:false},
+                  {dt:30,wet:false},{dt:40,wet:false}];
+  const c=context(['chmiNarrative','smer8'],{
+    KOMPAS_SMERY8:["S","SV","V","JV","J","JZ","Z","SZ"],
+    stanicePotvrzujeSelf:()=>false,
+    chmiState:{nowWet:false,nowOrd:0,ageMin:7,scale:14,first:null,
+      steps:suchaOsa}
+  });
+  /* Prázdné pole = sucho v okruhu 48 km, a to je v pohledu ČHMÚ
+     slyšet: verdikt i věta se změní proti kompozitu. */
+  const n0=c.chmiNarrative(null);
+  assert.equal(n0.verd,'Sucho okolo tebe.','prázdné pole je taky verdikt');
+  assert.equal(n0.cls,'miss','sucho bez příslibu = miss');
+  assert.ok(n0.expl.includes('48 km')&&n0.expl.includes('do hodiny'),
+    'věta říká, co vidí: kruh 48 km bez srážek a suchou předpověď');
+  assert.deepEqual(c.chmiNarrative([]).verd,'Sucho okolo tebe.',
+    'prázdné pole i explicitně prázdné pole buněk');
+  const n0s=c.chmiNarrative(null,true);
+  assert.ok(n0s.expl.length<n0.expl.length&&n0s.expl.includes('48 km'),
+    'úzký layout: kratší věta, údaj o okruhu zůstává');
+  /* Na sucho čekají srážky z COTREC osy → příchod se ohlásí. */
+  c.chmiState.first={dt:30,wet:true,ord:.5};
+  const prilet=c.chmiNarrative(null);
+  assert.equal(prilet.verd,'Přiletí k tobě.','COTREC hlásí příchod i bez buněk');
+  assert.ok(prilet.expl.includes('za <b>30 min</b>'),'čas z předpovědi radaru');
+  /* Mrholení pod prahem echa: stanice měří, radar nevidí. */
+  const cS=context(['chmiNarrative','smer8'],{
+    KOMPAS_SMERY8:["S","SV","V","JV","J","JZ","Z","SZ"],
+    stanicePotvrzujeSelf:()=>true,
+    chmiState:{nowWet:false,nowOrd:0,ageMin:7,scale:14,first:null,
+      steps:[{dt:10,wet:false}]}
+  });
+  const mrholi=cS.chmiNarrative(null);
+  assert.equal(mrholi.verd,'Nad tebou mrholí.',
+    'pozemní pravda z kola 12 i bez buněk');
+  assert.equal(mrholi.cls,'hit');
+  /* Filtr dekorací: černý rám/text i šedý panel nejsou barvy
+     škály, skutečné echo ano; bez legendy se chová jako dřív. */
+  const f=context(['chmiEchoColor','chmiOrdinal','chmiReadNow',
+                   'chmiReadPatch','chmiFieldFromPatch'],{chmiScale:SCALE});
+  assert.equal(f.chmiEchoColor([0,0,0,255]),false,'černý rám není echo');
+  assert.equal(f.chmiEchoColor([196,196,196,255]),false,'šedý panel není echo');
+  assert.equal(f.chmiEchoColor([0,108,192,255]),true,'barva škály je echo');
+  assert.equal(f.chmiEchoColor([4,104,190,255]),true,
+    'i mírně posunutá barva echa projde prahem legendy');
+  assert.equal(f.chmiEchoColor([0,0,0,10]),false,'průhledné není echo');
+  const bez=context(['chmiEchoColor'],{chmiScale:null});
+  assert.equal(bez.chmiEchoColor([0,0,0,255]),true,
+    'bez legendy se vrací staré chování (jen průhlednost/podklad)');
+  /* Výřez plný černé dekorace: 0 buněk, střed 3×3 suchý. */
+  const px=[];
+  for(let i=0;i<97*97;i++) px.push([0,0,0,255]);
+  const cerna=f.chmiFieldFromPatch({n:97,x0:338,y0:273,ux:386,uy:321,px},48,3);
+  assert.ok(Array.isArray(cerna)&&cerna.length===0,
+    'výřez z černého rámu/netextu nepřinese jedinou buňku');
+  const rNow=f.chmiReadNow({n:97,px});
+  assert.equal(rNow.wet,false,'černý střed neznamená déšť');
+  assert.equal(rNow.pixels,0,'dekorace se nepočítá do viděných pixelů');
+  const rPatch=f.chmiReadPatch({n:97,px});
+  assert.equal(rPatch.wet,false,'stejně tak širší výřez (COTREC kroky)');
+  /* Jediný skutečný echo pixel v suchém výřezu = jediná buňka. */
+  px[48*97+51]=[56,0,112,255];
+  const pole=f.chmiFieldFromPatch({n:97,x0:338,y0:273,ux:386,uy:321,px},48,3);
+  assert.equal(pole.length,1,'skutečné echo v poli zůstane');
+  assert.equal(pole[0].o,1,'ordinál nejsilnější barvy škály');
+  /* Struktura: popisek se přepisuje i bez buněk, src přiznává
+     kompozitní kreslení; kolo 28 poctivost (CHMU tvrdí jen s poli)
+     zůstává. */
+  const rcb=fn('renderCompassBase');
+  assert.ok(rcb.includes('radViewCur === "chmu" && chmiReady){'),
+    'popisek ČHMÚ se přepisuje se čerstvým snímkem i bez buněk');
+  assert.ok(rcb.includes('sucho do 48 km, cifra z kompozitu'),
+    'src u sucha přiznává, že cifernák kreslí kompozit');
+  assert.ok(rcb.includes('radViewCur === \"chmu\" && chmiReady && chmiCells'),
+    'src dál tvrdí ČHMÚ jen tehdy, když kreslí jeho pole (kolo 28)');
+  const nc=fn('chmiNarrative');
+  assert.ok(nc.includes('!cells || !cells.length'),
+    'chmiNarrative má větev pro prázdné pole');
+  assert.ok(nc.includes('chmiEchoColor')===false,
+    'narrativa nefiltruje sama, filtr patří do čtení patche');
+  const rf=fn('chmiFieldFromPatch');
+  assert.ok(rf.includes('chmiEchoColor(p)'),
+    'čtení pole počítá jen barvy ze škály legendy');
+  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
+  const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
+  assert.ok(swSrc.includes('bude-prset-v20'),'service worker v20');
 });

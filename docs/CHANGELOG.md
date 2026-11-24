@@ -672,6 +672,38 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 34 — sucho v pohledu ČHMÚ: přepínač se hlásí i bez buněk (24. 11.)
+
+Dave (mobil, 24. 11. 13:19): „Nejede prepinani na ČHMÚ radar. Nic to
+neprepne.“ Vyšetřeno na dnešním snímku: ČHMÚ publikuje sucho, pole
+1×1 km je prázdné a stará podmínka `chmiCells` vypnula celý přepis
+popisku, takže pohled ČHMÚ vypadal i mluvil stejně jako kompozit.
+Přepínač tak dal vidět jen podsvícený segment. Měření: dnešní PNG
+(12:10 UTC, 680×460) je z ~97 % průhledné; včerejší (23. 11. 12:10)
+nesl ~6 000 barevných pixelů srážek. Zároveň ČHMÚ nově kreslí do
+datového PNG dekorace: černý rám po okrajích, texty vlevo nahoře a
+šedý panel vpravo (5 984 černých a 1 521 šedých pixelů; 23. 11.
+totožných 5 986/1 521, tedy trvalá dekorace, ne data).
+
+Opravy:
+
+- Prázdné pole je taky verdikt: `chmiNarrative` umí pracovat bez
+  buněk a pohled ČHMÚ mluví daty národního radaru vždy: sucho
+  v okruhu 48 km („Sucho okolo tebe.“), příchod srážek do hodiny
+  z COTREC osy („Přiletí k tobě.“), mrholení potvrzené stanicí. Cifernák
+  zůstává kompozitní, pokud nemá co kreslit, a src řádek to říká
+  na rovinu („sucho do 48 km, cifra z kompozitu“).
+- Filtr dekorací (`chmiEchoColor`): pixel se počítá jako srážka jen
+  tehdy, když se jeho barva podobá barvě ověřené legendy dBZ; černý
+  rám, texty i šedý panel tak nemohou založit falešné buňky (dnes
+  by hrozily hlavně na severu Čech a Moravy). Bez legendy se chová
+  jako dřív, aby modul neoslepnul.
+- Krátké varianty všech nových vět pro úzký layout (kolo 33).
+
+Verze v rohu: v34; service worker v20. Testy: 165/165 (regrese 111,
+worker 54); nový test kola 34 asertuje suchý verdikt, filtr dekorací
+i strukturu přepínače.
+
 ## Kolo 33 — úzký layout: stručné odpovědi pro tytéž situace (20. 11.)
 
 Dave (PC): „Když zmenším rozložení okna, tak ten text je schovaný
