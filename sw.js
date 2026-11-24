@@ -4,7 +4,7 @@
    radar, geokódování) jdou vždy přímo na síť a NEcachují se zde —
    o úsporu dat se stará in-memory cache v aplikaci. Na pozadí SW
    nic nestahuje. */
-var CACHE = "bude-prset-v19"; /* kolo 33: bump vynuti SW update hned pri startu - novy kod se nasadi az kdyz appka jde do pozadice (kolo 25: zadny skok za chodu; bez bumpu muze PWA na iPhonu hodiny viset ve starem shellu) */
+var CACHE = "bude-prset-v20"; /* kolo 34: bump vynuti SW update hned pri startu - novy kod se nasadi az kdyz appka jde do pozadice (kolo 25: zadny skok za chodu; bez bumpu muze PWA na iPhonu hodiny viset ve starem shellu) */
 var SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", function(e){
