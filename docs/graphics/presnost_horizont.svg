@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="940" height="470" viewBox="0 0 940 470" role="img" aria-label="Úspěšnost a Brierovo skóre podle horizontu předpovědi">
 <rect x="0" y="0" width="940" height="470" rx="0" fill="#0A1017"/>
 <text x="28" y="40" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="18" fill="#E6EDF3" text-anchor="start" font-weight="600">Přesnost podle horizontu předpovědi</text>
-<text x="28" y="62" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#8CA0B3" text-anchor="start">práh rozhodnutí 50 % · 207 456 párů · okno 0–12 h · vygenerováno 24. 11. 2026 14:10 UTC</text>
+<text x="28" y="62" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#8CA0B3" text-anchor="start">práh rozhodnutí 50 % · 207 560 párů · okno 0–12 h · vygenerováno 25. 11. 2026 13:23 UTC</text>
 <line x1="78" y1="396.0" x2="862" y2="396.0" stroke="#1D2A38" stroke-width="1" stroke-linecap="round"/>
 <text x="66" y="400.0" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#8CA0B3" text-anchor="end">40</text>
 <line x1="78" y1="296.0" x2="862" y2="296.0" stroke="#1D2A38" stroke-width="1" stroke-linecap="round"/>
@@ -26,40 +26,40 @@
 <text x="32" y="70" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#A8E4FF" text-anchor="start" font-weight="600">úspěšnost (%)</text>
 <text x="908" y="70" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#FFD98E" text-anchor="end" font-weight="600">Brier (×100)</text>
 <rect x="65.0" y="126.0" width="26" height="270.0" rx="3" fill="#223349"/>
-<rect x="130.33333333333331" y="127.59898477157361" width="26" height="268.4010152284264" rx="3" fill="#223349"/>
-<rect x="195.66666666666666" y="129.13270485859317" width="26" height="266.8672951414068" rx="3" fill="#223349"/>
-<rect x="261.0" y="130.74800580130528" width="26" height="265.2519941986947" rx="3" fill="#223349"/>
-<rect x="326.3333333333333" y="132.3796229151559" width="26" height="263.6203770848441" rx="3" fill="#223349"/>
-<rect x="391.6666666666667" y="134.0112400290065" width="26" height="261.9887599709935" rx="3" fill="#223349"/>
-<rect x="457.0" y="135.6102248005801" width="26" height="260.3897751994199" rx="3" fill="#223349"/>
-<rect x="522.3333333333333" y="137.19289340101523" width="26" height="258.8071065989848" rx="3" fill="#223349"/>
-<rect x="587.6666666666666" y="138.82451051486584" width="26" height="257.17548948513416" rx="3" fill="#223349"/>
-<rect x="653.0" y="140.45612762871647" width="26" height="255.54387237128353" rx="3" fill="#223349"/>
-<rect x="718.3333333333334" y="142.08774474256708" width="26" height="253.91225525743292" rx="3" fill="#223349"/>
-<rect x="783.6666666666666" y="143.7193618564177" width="26" height="252.2806381435823" rx="3" fill="#223349"/>
-<rect x="849.0" y="145.3509789702683" width="26" height="250.6490210297317" rx="3" fill="#223349"/>
-<circle cx="78.0" cy="173.53202803964228" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="78.0" y="161.53202803964228" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">84 %</text>
-<circle cx="143.33333333333331" cy="173.44680851063828" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<circle cx="208.66666666666666" cy="173.31107850330153" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="208.66666666666666" y="161.31107850330153" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">85 %</text>
-<circle cx="274.0" cy="172.61315125791967" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<circle cx="339.3333333333333" cy="172.2827257535434" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="339.3333333333333" y="160.2827257535434" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">85 %</text>
-<circle cx="404.6666666666667" cy="172.85121753752256" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<circle cx="470.0" cy="172.00726862585378" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="470.0" y="160.00726862585378" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">85 %</text>
-<circle cx="535.3333333333333" cy="172.06228722733573" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<circle cx="600.6666666666666" cy="171.75180814617434" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="600.6666666666666" y="159.75180814617434" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">85 %</text>
-<circle cx="666.0" cy="171.30966670923254" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<circle cx="731.3333333333334" cy="171.2473975067472" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="731.3333333333334" y="159.2473975067472" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">85 %</text>
-<circle cx="796.6666666666666" cy="171.9927564351313" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<circle cx="862.0" cy="171.05533133706552" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
-<text x="862.0" y="159.05533133706552" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">85 %</text>
-<polyline points="78.0,173.53202803964228 143.33333333333331,173.44680851063828 208.66666666666666,173.31107850330153 274.0,172.61315125791967 339.3333333333333,172.2827257535434 404.6666666666667,172.85121753752256 470.0,172.00726862585378 535.3333333333333,172.06228722733573 600.6666666666666,171.75180814617434 666.0,171.30966670923254 731.3333333333334,171.2473975067472 796.6666666666666,171.9927564351313 862.0,171.05533133706552" fill="none" stroke="#A8E4FF" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
-<polyline points="78.0,259.5074981870921 143.33333333333331,259.8593726443769 208.66666666666666,260.17697725605285 274.0,261.3802251337885 339.3333333333333,261.70317014297206 404.6666666666667,261.7964077972224 470.0,262.8465743467636 535.3333333333333,262.72274366410284 600.6666666666666,263.2419413779977 666.0,263.78427276209936 731.3333333333334,265.0737848605578 796.6666666666666,265.4912145906092 862.0,266.8591277177451" fill="none" stroke="#FFD98E" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 5"/>
+<rect x="130.33333333333331" y="127.64654027291391" width="26" height="268.3534597270861" rx="3" fill="#223349"/>
+<rect x="195.66666666666666" y="129.19526627218937" width="26" height="266.8047337278106" rx="3" fill="#223349"/>
+<rect x="261.0" y="130.8255041661635" width="26" height="265.1744958338365" rx="3" fill="#223349"/>
+<rect x="326.3333333333333" y="132.45574206013765" width="26" height="263.54425793986235" rx="3" fill="#223349"/>
+<rect x="391.6666666666667" y="134.08597995411185" width="26" height="261.91402004588815" rx="3" fill="#223349"/>
+<rect x="457.0" y="135.716217848086" width="26" height="260.283782151914" rx="3" fill="#223349"/>
+<rect x="522.3333333333333" y="137.34645574206013" width="26" height="258.65354425793987" rx="3" fill="#223349"/>
+<rect x="587.6666666666666" y="138.97669363603427" width="26" height="257.02330636396573" rx="3" fill="#223349"/>
+<rect x="653.0" y="140.59062915106873" width="26" height="255.40937084893127" rx="3" fill="#223349"/>
+<rect x="718.3333333333334" y="142.22086704504287" width="26" height="253.77913295495713" rx="3" fill="#223349"/>
+<rect x="783.6666666666666" y="143.81850018113755" width="26" height="252.18149981886245" rx="3" fill="#223349"/>
+<rect x="849.0" y="145.39983093829247" width="26" height="250.60016906170753" rx="3" fill="#223349"/>
+<circle cx="78.0" cy="159.51889868373385" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="78.0" y="147.51889868373385" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">87 %</text>
+<circle cx="143.33333333333331" cy="159.39226049450218" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<circle cx="208.66666666666666" cy="159.17976292313332" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="208.66666666666666" y="147.17976292313332" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">87 %</text>
+<circle cx="274.0" cy="158.1541866469937" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<circle cx="339.3333333333333" cy="157.61078807373497" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="339.3333333333333" y="145.61078807373497" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">88 %</text>
+<circle cx="404.6666666666667" cy="157.71417901157724" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<circle cx="470.0" cy="156.597519729425" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="470.0" y="144.597519729425" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">88 %</text>
+<circle cx="535.3333333333333" cy="156.66431362662303" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<circle cx="600.6666666666666" cy="156.63681339591525" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="600.6666666666666" y="144.63681339591525" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">88 %</text>
+<circle cx="666.0" cy="156.70083615242226" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<circle cx="731.3333333333334" cy="156.67321898888673" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="731.3333333333334" y="144.67321898888673" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">88 %</text>
+<circle cx="796.6666666666666" cy="157.41314887840196" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<circle cx="862.0" cy="157.21519646109812" r="3.5" fill="#A8E4FF" stroke="#0A1017" stroke-width="1.5"/>
+<text x="862.0" y="145.21519646109812" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#E6EDF3" text-anchor="middle">88 %</text>
+<polyline points="78.0,159.51889868373385 143.33333333333331,159.39226049450218 208.66666666666666,159.17976292313332 274.0,158.1541866469937 339.3333333333333,157.61078807373497 404.6666666666667,157.71417901157724 470.0,156.597519729425 535.3333333333333,156.66431362662303 600.6666666666666,156.63681339591525 666.0,156.70083615242226 731.3333333333334,156.67321898888673 796.6666666666666,157.41314887840196 862.0,157.21519646109812" fill="none" stroke="#A8E4FF" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="78.0,284.0069894940225 143.33333333333331,284.4382577000182 208.66666666666666,284.8259538066724 274.0,286.5398008115087 339.3333333333333,287.09804775454654 404.6666666666667,287.7190688410308 470.0,288.8577978203683 535.3333333333333,288.76697592335813 600.6666666666666,288.57798046429025 666.0,288.6989519371928 731.3333333333334,289.0688456349971 796.6666666666666,288.93702243196066 862.0,289.2163075722092" fill="none" stroke="#FFD98E" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 5"/>
 <text x="874" y="400.0" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#8CA0B3" text-anchor="start">0</text>
 <text x="874" y="340.0" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#8CA0B3" text-anchor="start">5</text>
 <text x="874" y="280.0" font-family="ui-sans-serif, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="11" fill="#8CA0B3" text-anchor="start">10</text>
