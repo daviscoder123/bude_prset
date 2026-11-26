@@ -129,6 +129,23 @@ váhy pozorovacích zdrojů klesnou (radar ×0,70, nowcasty ×0,80–0,90) a mod
 posílí (×1,5). Jakmile se pro daný zdroj a režim nahromadí vlastní měření, prior
 ustupuje a přebírají naučené křivky.
 
+**Horský terén (kolo 35, měřeno 12.–26. 11. 2026):** v nadmořské výšce ≥ 700 m
+ensemble ztrácí dvojnásobek dovednosti oproti Open-Meteo (Brier ens−pp na
+stejných párech: hory +0,018 vs nížina +0,010; 9 669 horských párů), zatímco
+minutecast má naopak nejnižší falešné poplachy právě v horách (FAR 0,21).
+Výšku lokality appka zná z geokódu (`placeElev`): v horách jde váha ensemblu
+v blendu ×0,85 a radarová rodina zdrojů ×1,1, a pravděpodobnost verdiktu se
+počítá ze symetrického průměru ens×OM (viz §5).
+
+**Ocas za oknem (kolo 35):** měřené Brierovy křivky jsou ploché déle, než
+končí osmihodinové okno — pravděpodobnosti Open-Meteo až do 13. hodiny
+(0,124–0,128), ensemble do 9. hodiny (0,122–0,128). Když uvnitř okna nikdo
+déšť nehlásí, ale za hranicí ano (≥ 30 %), panel „Kdy začne pršet" to připojí:
+„Za hranicí okna ale ensemble/Open-Meteo vidí déšť mezi N. a N+1. hodinou."
+Handover podle měření: hodinu právě za oknem nese ensemble (podíl členů
+v 9. hodině), hodiny 9.–12. potom Open-Meteo (řada pp se stahuje až do
+13. hodiny). Práh 30 % drží slabé signály mimo panel.
+
 ## 5. Pravděpodobnosti
 
 Aplikace nikdy neukáže „50 %" bez rozmyslu — rozlišuje, **čí** procento to je:
@@ -141,8 +158,13 @@ Aplikace nikdy neukáže „50 %" bez rozmyslu — rozlišuje, **čí** procento
   Open-Meteo ho **nikdy nesníží**; hlásí-li OM více, jde verdikt jen na
   **polovinu cesty** k němu: `max(ens; (ens+om)/2)` (kolo 8z3: na 726 oknových
   párech falešné poplachy 30→11, úspěšnost 91,3→92,6 %, Brier 0,0593→0,0579).
-  Bez obou zdrojů zůstane škála podle počtu souhlasících modelů (2 zdroje = 0,7,
-  ani ne „skoro jistě").
+  **Výjimka hory (kolo 35):** v nadmořské výšce ≥ 700 m ensemble měřeně
+  ztrácí 2× dovednost, proto se verdikt staví na **symetrickém průměru**
+  `(ens+om)/2` — OM smí ensemble i skorigovat dolů. Zrcadlení zdroje
+  (`verdictProbSrc`) to drží krokem: v horách nese verdikt „mix" vždy,
+  když OM něco říká, ať se Brierova kalibrace učí na tom, co skutečně
+  tvrdí. Bez obou zdrojů zůstane škála podle počtu souhlasících modelů
+  (2 zdroje = 0,7, ani ne „skoro jistě").
 - **„Šance do N minut":** procento členů ensemblu, jejichž čas začátku spadá do
   hlášeného rozpětí — vztahuje se k tomu, co věta slibuje, ne k celému oknu.
 - **„V obci vs. někde do ~11 km":** při konvekci rozdíl desítky procent bodů
@@ -184,6 +206,15 @@ flowchart LR
 ```
 
 - **Klíč** `raw/YYYYMMDDHH:mm`, TTL 14 dní — plné okno pro zpětná testování.
+- **Ensemble (kolo 35):** rotace **per město** — město je způsobilé v UTC
+  hodinách, kde `(townHash(jméno)+hodina)%3===0` (právě 8 z 24 denně, vždy
+  po 3 h, fáze podle jména). Napříč městy je tak pokrytá každá hodina
+  denního cyklu; rozpočet beze změny 7 200 volání kvóty/den < 10 000.
+  Způsobilost nese záznam v `ensT` (1/0), takže analýza ví, kterým obcím
+  ensemble mohl nadřízeně chybět. icon_d2 se sbírá jen uvnitř změřeného
+  polygonu domény (jižní hrana je křivka s vrcholem 43,67°N při 10°E;
+  Nice a Split selhávají jižním rohem mřížky 3×3) — ven z polygonu jde
+  rovnou kaskáda od icon_eu.
 - **METAR:** hromadný dotaz na celý dílek (1 subrequest), zpráva se parsuje
   včetně pravidla z opravy #23 — jevy z trendových skupin TEMPO/BECMG (předpověď
   vývoje, ne pozorování) se do aktuálního počasí nezapočítávají.
