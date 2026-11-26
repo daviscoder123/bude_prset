@@ -1220,6 +1220,18 @@ var THRESH = THRESH_BASE;
    radar ukazuje déšť přímo nad hlavou. */
 var THRESH_OBS = THRESH_BASE;
 
+/* KOLO 35 (měřeno 12.–26. 11. 2026, 214 010 párů minutecast×pozorování ze
+   sběrače): práh THRESH_OBS pro minutecast JE na optimální hodnotě a
+   měřeně ho nic nezlepší. Hodnoty minutely_15 srážek jsou kvantovány
+   po 0,1 mm/15 min, takže prahy 0,025–0,1 mm/15 min (0,1–0,4 mm/h)
+   dávají IDENTICKÚ kontingenci (POD 0,52–0,53, FAR 0,21–0,25, bias
+   0,66–0,70, přesnost 0,86), a práh ≥0,15 mm/15 min už POD propadne na
+   0,31. Snížení prahu tedy nic nevydělá (pod kvantizačním patrem nejsou
+   žádná data) a zvýšení jen ukradne zásahy. Podměrný bias 0,70 se
+   neopravuje prahem, ale handoverem za hranici hodiny (ensemble/modely
+   v blendu) — viz KOLO 35 v blendWeights. */
+
+
 /* Práh pro KONEC deště. Nižší než práh začátku: frontální mrholení
    0,1–0,2 mm/h reálně kape, takže "skončilo v 15:20" by u něj byla lež.
    Konec se hlásí, až intenzita spadne pod 0,12 mm/h — a vydrží tam
@@ -1233,6 +1245,17 @@ var HOURS = 8;
    déšť měl začít v 00:00, tedy na samém okraji okna, a appka na to hlásila
    nesmysl o srážkách přes celé okno. Data se tahají na 24 h, zobrazuje se 8. */
 var HOURS_END = 24;
+
+/* KOLO 35: ocas za 8h oknem. Verdikt i tabulka zůstávají na 8 hodinách
+   (to je slib appky), ale panel „Kdy začne pršet“ po suchém okně může
+   poctivě dodat, co zdroje vidí ZA hranicí: ensemble do 9. hodiny,
+   Open-Meteo pravděpodobnost 9.–12. hodiny. Změřeno na sběrači
+   (12.–26. 11. 2026): Brier pravděpodobnosti je plochý až do 13. h
+   (0,124–0,128), ensemble drží 0,122–0,128 do 9. h — za hranicí okna
+   tedy zdroje NEMLČÍ, jen dosud appka nedovolila, aby to řekly.
+   Handover zdrojů v ocasu zrcadlí měřenou přesnost: do 9. h ensemble,
+   nad tím Open-Meteo. */
+var HOURS_TAIL = 12;
 
 /* ================= KALIBRACE PROCENT =================
    Převodní klíč mezi tím, co appka tvrdí (podíl modelů nad prahem),
@@ -1329,10 +1352,53 @@ function ensembleFromJson(j, nHours){
   }
   return {members: center, all: all, perHour: perHour};
 }
+/* KOLO 35 (měřené 12.–26. 11. 2026, 31 191 záznamů sběrače + živé sondy
+   Open-Meteo ensemble API): doména icon_d2 na Open-Meteo NENÍ obdélník
+   43,2–58,1°N × 3,9–20,3°E, ale rotovaný čtyřúhelník. Ze 100 sbíraných
+   obcí starý box 28 z nich posílal do zákonitého neúspěchu (icon_d2
+   vrací 400 "No data is available for this location"): Krakov, Lodž,
+   Katovice, Budapešť, Pécs, Kecskemét, Žilina, Sliač, Poprad, Bělehrad,
+   Nice a Split (u Nice/Split selhává až JIŽNÍ ROH mřížky 3×3 −0,1° šířky,
+   celý 9bodový dotaz tedy padá i když centrum samo by prošlo).
+   Každý takový pokus stojí subrequest (appka) i kvótu (sběrač) a stejně
+   skončí kaskádou na icon_eu. Živé sondy hranic (26. 11. 2026, bisekce,
+   každý bod 2× ověřen, 429 odlišeny od "No data"):
+   východní hrana ~18,74°E při 50,5°N a ~19,43°E při 54°N (stoupá na
+   sever), jižní hrana je KŘIVKA: 43,53°N při 5°E, vrchol 43,67°N při
+   10°E, 43,58°N při 13°E, 43,45°N při 16,3°E (první přímka přes ji
+   pustila Nice a Split zpátky dovnitř), sever ~58,1°N, západ ~−2,7°E.
+   Empirický polygon (šikmé hrany + 0,12° rezerva na roh mřížky):
+   lonMax(lat) ≈ 18,6 + 0,19·(lat−50,5), latMin(lon) po úsecích viz
+   ensD2Ok. Kontrola na všech 100 sbíraných obcích: všech 72 obcí,
+   kde icon_d2 REÁLNĚ data dal (vč. Gdaňsku 18,47°E a Balatonu),
+   zůstává uvnitř včetně rohů mřížky; všech 28 prokázaných selhání
+   padá ven. Kaskáda na icon_eu zůstává jako pojistka, polygon jen
+   ruší pokusy předem odsouzené k nezdar. */
+function ensD2Ok(lat, lon){
+  if(lon < -2.4 || lat > 57.8) return false;
+  /* Jižní hrana NENÍ přímka, ale křivka rotované mřížky (bisekce
+     živými sondami 26. 11. 2026, každý bod 2× ověřen): 43,53°N při 5°E,
+     stoupá k vrcholu 43,67°N při 10°E, klesá k 43,58°N při 13°E a
+     43,45°N při 16,3°E. Původní přímka pustila Nice (43,66°N/7,22°E)
+     a Split (43,54°N/16,3°E), kterým padá JIŽNÍ ROH mřížky 3×3
+     (−0,1° šířky) těsně pod hranu: Nice 43,56 < 43,60, Split 43,44 <
+     43,45. Kontrola na všech 100 sbíraných obcích (14 dní měření):
+     72 obcí s reálným icon_d2 uvnitř, všech 28 selhání ven, rohy
+     mřížky zahrnuty. */
+  var latMin;
+  if(lon <= 7.22) latMin = 43.53 + 0.033*(lon - 5);
+  else if(lon <= 10) latMin = 43.60 + 0.025*(lon - 7.22);
+  else if(lon <= 13) latMin = 43.67 - 0.030*(lon - 10);
+  else latMin = 43.58 - 0.038*(lon - 13);
+  if(lat < latMin + 0.12) return false;
+  var lonMax = 18.6 + 0.19*(lat - 50.5);
+  if(lon > lonMax - 0.2) return false;
+  return true;
+}
 function ensembleCandidates(lat, lon){
   var c = [];
   /* ICON-D2 EPS — 20 členů, 2,2 km, střední Evropa (včetně celé ČR) */
-  if(lat>=43.2 && lat<=58.1 && lon>=-3.9 && lon<=20.3)
+  if(ensD2Ok(lat, lon))
     c.push({id:"icon_d2", n:"ICON-D2 EPS", res:"2,2 km"});
   /* ICON-EU EPS — 40 členů, 7 km */
   if(lat>=29.5 && lat<=70.5 && lon>=-23.5 && lon<=45)
@@ -1359,10 +1425,13 @@ function loadEnsemble(lat, lon, myId){
       "latitude=" + pts.map(function(p){ return p[0]; }).join(",")
       + "&longitude=" + pts.map(function(p){ return p[1]; }).join(",")
       + "&hourly=precipitation&models=" + M.id
-      + "&forecast_hours=" + (HOURS+1) + "&timezone=auto"), 900000)
+      + "&forecast_hours=" + (HOURS+2) + "&timezone=auto"), 900000)
       .then(function(j){
         if(isStale(myId)) return;
-        var parsed = ensembleFromJson(j, HOURS);
+        /* KOLO 35: parsuje se o hodinu navíc (HOURS+1 = 9. hodina),
+           ať ocas za oknem (tailRainAfterWindow) má co říct z ensemblu.
+           Verdikt, špička i „šance do N minut“ čtou jen indexy < HOURS. */
+        var parsed = ensembleFromJson(j, HOURS+1);
         if(!parsed || !parsed.members || parsed.members.length < 5) throw new Error("členy bez dat");
 
         var pk = peakConsensus(parsed.members, HOURS);
@@ -1377,7 +1446,7 @@ function loadEnsemble(lat, lon, myId){
            arrivalů i pro "šance do N minut".
            null = ten člen déšť v okně nehlásí. */
         var onsets = parsed.members.map(function(m){
-          for(var h=0; h<HOURS; h++){
+          for(var h=0; h<HOURS+1; h++){
             if(m.cvals[h] != null && m.cvals[h] >= THRESH) return h*60;
           }
           return null;
@@ -2303,6 +2372,18 @@ function brierCalib(p01, src){
    nic z toho není (ensemble nedostupný), zbyde škála podle počtu zdrojů,
    které se na čase shodly — bedlivě pod 1, protože jeden zdroj není
    žádná jistota. */
+/* KOLO 35: horská korekce. Výška bodu přijde zdarma z forecast odpovědi
+   (placeElev, blok B); nad 700 m n.m. jde o hornatý terén ve smyslu
+   sběračem naměřeného horšího chování ensemblu (Innsbruck, Samedan,
+   Sion, Bolzano, Poprad…: ens Brier 0,147 vs 0,123 v nížině) a naopak
+   nejčistšího minutecastu (FAR 0,21 vs 0,24–0,31 jinde). Výška chybí
+   (null) = terén neznám, korekce se nepoužije — konzervativní cesta. */
+function isMountain(){
+  /* typeof pojistka: funkce se vytahuje i samostatně (regresní testy
+     ji vytrhají z kontextu), čtení nedeklarované placeElev by hodilo
+     ReferenceError; v appce je placeElev vždy deklarovaná (var nahoře). */
+  return typeof placeElev !== "undefined" && placeElev != null && placeElev >= 700;
+}
 function verdictProb(agree, obsN){
   var p = null;
   if(ensState && typeof ensState.prob === "number") p = ensState.prob/100;
@@ -2311,7 +2392,7 @@ function verdictProb(agree, obsN){
   if(p == null && ensState && ensState !== "off" && ensState !== "error"
      && ensState.onsets && ensState.onsets.length){
     var n = 0;
-    ensState.onsets.forEach(function(o){ if(o != null && o <= HOURS*60) n++; });
+    ensState.onsets.forEach(function(o){ if(o != null && o < HOURS*60) n++; });
     p = n / ensState.onsets.length;
   }
   if(probSeries && probSeries.length){
@@ -2330,7 +2411,16 @@ function verdictProb(agree, obsN){
        Brier 0,0593→0,0579, stabilně v obou polovinách okna dat. */
     if(om > 0){
       var q = om/100;
-      p = (p == null) ? q : Math.max(p, (p + q)/2);
+      /* KOLO 35 (hory): v nadmořské výšce ≥ 700 m ensemble měřeně ztrácí
+         dvojnásobek dovednosti oproti pravděpodobnosti Open-Meteo
+         (Brier ens−pp na stejných párech: hory +0,018 vs nížina +0,010;
+         9 669 horských párů, 12.–26. 11. 2026, sběrač). Praha pravidla
+         kola 8z3 („OM nikdy nesníží ensemble“) tam proto neplatí —
+         v horách se verdikt staví na SYMETRICKÉM průměru obou zdrojů,
+         OM smí ensemble i skorigovat dolů. V nížině a na pobřeží
+         zůstává měřené pravidlo kola 8z3 beze změny. */
+      p = (p == null) ? q
+        : (isMountain() ? (p + q)/2 : Math.max(p, (p + q)/2));
     }
   }
   if(p != null) return Math.max(0.05, Math.min(0.98, p));
@@ -2353,7 +2443,7 @@ function verdictProbSrc(){
   else if(ensState && ensState !== "off" && ensState !== "error"
           && ensState.onsets && ensState.onsets.length){
     var n = 0;
-    ensState.onsets.forEach(function(o){ if(o != null && o <= HOURS*60) n++; });
+    ensState.onsets.forEach(function(o){ if(o != null && o < HOURS*60) n++; });
     ep = Math.round(100*n/ensState.onsets.length);
   }
   if(ep != null){
@@ -2363,8 +2453,10 @@ function verdictProbSrc(){
         if(probSeries[i] != null && probSeries[i] > om) om = probSeries[i];
       /* Kolo 8z3: když OM mluví výš, verdikt nese směs max(ens,(ens+om)/2)
          — vzorek patří vlastnímu zdroji "mix", ať se křivka učí na čem
-         skutečně tvrdí. Jinak zůstává čistý "ens". */
-      if(om > ep) return "mix";
+         skutečně tvrdí. Jinak zůstává čistý "ens".
+         KOLO 35 (hory): při symetrickém mixu (isMountain) nese verdikt
+         směs VŽDY, když OM něco říká — zrcadlení musí zůstat věrné. */
+      if(isMountain() ? om > 0 : om > ep) return "mix";
     }
     return "ens";
   }
@@ -2394,6 +2486,45 @@ function arrivalProbPct(lo, hi){
   }
   if(p == null) return null;
   return Math.max(2, Math.min(97, Math.round(p*100)));
+}
+/* ===== KOLO 35: OCAS ZA OKNEM (8h → 13h) =====
+   Měření 12.–26. 11. 2026 (31 191 záznamů sběrače): Brier skóre
+   pravděpodobností Open-Meteo (pp) zůstává ploché až do 13. hodiny
+   (0,124–0,128) a ensemble drží dovednost do 9. hodiny (0,122–0,128).
+   Osmihodinové okno tedy končí dřív, než končí použitelná informace:
+   když uvnitř okna nikdo déšť nehlásí, ale za hranicí ano, uživatel
+   má vědět. Handover zdrojů dle měření: hodinu právě za oknem
+   (480–540 min) neslýchavější ensemble (perHour[HOURS]), hodiny
+   9.–12. potom Open-Meteo (probSeries). Práh zobrazení 30 %: pod ním
+   je většina signálů šum (kalibrace 14denních dat: pp ≥ 30 % v tomto
+   pásu odpovídá zhruba každé druhé až třetí skutečnosti), nad ním
+   stojí za upozornění. Vrací {src, lo, hi, pct} první hodiny
+   za oknem s p≥30 %, jinak null. */
+function tailRainAfterWindow(){
+  var TH = 30;
+  var best = null;
+  if(ensState && ensState !== "off" && ensState !== "error"){
+    var p8 = null;
+    if(ensState.perHour && ensState.perHour.length > HOURS
+       && typeof ensState.perHour[HOURS] === "number"){
+      p8 = ensState.perHour[HOURS];
+    } else if(ensState.onsets && ensState.onsets.length){
+      var n = 0, c = 0;
+      ensState.onsets.forEach(function(o){ n++; if(o != null && o >= HOURS*60) c++; });
+      if(n > 0) p8 = c/n;
+    }
+    if(p8 != null && p8*100 >= TH) best = {src: "ens", i: HOURS, pct: Math.round(p8*100)};
+  }
+  if(!best && probSeries && probSeries.length){
+    for(var i=HOURS; i<probSeries.length && i<=HOURS_TAIL; i++){
+      if(probSeries[i] != null && probSeries[i] >= TH){
+        best = {src: "pp", i: i, pct: Math.round(probSeries[i])};
+        break;
+      }
+    }
+  }
+  if(!best) return null;
+  return {src: best.src, lo: best.i, hi: best.i+1, pct: best.pct};
 }
 function enqueueVerdict(locKey, lat, lon, cc, targetMs, prob, src){
   /* dedup: klíčová věta se přepočítává po každém dorazivším zdroji —
@@ -4331,11 +4462,28 @@ function renderVerdictExtras(pk, spread, N){
    z globálního kompozitu (RainViewer / OPERA vč. ČHMÚ) a zpřesňuje
    minutový odhad začátku deště pomocí 10min nowcastu. */
 var radarState = null;   /* {nowMm, isSnow, t} | "error" | null */
-var radarCoverage = null;/* "ok" | "none" (radar sem nedosahuje) | "error" | null */
+var radarCoverage = null;/* "ok" | "none" (radar sem nedosahuje) | "error" | null
+                            KOLO 35 (ověřeno 14denním sběrem 12.–26. 11. 2026,
+                            30 915 párů radar×METAR): radar ve srovnání s
+                            pozemní stanicí vynechá ~80 % srážek, které stanice
+                            hlásí (PL/IE/UK/LV/BG nadto často "none" pokrytí,
+                            tam kompozit mlčí zcela). Aplikace to už řeší
+                            správně: kompas při "none" nekreslí z kompozitu
+                            nic (satelit IMERG / hláška "Radar sem
+                            nedosahuje"), verdikt se opírá o stanici
+                            (stanicePotvrzujeSelf, kolo 12) a rozpor
+                            "mokrá stanice × suchý radar" je vyslovený
+                            slovy. Měřením potvrzeno, beze změny chování. */
 var rvNowcast = null;    /* zdroj 5: vlastní nowcast RainVieweru [{t,mmh}] | "error" */
 var precipMix = null;    /* {showerFrac, snowFrac} — konvekce vs fronta */
 var native15 = false;    /* má lokalita SKUTEČNÁ 15min data, nebo jen interpolaci? */
 var altNowcast = null;   /* zdroj 2: 15min model Open-Meteo, nikoli měření | "error" */
+/* KOLO 35: nadmořská výška bodu z Open-Meteo forecast odpovědi
+   (j.elevation, zdarma v každém dotazu). Slouží horské korekci
+   (isMountain) — v horách ensemble měřeně ztrácí dvojnásobek dovednosti
+   oproti globální pravděpodobnosti (Brier ens−pp: hory +0,018 vs
+   nížina +0,010, 12.–26. 11. 2026). */
+var placeElev = null;
 var modelCurrent = null; /* Open-Meteo current: modelový odhad, NE nezávislé pozorování */
 var metarPreskoceno = 0; /* kolik bójí a automatů se přeskočilo */
 var obsMetar   = null;   /* zdroj 4: METAR — reálný senzor na nejbližším letišti | "error" */
@@ -4844,7 +4992,7 @@ function loadRadar(lat, lon, myId, attempt){
      zdarma jako součet jedné položky do už existujícího dotazu.
 
      Bloky se parsují každý zvlášť: když jeden chybí, ostatní to nepoloží. */
-  modelCurrent = null; atmoState = null; altNowcast = null; probSeries = null;
+  modelCurrent = null; atmoState = null; altNowcast = null; probSeries = null; placeElev = null;
   cachedJson("https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon
     + "&current=precipitation,rain,showers,snowfall,weather_code"
     + "&minutely_15=precipitation,rain,showers,snowfall&forecast_minutely_15=8"
@@ -4852,7 +5000,7 @@ function loadRadar(lat, lon, myId, attempt){
     + "relative_humidity_850hPa,relative_humidity_700hPa,relative_humidity_500hPa,"
     + "wind_speed_850hPa,wind_speed_500hPa,wind_direction_850hPa,wind_direction_500hPa,"
     + "wind_speed_10m,wind_direction_10m,freezing_level_height"
-    + "&past_hours=3&forecast_hours="+(HOURS+1)
+    + "&past_hours=3&forecast_hours="+(HOURS_TAIL+1)
     + "&timeformat=unixtime&timezone=auto", 300000)
     .then(function(j){
       if(isStale(myId)) return;
@@ -4866,6 +5014,8 @@ function loadRadar(lat, lon, myId, attempt){
 
       /* ---- blok B: 15minutový nowcast + rozklad na typy srážek ---- */
       try{
+        /* KOLO 35: výška bodu (horská korekce verdiktu i blendu). */
+        if(j && typeof j.elevation === "number") placeElev = j.elevation;
         var q = j.minutely_15 || {};
         var t = q.time || [], v = q.precipitation || [];
         var rn = q.rain || [], sh = q.showers || [], sn = q.snowfall || [];
@@ -4896,7 +5046,10 @@ function loadRadar(lat, lon, myId, attempt){
            opíral o to, jaká byla pravděpodobnost před obědem. */
         var pp = h.precipitation_probability || [];
         if(pp.length > nowIdx){
-          var cut = pp.slice(nowIdx, nowIdx + HOURS + 1)
+          /* KOLO 35: řada se táhne až za okno (HOURS_TAIL) — ocas za 8h
+             oknem pracuje s hodinami 9.–12. Consumers okna čtou jen
+             indexy < HOURS, prodloužení je pro ně neškodné. */
+          var cut = pp.slice(nowIdx, nowIdx + HOURS_TAIL + 1)
                       .map(function(x){ return (x == null || isNaN(x)) ? null : Math.max(0, Math.min(100, x)); });
           probSeries = cut.some(function(x){ return x != null; }) ? cut : null;
         } else probSeries = null;
@@ -6465,6 +6618,18 @@ function blendWeights(dt, cc){
        pozorovacích zdrojích) úmyslně NEpatří. */
     ens:     0.35*Math.exp(-dt/150)
   };
+  /* KOLO 35 (hory, ≥ 700 m n.m., měřeno 12.–26. 11. 2026 na sběrači):
+     ensemble v horách ztrácí dvojnásobek dovednosti oproti globálním
+     modelům (Brier ens−pp: hory +0,018 vs nížina +0,010), zatímco
+     pozorovací extrapolace v horách naopak chodí nejmíň falešných
+     poplachů (FAR minutecastu 0,21 vs 0,24–0,31 jinde — orografický
+     déšť je pro radar nejčitelnější vzorec). Hlas ensemble v čase
+     příchodu proto v horách zeslábne (×0,85) a pozorovací zdroje
+     se posílí (×1,1), dokud se naučené váhy neuschopí samy. */
+  if(isMountain()){
+    w.ens *= 0.85;
+    ["radar","rvcast","natcast","metno","regio"].forEach(function(k){ w[k] *= 1.1; });
+  }
   w.nowcast = Math.max(0.05, 1 - w.radar - w.rvcast - w.natcast - w.metno - w.regio - w.model);
   /* Naučené váhy: zdroj, který appka vlastní verifikací přistihla při
      nadhodnocování, zeslabíme (a podhodnocující posílíme). Bez vzorků
@@ -10260,8 +10425,16 @@ function recomputeWhen(){
   if(maxC === 0){
     big.className = "big none";
     big.textContent = "Nemělo by pršet";
+    /* KOLO 35 (ocas za oknem): když modely uvnitř okna mlčí, ale za
+       hranicí (9.–13. hodina) někdo p≥30 % vidí déšť, panel to připojí
+       — verdikt zůstává suchý, uživatel ale ví, že déšť čeká hned za
+       hranicí okna. Měřený handover: ensemble pro 480–540 min,
+       Open-Meteo pro hodiny 9.–12. (Brier plochý do 13. h). */
+    var tail = tailRainAfterWindow();
     sub.innerHTML = "Žádný z "+ms.N+" modelů nehlásí srážky v příštích "+HOURS+" hodinách."
-      + (chmiSaysDry() ? " Český radar do hodiny nevidí žádné echo — potvrzeno i měřením." : "");
+      + (chmiSaysDry() ? " Český radar do hodiny nevidí žádné echo — potvrzeno i měřením." : "")
+      + (tail ? " Za hranicí okna ale "+(tail.src === "ens" ? "ensemble" : "Open-Meteo")
+               +" vidí déšť mezi "+tail.lo+". a "+tail.hi+". hodinou ("+tail.pct+" %)." : "");
     srcEl.textContent = (radarState==="error" ? "radar nedostupný · jen modely" : "zdroj: "+ms.N+" modelů + radar") + sourceCaveat();
     if($("whenUntil")) $("whenUntil").innerHTML = "";
     whenState = {mode:"dry", now: now};
