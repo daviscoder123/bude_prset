@@ -71,6 +71,11 @@
  *     nehlásí. Záznam radaru nese px (9 surových dBZ pixelů, null = bez
  *     odrazu), METAR navíc dz (příznak mrholení); v obou případech jde
  *     o aditivní pole, starší záznamy zůstávají platné.
+ *   - Kolo 35 (analýza 12.-26. 11. 2026): rotace ensemble je per MĚSTO
+ *     (ensRotEligible: (townHash(jméno)+UTC hodina)%3===0, každé město
+ *     8 z 24 hodin rozprostřených přes celý den; rozpočet beze změny
+ *     7 200/den), záznam nese entry.ensT; icon_d2 jen uvnitř změřeného
+ *     polygonu domény (ne boxu).
  *   - maps.json, radarová dlaždice i METAR dostanou jedno opakování
  *     po přechodném selhání (5xx/síť).
  *   - /analysis/status navíc vrací counts (počty chyb per zdroj za
@@ -235,8 +240,33 @@ var ENS_CD_MS = 30 * 60 * 1000;  /* cooldown ensemble po 429/5xx: 30 minut */
    9 volání kvóty → 100 obcí × 9 = 900 volání na rotační hodinu,
    8 × 900 = 7 200/den < limit 10 000 (dříve každá hodina = 21 600/den
    → 100 % ens429 a sběrač vyhladověl i appku přes proxy /om/v1/ensemble).
-   Horizont ens je 9 h, rotace po 3 h pokrytí neprotrhne. */
+   Horizont ens je 9 h, rotace po 3 h pokrytí neprotrhne.
+   KOLO 35: při sběru už se nepoužívá (rotace je per město, viz
+   ensRotEligible), export zůstává kvůli zpětné kompatibilitě starých
+   záznamů v /analysis/status. */
 export var ENS_ROT_HOURS = [2, 5, 8, 11, 14, 17, 20, 23];
+
+/* KOLO 35 (rotace měst): ensemble se sbírá pro město v hodinách, kdy
+   (townHash(jméno) + utcHodina) % 3 === 0 → každé město právě 8 z 24
+   hodin DENNĚ, rozprostěných po celém denním cyklu (stará rotace
+   ENS_ROT_HOURS brala všechna města ve stejných 8 hodinách — analýza
+   tak měla ens jen pro tři pevné části dne a 2/3 denního cyklu vůbec
+   žádné). Rozpočet se nemění: 100 měst × 8 město-hodin × 9 bodů
+   mřížky = 7 200 volání kvóty/den < 10 000. Na jedno probuzení
+   (8–9 obcí dílků) je způsobilých ~1/3 → 2–3 ens obce, nejhorší
+   případ subrequestů klesá oproti starým rotačním hodinám
+   (dříve 8–9 obcí × až 2 modely). townHash je deterministický:
+   (h*31 + charCode)>>>0, takže eligibility lze dopočítat zpětně
+   z jakéhokoli záznamu bez dalších dat. */
+export function townHash(name) {
+  var h = 0;
+  var s = String(name || "");
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h >>> 0;
+}
+export function ensRotEligible(name, utcHour) {
+  return (townHash(name) + (utcHour | 0)) % 3 === 0;
+}
 
 /* 100 obcí: primárně střední Evropa (CZ/SK/AT/DE/CH/PL/HU/SI/HR), doplněno
    o top lokality a rozličné biomy (Alpy, pobřeží, nížiny, Vysočina,
@@ -382,11 +412,30 @@ export function ensModelFor(lat, lon) {
 }
 
 /* Zrcadlí ensembleCandidates aplikace: pořadí modelů pro fallback.
-   Okrajové obce (mřížka 3×3 může přesáhnout doménu) spadnou na další
-   model — stejný tryNext mechanismus jako v appce. */
+   KOLO 35: icon_d2 už NENÍ box 43,2–58,1°N × −3,9–20,3°E, ale rotovaný
+   čtyřúhelník (živé sondy Open-Meteo 26. 11. 2026 + 28 selhání ze
+   100 sbíraných obcí): východní hrana ~18,7°E při 50,5°N stoupající
+   na sever (~19,4°E při 54°N), jižní hrana je KŘIVKA (bisekce, každý
+   bod 2× ověřen): 43,53°N při 5°E, vrchol 43,67°N při 10°E, klesá k
+   43,58°N při 13°E a 43,45°N při 16,3°E, sever ~58,1°N, západ ~−2,7°E.
+   Rezerva 0,12° šířky pokrývá jižní roh mřížky 3×3 (−0,1°): bez ní
+   padají Nice a Split, kterým selhává právě jižní roh (Nice 43,56 <
+   hrana 43,60, Split 43,44 < 43,45). Kontrola na všech 100 obcích
+   14denního sběru: 72 obcí s reálným icon_d2 uvnitř, všech 28 selhání
+   ven. Kaskáda na icon_eu zůstává jako pojistka. */
 export function ensCandidates(lat, lon) {
   var c = [];
-  if (lat >= 43.2 && lat <= 58.1 && lon >= -3.9 && lon <= 20.3) c.push("icon_d2");
+  var d2ok = false;
+  if (lon >= -2.4 && lat <= 57.8) {
+    var latMin;
+    if (lon <= 7.22) latMin = 43.53 + 0.033 * (lon - 5);
+    else if (lon <= 10) latMin = 43.60 + 0.025 * (lon - 7.22);
+    else if (lon <= 13) latMin = 43.67 - 0.030 * (lon - 10);
+    else latMin = 43.58 - 0.038 * (lon - 13);
+    var lonMax = 18.6 + 0.19 * (lat - 50.5);
+    if (lat >= latMin + 0.12 && lon <= lonMax - 0.2) d2ok = true;
+  }
+  if (d2ok) c.push("icon_d2");
   if (lat >= 29.5 && lat <= 70.5 && lon >= -23.5 && lon <= 45) c.push("icon_eu");
   c.push("ecmwf_ifs025");
   c.push("gfs_seamless");
@@ -774,54 +823,59 @@ async function collectSlice(deps, slice, now) {
     record.p[p.n] = entry;
   }));
 
-  /* Faze 2 (kolo 9): ensemble jen v rotacnich hodinach ENS_ROT_HOURS
-     (2,5,8,11,14,17,20,23 UTC = 8 hodin denne, 7 200 volani kvoty/den
-     < limit 10 000; drive kazda hodina = 21 600/den -> 100 % ens429 a
-     sbirka vyhladovela i appku pres proxy /om/v1/ensemble, ktera tak
-     ztracela "Pravdepodobnost deste"). Horizont ens je 9 h, rotace po
-     3 h pokryti neprotrhne. Mimo rotacni hodinu se ens nesebere vubec:
-     cd "ensrot" pro diagnostiku a err "ens" se NEhlasi (nezhasl zdroj,
-     jen se v danou hodinu nesebira).
-     V rotacni houre plati puvodni pravidla kola 8bb: ensemble az po
-     fc+rv, SEKVENCNE, max 2 kandidati; 429/5xx NEkaskaduji (kaskada by
-     palila az 4 subrequesty na obec), misto toho cooldown 30 min a
-     zbytek kola ens preskoci; domenova chyba 400/404 kaskaduje na
-     dalsi model jako v appce. Objeveni 429 stoji jedinou obec. */
-  var ensHour = ENS_ROT_HOURS.indexOf(now.getUTCHours()) >= 0;
-  if (!ensHour) {
-    record.cd = "ensrot";
-  } else {
-    for (var pi = 0; pi < places.length; pi++) {
-      var p = places[pi];
-      var entry = record.p[p.n];
-      if (ensCd.until && now.getTime() < ensCd.until) continue;
-      try {
-        var parsed = null, usedModel = null;
-        var cands = ensCandidates(p.lat, p.lon).slice(0, 2);
-        for (var ci = 0; ci < cands.length && !parsed; ci++) {
-          var r2;
-          try {
-            r2 = await fetchImpl(buildEnsUrl(p, cands[ci]), { headers: { "user-agent": "bude-prset-proxy/1.0" } });
-          } catch (e2) {
-            ensCd.until = now.getTime() + ENS_CD_MS;
-            ensCd.reason = "ensnet";
-            break;
-          }
-          if (r2.status === 429 || r2.status >= 500) {
-            ensCd.until = now.getTime() + ENS_CD_MS;
-            ensCd.reason = "ens" + r2.status;
-            break;
-          }
-          if (!r2.ok) continue;                    /* domena modelu -> dalsi kandidat */
-          parsed = parseEns(await r2.text());
-          if (parsed) usedModel = cands[ci];
+  /* Faze 2 (kolo 35): ensemble podle rotace MĚST (ensRotEligible),
+     ne podle pevných UTC hodin. Každé město je způsobilé právě
+     8 z 24 hodin denně (dle townHash), rozprostřeno přes celý
+     denní cyklus — analýze tak chybí 2/3 cyklu jako dříve
+     (kolo 9 sbíralo všechna města jen v 8 pevných hodinách).
+     Rozpočet bez změny: 100 měst × 8 h × 9 bodů = 7 200/den < 10 000.
+     Způsobilost se zapisuje do entry.ensT (1/0), ať ví
+     /analysis/status i zpětná analýza, které obce v daném kole
+     ens vůbec mohly mít. Když v kole není způsobilé žádné město
+     (rotP === 0), cd "ensrot" pro diagnostiku a err "ens" se
+     NEhlásí (nezhasl zdroj, jen se v danou hodinu nesebírá).
+     Pro způsobilá města platí původní pravidla kola 8bb: ensemble
+     až po fc+rv, SEKVENCNE, max 2 kandidáti; 429/5xx NEkaskaduji,
+     místo toho cooldown 30 min a zbytek kola ens přeskočí; doménová
+     chyba 400/404 kaskaduje na další model jako v appce. Objevení
+     429 stojí jedinou obec. */
+  var utcHour = now.getUTCHours();
+  var rotP = 0;
+  for (var pi = 0; pi < places.length; pi++) {
+    var p = places[pi];
+    var entry = record.p[p.n];
+    var eligible = ensRotEligible(p.n, utcHour);
+    entry.ensT = eligible ? 1 : 0;
+    if (!eligible) continue;
+    rotP++;
+    if (ensCd.until && now.getTime() < ensCd.until) continue;
+    try {
+      var parsed = null, usedModel = null;
+      var cands = ensCandidates(p.lat, p.lon).slice(0, 2);
+      for (var ci = 0; ci < cands.length && !parsed; ci++) {
+        var r2;
+        try {
+          r2 = await fetchImpl(buildEnsUrl(p, cands[ci]), { headers: { "user-agent": "bude-prset-proxy/1.0" } });
+        } catch (e2) {
+          ensCd.until = now.getTime() + ENS_CD_MS;
+          ensCd.reason = "ensnet";
+          break;
         }
-        if (!parsed) continue;
-        entry.ens = { m: usedModel, t0: parsed[0] && parsed[0].t0, g: parsed.map(function (pt) { return pt.v; }) };
-      } catch (e) { /* ens chybi -> err v zaveru */ }
-    }
-    if (ensCd.reason && now.getTime() < ensCd.until) record.cd = ensCd.reason;
+        if (r2.status === 429 || r2.status >= 500) {
+          ensCd.until = now.getTime() + ENS_CD_MS;
+          ensCd.reason = "ens" + r2.status;
+          break;
+        }
+        if (!r2.ok) continue;                    /* domena modelu -> dalsi kandidat */
+        parsed = parseEns(await r2.text());
+        if (parsed) usedModel = cands[ci];
+      }
+      if (!parsed) continue;
+      entry.ens = { m: usedModel, t0: parsed[0] && parsed[0].t0, g: parsed.map(function (pt) { return pt.v; }) };
+    } catch (e) { /* ens chybi -> err v zaveru */ }
   }
+  if (rotP === 0) record.cd = "ensrot";
+  else if (ensCd.reason && now.getTime() < ensCd.until) record.cd = ensCd.reason;
 
   await metP;
   Object.keys(record.p).forEach(function (name) {
@@ -833,7 +887,7 @@ async function collectSlice(deps, slice, now) {
     }
     var errs = [];
     if (!e.fc) errs.push("fc");
-    if (!e.ens && ensHour) errs.push("ens");  /* mimo rotacni hodinu ens chybi nadrizlene */
+    if (!e.ens && e.ensT) errs.push("ens");  /* mimo rotaci města (ensT=0) ens chybí nadřízeně */
     if (!e.met) errs.push("met");
     if (!e.rv) errs.push("rv");
     if (errs.length) e.err = errs;
@@ -956,14 +1010,19 @@ export function createWorker(deps) {
         if (!out.last) out.last = entry;
         out.counts.slices++;
         out.counts.places += names.length;
-        /* Kolo 9: ens se srocnava jen nad rotacnimi dílky (ENS_ROT_HOURS);
-           mimo ne ens chybi nadrizlene (cd "ensrot") a neni to chyba. */
-        var rot = rec.h && ENS_ROT_HOURS.indexOf(Number(String(rec.h).slice(8, 10))) >= 0;
-        if (rot) out.counts.rotPlaces += names.length;
+        /* Kolo 35: ens se srovnává jen nad způsobilými obcemi.
+           Nové záznamy nesou ensT (1/0) přímo; staré záznamy
+           (před kolem 14) se zpětně posoudí podle ENS_ROT_HOURS
+           a hodiny klíče, ať status nelže o historii. */
+        var hourNum = rec.h ? Number(String(rec.h).slice(8, 10)) : NaN;
         names.forEach(function (n) {
-          var er = (rec.p[n] && Array.isArray(rec.p[n].err)) ? rec.p[n].err : [];
+          var e = rec.p[n] || {};
+          var elig = (e.ensT != null) ? !!e.ensT
+            : (rec.h && ENS_ROT_HOURS.indexOf(hourNum) >= 0);
+          if (elig) out.counts.rotPlaces++;
+          var er = Array.isArray(e.err) ? e.err : [];
           for (var ek = 0; ek < er.length; ek++) {
-            if (er[ek] === "ens" && !rot) continue; /* kolo 9: mimo rotaci ens nadrizlene chybi */
+            if (er[ek] === "ens" && !elig) continue; /* kolo 9/14: mimo rotaci ens nadřízeně chybí */
             if (out.counts[er[ek]] != null) out.counts[er[ek]]++;
           }
         });
