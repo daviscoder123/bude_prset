@@ -355,7 +355,7 @@ test('blend skill starts neutral, shrinks with few samples and saturates with ma
 test('learned blend multipliers rescale weights only for the region with data',()=>{
   const store={};
   const ls={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v;},removeItem:()=>{}};
-  const c=context(['blendBucket','blendWeights','blendRegimeKey','convectiveFrac','getBlendMult','recordBlendError','lsGet','lsSet'],
+  const c=context(['blendBucket','blendWeights','blendRegimeKey','convectiveFrac','getBlendMult','recordBlendError','lsGet','lsSet','isMountain'],
     {localStorage:ls,BLEND_KEY:'bpBlend_v1',stormRisk:null,precipMix:null,CAPE_CONV_LO:400,CAPE_CONV_HI:2000});
   /* Kolo 4: blendWeights si režim (standardní/konvektivní počasí) určí
      sama přes blendRegimeKey ← convectiveFrac; v vm kontextu bez dat
@@ -393,13 +393,13 @@ test('blend multipliers learn per convective regime, not one curve for all weath
   assert.ok(total>1,'celková křivka zůstává zálohou pro neznámé režimy');
 });
 test('Brier verdict probability is honest without ensemble and calibrated with it',()=>{
-  const c=context(['verdictProb'],{ensState:null,probSeries:null,HOURS:48});
+  const c=context(['verdictProb','isMountain'],{ensState:null,probSeries:null,HOURS:48});
   assert.equal(c.verdictProb(1,0),0.5);   /* jediný zdroj = nejistota, ne jistota */
   assert.equal(c.verdictProb(2,0),0.7);
   assert.equal(c.verdictProb(2,1),0.75);  /* pozorovaný zdroj posiluje důvěru */
   assert.equal(c.verdictProb(3,0),0.8);
   assert.equal(c.verdictProb(4,0),0.9);
-  const ens=context(['verdictProb'],{ensState:{prob:65},probSeries:[80,null,50],HOURS:48});
+  const ens=context(['verdictProb','isMountain'],{ensState:{prob:65},probSeries:[80,null,50],HOURS:48});
   /* Kolo 8z3 (zpětný test 726 párů, sběrač 6.–7. 11. 2026): OM špička už
      nepřebíjí ensemble celá — verdikt jde jen do poloviny cesty k ní:
      max(ens, (ens+om)/2) = max(0.65, 0.725) = 0.725. Falešné poplachy
@@ -407,20 +407,31 @@ test('Brier verdict probability is honest without ensemble and calibrated with i
   assert.equal(Math.round(ens.verdictProb(2,0)*1000)/1000,0.725);
   assert.equal(ens.verdictProb(2,0)>0.65,true);  /* OM nad ens zvedá, ale jen na polovinu cesty */
   assert.equal(ens.verdictProb(2,0)<0.8,true);   /* a nikdy nepřebíjí ensemble celé */
-  const lowOm=context(['verdictProb'],{ensState:{prob:65},probSeries:[20,10],HOURS:48});
+  const lowOm=context(['verdictProb','isMountain'],{ensState:{prob:65},probSeries:[20,10],HOURS:48});
   assert.equal(lowOm.verdictProb(2,0),0.65); /* nízké OM nesníží ensemble — podkladem je sdružení členů */
-  const grid=context(['verdictProb'],{ensState:null,probSeries:[30,10],HOURS:48});
+  const grid=context(['verdictProb','isMountain'],{ensState:null,probSeries:[30,10],HOURS:48});
   assert.equal(grid.verdictProb(2,0),0.3); /* mřížka s 30 % vydává 30 %, ne domněnku */
+  /* KOLO 35 (hory, měřeno 12.–26. 11. 2026, 9 669 horských párů: ensemble
+     ztrácí v nadmořské výšce ≥ 700 m dvojnásobek dovednosti): nízké OM
+     v horách ensemble SKORIGUJE dolů (symetrický průměr), v nížině ne. */
+  const mtn=context(['verdictProb','isMountain'],{ensState:{prob:65},probSeries:[20,10],HOURS:48,placeElev:1200});
+  assert.equal(Math.round(mtn.verdictProb(2,0)*1000)/1000,0.425);
+  const sea=context(['verdictProb','isMountain'],{ensState:{prob:65},probSeries:[20,10],HOURS:48,placeElev:120});
+  assert.equal(sea.verdictProb(2,0),0.65);
 });
 test('verdict probability source mirror: mix when OM exceeds ensemble, ens otherwise',()=>{
-  const mix=context(['verdictProb','verdictProbSrc'],{ensState:{prob:65},probSeries:[80,null,50],HOURS:48});
+  const mix=context(['verdictProb','verdictProbSrc','isMountain'],{ensState:{prob:65},probSeries:[80,null,50],HOURS:48});
   assert.equal(mix.verdictProbSrc(),'mix');   /* verdikt = směs, kalibrace se učí na směsi */
-  const pure=context(['verdictProb','verdictProbSrc'],{ensState:{prob:65},probSeries:[20,10],HOURS:48});
+  const pure=context(['verdictProb','verdictProbSrc','isMountain'],{ensState:{prob:65},probSeries:[20,10],HOURS:48});
   assert.equal(pure.verdictProbSrc(),'ens');  /* bez OM špičky zůstává čistý ensemble */
-  const onlyOm=context(['verdictProb','verdictProbSrc'],{ensState:null,probSeries:[30,10],HOURS:48});
+  const onlyOm=context(['verdictProb','verdictProbSrc','isMountain'],{ensState:null,probSeries:[30,10],HOURS:48});
   assert.equal(onlyOm.verdictProbSrc(),'om');
-  const nothing=context(['verdictProb','verdictProbSrc'],{ensState:null,probSeries:null,HOURS:48});
+  const nothing=context(['verdictProb','verdictProbSrc','isMountain'],{ensState:null,probSeries:null,HOURS:48});
   assert.equal(nothing.verdictProbSrc(),'agree');
+  /* KOLO 35 (hory): v horách nese verdikt směs VŽDY, když OM něco říká */
+  const mtnMix=context(['verdictProb','verdictProbSrc','isMountain'],
+    {ensState:{prob:65},probSeries:[20,10],HOURS:48,placeElev:900});
+  assert.equal(mtnMix.verdictProbSrc(),'mix');
 });
 test('AIFS joins the model pool as its own family next to ECMWF IFS',()=>{
   assert.match(script,/id:\s*"ecmwf_aifs025_single"[^\n]*fam:\s*"AIFS"/);
@@ -484,30 +495,77 @@ test('Brier calibration is per-source and stays identity until data suffices',()
   assert.ok(JSON.parse(store['b']).srcs.agree);
 });
 test('arrival probability uses ensemble onsets and mirrors the verdict source choice',()=>{
-  const c=context(['arrivalProbPct','verdictProbSrc'],
+  const c=context(['arrivalProbPct','verdictProbSrc','isMountain'],
     {ensState:{onsets:[0,60,60,120,null]},probSeries:null,HOURS:8});
   assert.equal(c.arrivalProbPct(30,60),60);   /* 3 z 5 členů začnou do 60 min */
   assert.equal(c.verdictProbSrc(),'ens');
-  const c2=context(['arrivalProbPct','verdictProbSrc'],
+  const c2=context(['arrivalProbPct','verdictProbSrc','isMountain'],
     {ensState:null,probSeries:[10,50,20,0],HOURS:8});
   assert.equal(c2.arrivalProbPct(30,60),50);   /* bez ensemblu max OM v okně */
   assert.equal(c2.verdictProbSrc(),'om');
-  const c3=context(['arrivalProbPct','verdictProbSrc'],
+  const c3=context(['arrivalProbPct','verdictProbSrc','isMountain'],
     {ensState:{onsets:[0,0]},probSeries:null,HOURS:8});
   assert.equal(c3.arrivalProbPct(null,null),97);   /* stop 97 %, žádná jistota */
-  const c4=context(['arrivalProbPct','verdictProbSrc'],{ensState:null,probSeries:null,HOURS:8});
+  const c4=context(['arrivalProbPct','verdictProbSrc','isMountain'],{ensState:null,probSeries:null,HOURS:8});
   assert.equal(c4.arrivalProbPct(30,60),null);
   assert.equal(c4.verdictProbSrc(),'agree');
   /* OM přebije ensemble, když mluví hlasitěji — kolo 8z3: verdikt pak nese
      směs max(ens,(ens+om)/2), takže zdrojem je "mix", ne čisté "om". */
-  const c5=context(['verdictProbSrc'],{ensState:{prob:65},probSeries:[80,null,50],HOURS:8});
+  const c5=context(['verdictProbSrc','isMountain'],{ensState:{prob:65},probSeries:[80,null,50],HOURS:8});
   assert.equal(c5.verdictProbSrc(),'mix');
+});
+/* ===== KOLO 35: ocas za oknem (8h → 13h), hory, D2 polygon ===== */
+test('tail beyond the window hands over ensemble first, then Open-Meteo, at 30 % threshold',()=>{
+  /* Ensemble: měřeně drží dovednost do 9. hodiny — hodina právě za oknem
+     (perHour[HOURS]) je jeho; perHour může chybět, pak podíl onsets ≥HOURS. */
+  const t1=context(['tailRainAfterWindow'],
+    {ensState:{perHour:[0.1,0.2,0.1,0.05,0,0,0,0,0.55]},probSeries:null,HOURS:8,HOURS_TAIL:12});
+  const r1=t1.tailRainAfterWindow();
+  assert.equal(r1.src,'ens');
+  assert.equal(r1.lo,8); assert.equal(r1.hi,9); assert.equal(r1.pct,55);
+  const t1b=context(['tailRainAfterWindow'],
+    {ensState:{onsets:[0,60,120,300,480,480,480,null,null]},probSeries:null,HOURS:8,HOURS_TAIL:12});
+  assert.equal(t1b.tailRainAfterWindow().pct,33);   /* 3/9 členů, zaokrouhleno */
+  /* pod 30 % mlčí — nebudí planý poplach */
+  const t2=context(['tailRainAfterWindow'],
+    {ensState:{perHour:[0.1,0.2,0.1,0.05,0,0,0,0,0.29]},probSeries:null,HOURS:8,HOURS_TAIL:12});
+  assert.equal(t2.tailRainAfterWindow(),null);
+  /* bez ensemblu / se suchým ensembrem přebírá Open-Meteo (řada teď sahá
+     až do HOURS_TAIL): první hodina za oknem s p≥30 % */
+  const t3=context(['tailRainAfterWindow'],
+    {ensState:null,probSeries:[10,20,0,0,0,0,0,0,5,35,45,20,10],HOURS:8,HOURS_TAIL:12});
+  const r3=t3.tailRainAfterWindow();
+  assert.equal(r3.src,'pp'); assert.equal(r3.lo,9); assert.equal(r3.hi,10); assert.equal(r3.pct,35);
+  const t4=context(['tailRainAfterWindow'],
+    {ensState:{perHour:[0.1,0.1,0,0,0,0,0,0,0.1]},probSeries:[10,20,0,0,0,0,0,0,5,20,28,10,5],HOURS:8,HOURS_TAIL:12});
+  assert.equal(t4.tailRainAfterWindow(),null);   /* nikdo nad práh */
+  /* handover: když ensemble mlčí, pp hovoří od 8. hodiny */
+  const t5=context(['tailRainAfterWindow'],
+    {ensState:{perHour:[0,0,0,0,0,0,0,0,0.0]},probSeries:[0,0,0,0,0,0,0,0,40,0,0,0,0],HOURS:8,HOURS_TAIL:12});
+  const r5=t5.tailRainAfterWindow();
+  assert.equal(r5.src,'pp'); assert.equal(r5.lo,8);
+});
+test('mountain terrain reweights the blend: ensemble down, radar family up',()=>{
+  const store={};
+  const ls={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v;},removeItem:()=>{}};
+  const mk=(elev)=>context(['blendBucket','blendWeights','blendRegimeKey','convectiveFrac',
+                            'getBlendMult','lsGet','lsSet','isMountain'],
+    {localStorage:ls,BLEND_KEY:'bpBlend_v1',stormRisk:null,precipMix:null,placeElev:elev,
+     CAPE_CONV_LO:400,CAPE_CONV_HI:2000});
+  const flat=mk(120), mtn=mk(1200);
+  const b=flat.blendWeights(30,null), w=mtn.blendWeights(30,null);
+  /* Kolo 35 (hory, 12.–26. 11. 2026): ensemble v ≥700 m ztrácí 2× dovednost
+     (Brier ens−pp +0,018 vs +0,010), minutecast má naopak nejnižší FAR právě
+     v horách (0,21) — váhy to zrcadlí. */
+  assert.ok(Math.abs(w.ens/b.ens-0.85)<1e-9,'ensemble ×0,85 v horách');
+  assert.ok(Math.abs(w.radar/b.radar-1.1)<1e-9,'radar ×1,1 v horách');
+  assert.ok(Math.abs(w.rvcast/b.rvcast-1.1)<1e-9,'rvcast ×1,1 v horách');
 });
 test('convective prior tilts blend toward models until its own samples arrive',()=>{
   const storeC={},storeS={};
   const mk=(st,sr)=>{const l={getItem:k=>st[k]||null,setItem:(k,v)=>{st[k]=v;},removeItem:()=>{}};
     return context(['blendBucket','blendWeights','blendRegimeKey','convectiveFrac',
-                    'getBlendMult','blendHasData','recordBlendError','lsGet','lsSet'],
+                    'getBlendMult','blendHasData','recordBlendError','lsGet','lsSet','isMountain'],
       {localStorage:l,BLEND_KEY:'bpBlend_v1',stormRisk:sr,precipMix:null,
        CAPE_CONV_LO:400,CAPE_CONV_HI:2000});};
   const std=mk(storeS,null), conv=mk(storeC,{cape:2000});
