@@ -672,6 +672,62 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 35 — měřená implementace 14denní analýzy přesnosti: hory, ocas za oknem, D2 polygon, rotace měst (26. 11.)
+
+První kolo postavené přímo na datech: 12.–26. 11. 2026 sběrač nasbíral
+31 191 záznamů (336 hodinových JSONů, 12 dílků po 5 min, 100 obcí).
+Vše bylo spárováno s tolerancí ±35 min (geometrická zkratka: předpověď
+z hodiny H pro cíl T se páruje s pozorováním, jehož met.t/rv.t je
+nejblíž T) a spočítáno dvakrát nezávisle (dvakrát měř, jednou řeš):
+
+- **minutecast × pozorování: 214 010 párů.** Prahy 0,025–0,1 mm/15 min
+  jsou identické kvůli kvantizaci Open-Meteo na 0,1 mm (POD 0,52–0,53,
+  bias 0,70, přesnost 0,86); práh ≥0,15 sráží POD na 0,31. Stávající
+  THRESH_OBS 0,2 mm/h je optimum, beze změny (zdokumentováno v kódu).
+- **Brier pravděpodobností:** Open-Meteo pp 0,1238, ensemble 0,1243;
+  **pp je plochý až do 13. h (0,124–0,128), ensemble do 9. h
+  (0,122–0,128)** → ocas za 8h oknem je opodstatněný: když modely
+  uvnitř okna mlčí, panel „Kdy začne pršet" připojí větu o dešti
+  za hranicí (handover: ensemble 9. hodina, Open-Meteo 10.–13.,
+  práh zobrazení 30 %). Řada pp se stahuje do HOURS_TAIL=12, ens
+  o hodinu navíc. Platí pro mobilní verdikt i PC panel (tentýž prvek).
+- **modely ensemble:** icon_d2 Brier 0,1210 vs icon_eu 0,1311 — d2
+  je lepší, ale jeho doména na Open-Meteo NENÍ box 43,2–58,1°N ×
+  −3,9–20,3°E, nýbrž rotovaný čtyřúhelník s KŘIVKOU jižní hrany
+  (bisekce živými sondami, 429 odlišen od „No data", každý bod 2×):
+  43,53°N při 5°E, vrchol 43,67°N při 10°E, 43,58°N při 13°E,
+  43,45°N při 16,3°E; východ ~18,74°E při 50,5°N až ~19,43°E při
+  54°N. Starý box posílal 28/100 obcí do zákonitého neúspěchu
+  (Krakov, Budapešť, Pécs, Žilina, Bělehrad…; Nice a Split selhávají
+  JIŽNÍM ROHEM mřížky 3×3 −0,1° pod hranu). Nový polygon (ensD2Ok,
+  zrcadlený ve workeru a v testech) drží všech 72 d2-funkčních obcí
+  uvnitř včetně rohů a všech 28 selhání ven.
+- **hory (elev ≥ 700 m, 9 669 párů):** ensemble ztrácí 2× dovednost
+  (Brier rozdíl ens−pp: hory +0,018 vs nížina +0,010), minutecast má
+  naopak nejnižší FAR právě v horách (0,21; pobřeží 0,31). Nově:
+  verdictProb v horách používá SYMETRICKÝ průměr (ens+om)/2 (OM smí
+  ensemble skorigovat dolů; jinde zůstává kolo 8z3 max(ens,(ens+om)/2)),
+  blendWeights v horách ens ×0,85 a radarová rodina ×1,1. Výška bodu
+  teče z geokódu (placeElev z j.elevation).
+- **radar jako svědek: 30 915 párů radar×METAR — radar vynechá ~80 %
+  srážek, které stanice hlásí** (PL/IE/UK/LV/BG navíc pokrytí „none").
+  Aplikační pravidla (kompas nekreslí z kompozitu při „none", stanice
+  potvrzuje sama ≤25 km, rozpor mokrá stanice × suchý radar se říká
+  slovy, kolo 12) měřením potvrzena, beze změny chování — zdokumentováno.
+- **sběrač (doporučení 7):** rotace ensemble šla z 8 pevných UTC hodin
+  pro všechna města (2/3 denního cyklu bez ensemblu) na rotaci PER
+  MĚSTO: (townHash(jméno)+UTC hodina)%3===0 → každé město 8 z 24 h
+  vždy po 3 h, fáze podle jména; rozpočet beze změny 7 200 bodů/den
+  < 10 000, na probuzení 2–3 ens obce (dříve 8–9), záznam nese ensT
+  (1/0) a /analysis/status ví, kterým obcím ens mohl chybět nadřízeně.
+  ENS_ROT_HOURS zůstává exportem pro zpětné vyhodnocení starých záznamů.
+
+Testy: 169/169 (5 upravených kontextů kvůli isMountain, 4 nové regresní
+— hory verdikt/blend, ocas za oknem, zrcadlo polygonu; 6 přepsaných
+worker testů rotace na sémantiku per město + ensT). Build 540 456 B.
+Omezení měření: METAR je na letištích 10–30 km od obce, radar měří
+ve výšce (virga, bright band), okno 14 dní.
+
 ## Kolo 34 — sucho v pohledu ČHMÚ: přepínač se hlásí i bez buněk (24. 11.)
 
 Dave (mobil, 24. 11. 13:19): „Nejede prepinani na ČHMÚ radar. Nic to

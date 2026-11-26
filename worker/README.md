@@ -14,6 +14,18 @@ se zachytí STEJNÉ vstupy, ze kterých appka počítá verdikty:
 
 1. `current` + `minutely_15` (8 kroků = appčin minutecast) + `precipitation_probability`,
 2. ensemble srážkové členy na 3×3 mřížce (icon_d2 → icon_eu → ecmwf_ifs025 → gfs_seamless, tryNext jako v appce),
+   **kolo 35**: rotace per město — město je způsobilé v UTC hodinách, kdy
+   `(townHash(jméno)+hodina)%3===0`, tedy 8 z 24 hodin denně, vždy po 3 h,
+   ale s fází posunutou podle jména, takže napříč městy je pokrytá každá
+   hodina dne (kolo 9 sbíralo všechna města jen v 8 pevných hodinách a
+   2/3 denního cyklu zůstávaly bez ensemblu). Rozpočet beze změny:
+   100 měst × 8 město-hodin × 9 bodů = 7 200 volání kvóty/den < 10 000.
+   Způsobilost nese záznam v `ensT` (1/0), aby analýza věděla, kterým
+   obcím ensemble v danou hodinu mohl chybět nadřízeně. icon_d2 se
+   ptá jen uvnitř změřeného polygonu domény (jižní hrana je křivka:
+   43,53°N při 5°E → vrchol 43,67°N při 10°E → 43,45°N při 16,3°E;
+   Nice a Split selhávají jižním rohem mřížky 3×3), mimo něj jde rovnou
+   kaskáda od icon_eu,
 3. METAR stanice obce jako ground truth (dávkový dotaz na aviationweather.gov, tentýž zdroj jako appka),
 4. **radar RainViewer (kolo 8ag)** — aktuální snímek nad obcí. Worker
    nemá canvas, proto dekóduje PNG dlaždici sám (inflate přes
@@ -47,7 +59,7 @@ Záznamy se ukládají do KV pod `raw/{YYYYMMDDHH}:{mm}`, TTL 14 dní.
 | Open-Meteo volání | 4 800/den | 10 000 (zbytek = proxy provoz) |
 | KV zápisy | 288/den | 1 000 |
 | KV objem | ~10 MB/den → ~150 MB | 1 GB (TTL 14 dní) |
-| Subrequesty / probuzení | ~21–29 (nejhorší případ ~38) | 50 |
+| Subrequesty / probuzení | ~21–26 (nejhorší případ ~30; kolo 35 snížilo ens z 8–9 obcí × 2 modely na 2–3 obce) | 50 |
 | METAR dotazy | 288/den (dávkově) | bez významného limitu |
 | RainViewer dotazy | 12 maps.json + 288 dlažnic/den | veřejné API bez klíče a limitu |
 
@@ -118,7 +130,10 @@ obcí. Na obec:
   9 bodů mřížky × členové × 9 h srážek (mm, 1 desetinné místo),
 - `met` — METAR ground truth: `{t (čas pozorování), tp (°C), r (prší), i (0–3 intenzita), s (sníh), th (bouřka), sh (přeháňka), re (recent), vc (v okolí), raw}`,
 - `rv` — radar ground truth (kolo 8ag): `{t (čas snímku, ~10 min mřížka), mm (medián mm/h z 3×3 pixelů; 0 = jasno), ec (počet pixelů s odrazem 0–9), sn (sněhový příznak většiny odrazů)}`,
-- `err` — pole chybějících částí (fc/ens/met/rv), pokud něco selhalo.
+- `ensT` — (kolo 35) 1/0: bylo město v danou hodinu způsobilé pro sběr
+  ensemble (rotace měst); 0 znamená nadřízenou absenci `ens` bez chyby,
+- `err` — pole chybějících částí (fc/ens/met/rv), pokud něco selhalo
+  (`ens` se hlásí jen u způsobilých měst, `ensT`=1).
 
 Párování pro vyhodnocení přesnosti: předpověď z záznamu hodiny H pro
 cílový čas T porovnat s METAR `r/i` z záznamu, jehož `met.t` je blízko T,

@@ -360,15 +360,66 @@ test("sběrač: 12 dílků pokryje všech 100 obcí, každá právě jednou", as
   }
 });
 
-test("sběrač: výběr ensemble modelu zrcadlí appku (icon_d2 box vs icon_eu)", async () => {
+test("sběrač: výběr ensemble modelu zrcadlí appku (icon_d2 polygon vs icon_eu)", async () => {
   const m = await collector();
   assert.strictEqual(m.ensModelFor(50.10, 14.26), "icon_d2");   /* Praha */
   assert.strictEqual(m.ensModelFor(49.15, 16.69), "icon_d2");   /* Brno */
   assert.strictEqual(m.ensModelFor(41.80, 12.25), "icon_eu");   /* Řím (jih) */
   assert.strictEqual(m.ensModelFor(42.70, 23.32), "icon_eu");   /* Sofie (jih) */
-  assert.strictEqual(m.ensModelFor(44.82, 20.29), "icon_d2");   /* Bělehrad (u kraje boxu) */
+  assert.strictEqual(m.ensModelFor(44.82, 20.29), "icon_eu");   /* Bělehrad — východní hrana polygonu (kolo 35; starý box ho bral jako d2) */
   assert.strictEqual(m.ensModelFor(49.81, 23.96), "icon_eu");   /* Lvov (východ) */
   assert.strictEqual(m.ensModelFor(60.32, 24.96), "icon_eu");   /* Helsinky (sever) */
+  /* Kolo 35: obce, kterým icon_d2 REÁLNĚ selhával celých 14 dní sběru
+     (400 "No data"), polygon je musí vyřadit předem */
+  assert.strictEqual(m.ensModelFor(50.08, 19.80), "icon_eu");   /* Krakov */
+  assert.strictEqual(m.ensModelFor(47.44, 19.26), "icon_eu");   /* Budapešť */
+  assert.strictEqual(m.ensModelFor(45.99, 18.24), "icon_eu");   /* Pécs */
+  assert.strictEqual(m.ensModelFor(49.23, 18.61), "icon_eu");   /* Žilina */
+  assert.strictEqual(m.ensModelFor(43.66, 7.22), "icon_eu");    /* Nice — jižní ROH mřížky 3×3 padá pod hranu (43,56 < 43,60) */
+  assert.strictEqual(m.ensModelFor(43.54, 16.30), "icon_eu");   /* Split — jižní ROH mřížky padá pod hranu (43,44 < 43,45) */
+  /* obce, kde icon_d2 reálně data dával — polygon je drží uvnitř */
+  assert.strictEqual(m.ensModelFor(54.38, 18.47), "icon_d2");   /* Gdaňsk (východ, ale uvnitř) */
+  assert.strictEqual(m.ensModelFor(46.69, 17.16), "icon_d2");   /* Balaton */
+  assert.strictEqual(m.ensModelFor(45.20, 7.65), "icon_d2");   /* Turín */
+  assert.strictEqual(m.ensModelFor(45.22, 14.57), "icon_d2");   /* Rijeka */
+});
+
+/* KOLO 35: polygon domény icon_d2 musí být identický zrcadlo appky
+   (src/main.js ensD2Ok) — jinak by sběrač sbíral jiný model než co
+   uživatel vidí ve verdiktu a analýza by měřila něco jiného.
+   Vytáhne se ensD2Ok ze zdroje appky (ne z buildu, ať test selže
+   hned při změně zdroje) a porovná se všemi 100 obci + hraničními
+   sondami z měření 26. 11. 2026. */
+test("kolo 35: polygon icon_d2 ve workeru je věrné zrcadlo appky (ensD2Ok)", async () => {
+  const m = await collector();
+  const vm = require("node:vm");
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "main.js"), "utf8");
+  const start = src.indexOf("function ensD2Ok(");
+  assert.ok(start >= 0, "ensD2Ok v src/main.js chybí");
+  const end = src.indexOf("\n}", start);
+  const ctx = vm.createContext({});
+  vm.runInContext(src.slice(start, end + 2) + "\n;ensD2Ok", ctx);
+  const appOk = ctx.result || vm.runInContext("ensD2Ok", ctx);
+  const appD2 = (lat, lon) => appOk(lat, lon);
+  const wD2 = (lat, lon) => m.ensCandidates(lat, lon)[0] === "icon_d2";
+  /* všech 100 obcí: shoda appka vs worker */
+  m.MUNICIPALITIES.forEach((p) => {
+    assert.strictEqual(appD2(p.lat, p.lon), wD2(p.lat, p.lon),
+      "rozpor polygonu u " + p.n + " (" + p.lat + ", " + p.lon + ")");
+  });
+  /* hraniční sondy z živého měření (26. 11. 2026, bisekce středů):
+     jižní hrana domény je 43,60°N při 7,22°E a 43,454°N při 16,3°E.
+     Polygon je test CELOÉ mřížky 3×3 (jižní roh = střed −0,1°):
+     střed 0,12° nad hranou projde, těsně nad hranou ne (roh spadne),
+     Nice a Split (jejichž rohy měřeně padají pod hranu) také ne */
+  [[43.73, 7.22, true], [43.601, 7.22, false],
+   [43.585, 16.30, true], [43.454, 16.30, false],
+   [43.66, 7.22, false], [43.54, 16.30, false]].forEach(([lat, lon, want]) => {
+    assert.strictEqual(appD2(lat, lon), want, "sonda (" + lat + ", " + lon + ") má být " + (want ? "d2" : "mimo"));
+    assert.strictEqual(wD2(lat, lon), want, "worker sonda (" + lat + ", " + lon + ") má být " + (want ? "d2" : "mimo"));
+  });
 });
 
 test("sběrač: URL zrcadlí vstupy aplikace (minutely_15, 3×3 mřížka, 9 hodin)", async () => {
@@ -480,11 +531,23 @@ test("cron: jedno probuzení sebere svůj dílek a zapíše JEDEN klíč s TTL 1
   assert.strictEqual(Object.keys(rec.p).length, m.placesForSlice(0).length);
   /* METAR šel v jednom hromadném dotazu pro celý dílek */
   assert.strictEqual(up.state.urls.filter((u) => u.indexOf("aviationweather.gov") >= 0).length, 1);
-  /* každá obec má forecast i ensemble; METAR vrátila fixture jen LKPR */
+  /* každá obec má forecast; ensemble od kola 14 jen způsobilá města
+     (rotace per město, entry.ensT), ostatní ho nadřízeně postrádají
+     bez chyby */
+  const expElig = m.placesForSlice(0).filter((p) => m.ensRotEligible(p.n, 14)).map((p) => p.n);
   Object.keys(rec.p).forEach((n) => {
     assert.ok(rec.p[n].fc, "fc u " + n);
-    assert.ok(rec.p[n].ens, "ens u " + n);
+    if (rec.p[n].ensT) {
+      assert.ok(rec.p[n].ens, "ens u způsobilé " + n);
+    } else {
+      assert.ok(!rec.p[n].ens, "mimo rotaci města žádné ens u " + n);
+      assert.ok(!rec.p[n].err || rec.p[n].err.indexOf("ens") < 0,
+        "chybějící ens u nezpůsobilého města není selhání zdroje u " + n);
+    }
   });
+  const gotElig = Object.keys(rec.p).filter((n) => rec.p[n].ensT === 1);
+  assert.deepStrictEqual(gotElig.slice().sort(), expElig.slice().sort(),
+    "ensT v záznamu = přesně způsobilá města kola 14");
   /* Praha (LKPR) má ground truth z fixture: -RA → déšť, slabý */
   const pra = rec.p["Praha"];
   assert.ok(pra, "dílek 0 obsahuje Prahu");
@@ -512,7 +575,12 @@ test("cron: výpadek jednoho upstreamu shodí jen dotčené obce, kolo proběhne
   const rec = JSON.parse(kv.store.get("raw/2026110614:30").v);
   Object.keys(rec.p).forEach((n) => {
     assert.ok(rec.p[n].fc, "fc přežilo u " + n);
-    assert.ok(rec.p[n].err && rec.p[n].err.indexOf("ens") >= 0, "ens označeno jako chyba u " + n);
+    if (rec.p[n].ensT) {
+      assert.ok(rec.p[n].err && rec.p[n].err.indexOf("ens") >= 0, "ens označeno jako chyba u způsobilé " + n);
+    } else {
+      assert.ok(!rec.p[n].err || rec.p[n].err.indexOf("ens") < 0,
+        "mimo rotaci města chybějící ens není chyba u " + n);
+    }
   });
 });
 
@@ -583,7 +651,9 @@ test("analysis dashboard: HTML s ovládacími prvky, healthz hlásí kolektor", 
 
 test("sběrač: ensemble fallback — po výpadku icon_d2 sebere icon_eu (tryNext jako v appce)", async () => {
   const m = await collector();
-  /* dílek 0 obsahuje Prahu; icon_d2 vrátí 400 (mimo doménu), sběrač musí spadnout na icon_eu */
+  /* dílek 0 při 14:00 UTC: způsobilá města (kolo 35) jsou Budapešť,
+     Miláno, Amsterdam a Bergen; icon_d2 vrátí 400 (mimo doménu),
+     sběrač musí spadnout na icon_eu */
   const impl = async (url) => {
     if (url.indexOf("models=icon_d2") >= 0) return new Response("no data", { status: 400 });
     if (url.indexOf("models=icon_eu") >= 0) return okJson(ensFixture());
@@ -592,19 +662,24 @@ test("sběrač: ensemble fallback — po výpadku icon_d2 sebere icon_eu (tryNex
     if (url.indexOf("weather-maps.json") >= 0) return okJson(mapsFixture());
     if (url.indexOf("/v2/radar/") >= 0) return new Response(tileFixture(), { status: 200 });
     if (url.indexOf("aviationweather.gov") >= 0) {
-      return okJson([{ icaoId: "LKPR", obsTime: 1794000300, temp: 2, rawOb: "METAR LKPR 061930Z 07006KT 8000 -RA NSC 01/M00 Q1025 NOSIG" }]);
+      return okJson([
+        { icaoId: "LKPR", obsTime: 1794000300, temp: 2, rawOb: "METAR LKPR 061930Z 07006KT 8000 -RA NSC 01/M00 Q1025 NOSIG" },
+        { icaoId: "LIML", obsTime: 1794000300, temp: 2, rawOb: "METAR LIML 061930Z 07006KT 8000 -RA NSC 01/M00 Q1025 NOSIG" }
+      ]);
     }
     return okJson([]);
   };
   const kv = mockKv();
   const w = m.createWorker({ fetchImpl: impl, kv });
+  assert.ok(m.ensRotEligible("Miláno", 14), "Miláno musí být v 14 UTC způsobilé");
   const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 14, 0) });
   assert.ok(res.ok);
   const rec = JSON.parse(kv.store.get(res.key).v);
-  const pra = rec.p["Praha"];
-  assert.ok(pra.ens, "ensemble musí dojít přes fallback");
-  assert.strictEqual(pra.ens.m, "icon_eu");
-  assert.ok(!pra.err, "bez chyby: " + JSON.stringify(pra.err));
+  const mil = rec.p["Miláno"];
+  assert.ok(mil, "Miláno v dílku 0");
+  assert.ok(mil.ens, "ensemble musí dojít přes fallback");
+  assert.strictEqual(mil.ens.m, "icon_eu");
+  assert.ok(!mil.err, "bez chyby: " + JSON.stringify(mil.err));
 });
 
 /* ================= RADAR (kolo 8ag) ================= */
@@ -717,13 +792,15 @@ test("cron: výpadek radaru shodí jen pole rv, záznam vznikne, kolo běží d�
   const up = collectorFetch({ failIf: (u) => u.indexOf("rainviewer") >= 0 || u.indexOf("/v2/radar/") >= 0 });
   const kv = mockKv();
   const w = m.createWorker({ fetchImpl: up.impl, kv });
-  /* 14:00 UTC = rotační hodina (kolo 9), dílek 0 → Praha */
+  /* 14:00 UTC, dílek 0 → Praha; ensemble jen pro způsobilá města (kolo 35) */
   const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 14, 0) });
   assert.ok(res.ok);
   const rec = JSON.parse(kv.store.get(res.key).v);
   Object.keys(rec.p).forEach((n) => {
     const e = rec.p[n];
-    assert.ok(e.fc && e.ens, "předpovědi přežily výpadek radaru u " + n);
+    assert.ok(e.fc, "fc přežilo výpadek radaru u " + n);
+    if (e.ensT) assert.ok(e.ens, "ens přežilo výpadek radaru u způsobilé " + n);
+    else assert.ok(!e.ens, "mimo rotaci bez ens u " + n);
     assert.ok(!e.rv, "radar chybí u " + n);
     assert.ok(e.err.indexOf("rv") >= 0, "rv označeno jako chyba u " + n);
   });
@@ -887,7 +964,13 @@ test("kolo 8bb: 429 na ensemble -> cooldown kola (1 subrequest), zadna kaskada, 
     assert.ok(rec.p[n].fc, "fc u " + n);
     assert.ok(rec.p[n].rv, "rv u " + n + " nesmí trpět kvótou ensemble");
     assert.ok(rec.p[n].met, "met u " + n);
-    assert.deepStrictEqual(rec.p[n].err, ["ens"], "jediná chyba je ens u " + n);
+    /* kolo 35: err ens jen u způsobilých měst (ta cooldown postihl),
+       nezpůsobilá města ens nadřízeně postrádají bez chyby */
+    if (rec.p[n].ensT) {
+      assert.deepStrictEqual(rec.p[n].err, ["ens"], "jediná chyba je ens u způsobilé " + n);
+    } else {
+      assert.ok(!rec.p[n].err, "nezpůsobilé město bez chyb u " + n + ": " + JSON.stringify(rec.p[n].err));
+    }
   });
 });
 
@@ -914,9 +997,14 @@ test("kolo 8bb: zdravé kolo načte ens až po rv (ground truth první), per-wor
   const lastRv = urls2.map((u) => u.indexOf("/v2/radar/") >= 0).lastIndexOf(true);
   assert.ok(ensIdx > lastRv, "ensemble se načítá až po všech radarových dlaždicích");
   Object.keys(rec2.p).forEach((n) => {
-    assert.ok(rec2.p[n].ens, "ens u " + n);
-    assert.strictEqual(rec2.p[n].ens.m, "icon_d2");
-    assert.ok(!rec2.p[n].err, "bez chyb u " + n + ": " + JSON.stringify(rec2.p[n].err));
+    if (rec2.p[n].ensT) {
+      assert.ok(rec2.p[n].ens, "ens u způsobilé " + n);
+      assert.strictEqual(rec2.p[n].ens.m, "icon_d2");
+      assert.ok(!rec2.p[n].err, "bez chyb u způsobilé " + n + ": " + JSON.stringify(rec2.p[n].err));
+    } else {
+      assert.ok(!rec2.p[n].ens, "mimo rotaci bez ens u " + n);
+      assert.ok(!rec2.p[n].err, "bez chyb u " + n + ": " + JSON.stringify(rec2.p[n].err));
+    }
   });
 });
 
@@ -1009,20 +1097,50 @@ test("kolo 8bb: analysis/page?mm= vrací jediný dílek hodiny; validace mm", as
   }
 });
 
-/* ===================== KOLO 9: ROTACE ENS, PX, DZ ===================== */
+/* ===================== KOLO 9/14: ROTACE ENS, PX, DZ ===================== */
 
-test("kolo 9: ENS_ROT_HOURS = 8 rovnoměrně rozložených hodin, rotace přesně po 3 h", async () => {
+test("kolo 9 (legacy): ENS_ROT_HOURS zůstává exportováno pro zpětné vyhodnocení starých záznamů", async () => {
   const m = await collector();
   assert.strictEqual(m.ENS_ROT_HOURS.length, 8, "8 rotačních hodin denně");
   const h = m.ENS_ROT_HOURS.slice().sort((a, b) => a - b);
-  h.forEach((x) => assert.ok(x >= 0 && x <= 23, "hodina v UTC rozsahu"));
+  h.forEach((x) => assert.ok(x >= 0 && x <= 23, "hodnota v UTC rozsahu"));
   for (let i = 0; i < h.length; i++) {
     const next = i === h.length - 1 ? h[0] + 24 : h[i + 1];
-    assert.strictEqual(next - h[i], 3, "mezi rotacemi je přesně 3 h (horizont ens 9 h se neprotrhne)");
+    assert.strictEqual(next - h[i], 3, "mezi rotacemi je přesně 3 h");
   }
 });
 
-test("kolo 9: mimo rotační hodinu se ensemble nesebere vůbec (cd=ensrot, err bez ens)", async () => {
+test("kolo 35: rotace ensemble per město — každé město 8 hodin denně po 3 h, rozpočet 7 200/den", async () => {
+  const m = await collector();
+  /* každé město způsobilé právě 8 z 24 hodin, vždy po 3 h (horizont ens
+     9 h se neprotrhne) — ale s fází posunutou podle townHash, takže
+     napříč městy je pokrytá KAŽDÁ hodina dne (stará rotace kola 9
+     brala všechna města ve stejných 8 hodinách) */
+  m.MUNICIPALITIES.forEach((p) => {
+    const hs = [];
+    for (let h = 0; h < 24; h++) if (m.ensRotEligible(p.n, h)) hs.push(h);
+    assert.strictEqual(hs.length, 8, "právě 8 způsobilých hodin u " + p.n);
+    hs.sort((a, b) => a - b);
+    for (let i = 0; i < hs.length; i++) {
+      const next = i === hs.length - 1 ? hs[0] + 24 : hs[i + 1];
+      assert.strictEqual(next - hs[i], 3, "krok 3 h u " + p.n);
+    }
+  });
+  /* každá hodina dne má některá města způsobilá (kontinuita sběru) */
+  for (let h = 0; h < 24; h++) {
+    const n = m.MUNICIPALITIES.filter((p) => m.ensRotEligible(p.n, h)).length;
+    assert.ok(n >= 25, "hodina " + h + " má " + n + " způsobilých měst, očekáváno ~33");
+  }
+  /* rozpočet kvóty beze změny oproti kolu 9: 100 měst × 8 město-hodin
+     × 9 bodů mřížky = 7 200 volání/den < limit 10 000 */
+  const perDay = m.MUNICIPALITIES.length * 8 * 9;
+  assert.strictEqual(perDay, 7200, "rozpočet ens bodů za den");
+  /* townHash je deterministický — záznamy lze vyhodnotit zpětně */
+  assert.strictEqual(m.townHash("Praha"), m.townHash("Praha"));
+  assert.notStrictEqual(m.townHash("Praha") % 3, m.townHash("Brno") % 3, "fáze se liší");
+});
+
+test("kolo 35: v jednom kole má ens jen způsobilé město (13:35 = dílek 7, způsobilý Lugano)", async () => {
   const m = await collector();
   const urls = [];
   const impl = async (url) => {
@@ -1036,20 +1154,29 @@ test("kolo 9: mimo rotační hodinu se ensemble nesebere vůbec (cd=ensrot, err 
   };
   const kv = mockKv();
   const w = m.createWorker({ fetchImpl: impl, kv });
-  /* 13:35 UTC = dílek 7, mimo ENS_ROT_HOURS; radarová fixture má snímek 13:30 */
+  /* 13:35 UTC = dílek 7; způsobilá města dílků 7 v 13 h: jen Lugano */
+  const expElig = m.placesForSlice(7).filter((p) => m.ensRotEligible(p.n, 13)).map((p) => p.n);
+  assert.deepStrictEqual(expElig, ["Lugano"], "příklad rotace: dílek 7 v 13 UTC má způsobilý jen Lugano");
   const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 13, 35) });
   assert.ok(res.ok, JSON.stringify(res));
-  assert.strictEqual(urls.filter((u) => u.indexOf("ensemble-api") >= 0).length, 0,
-    "mimo rotační hodinu se nesmí udělat jediný ensemble subrequest (kvóta)");
+  assert.strictEqual(urls.filter((u) => u.indexOf("ensemble-api") >= 0).length, 1,
+    "ensemble subrequest jen pro způsobilé město (kvóta)");
   const rec = JSON.parse(kv.store.get(res.key).v);
-  assert.strictEqual(rec.cd, "ensrot", "důvod chybějícího ens v záznamu pro diagnostiku");
+  assert.ok(!rec.cd, "kolo se sběrem ens nemá cd značku: " + rec.cd);
   Object.keys(rec.p).forEach((n) => {
     const e = rec.p[n];
     assert.ok(e.fc, "fc u " + n);
     assert.ok(e.rv, "rv u " + n + " nesmí trpět rotací");
     assert.ok(e.met, "met u " + n);
-    assert.ok(!e.ens, "ens nesmí být u " + n);
-    assert.ok(!e.err, "chybějící ens mimo rotaci není selhání zdroje u " + n + ": " + JSON.stringify(e.err));
+    if (m.ensRotEligible(n, 13)) {
+      assert.strictEqual(e.ensT, 1, "ensT=1 u způsobilého " + n);
+      assert.ok(e.ens, "ens u způsobilého " + n);
+      assert.ok(!e.err, "způsobilé město bez chyb u " + n + ": " + JSON.stringify(e.err));
+    } else {
+      assert.strictEqual(e.ensT, 0, "ensT=0 u nezpůsobilého " + n);
+      assert.ok(!e.ens, "ens se nesbírá u nezpůsobilého " + n);
+      assert.ok(!e.err, "chybějící ens u nezpůsobilého města není selhání u " + n + ": " + JSON.stringify(e.err));
+    }
   });
 });
 
@@ -1112,7 +1239,7 @@ test("kolo 9: METAR dz — mrholení (-DZ, -RADZ) ano, RA/SN/BR ne", async () =>
   assert.ok(p.dz !== undefined, "pole dz je vždy vyplněno (0/1)");
 });
 
-test("kolo 9: rotační hodina (14:30) chová se jako dřív — ens po rv, cooldown 429 funguje", async () => {
+test("kolo 35: kolo s více způsobilými městy — 429 zastaví ens po prvním, err ens jen u způsobilých", async () => {
   const m = await collector();
   const urls = [];
   let ensCalls = 0;
@@ -1130,14 +1257,21 @@ test("kolo 9: rotační hodina (14:30) chová se jako dřív — ens po rv, cool
   };
   const kv = mockKv();
   const w = m.createWorker({ fetchImpl: impl, kv });
-  /* 14:30 UTC ∈ ENS_ROT_HOURS → ens se sbírá, 429 = cooldown kola */
+  /* 14:30 UTC = dílek 6; způsobilých měst je 5 (Náměšť nad Oslavou,
+     Celovec, Bern, Maribor, Paříž) — 429 zastaví sběr po prvním */
+  const nElig = m.placesForSlice(6).filter((p) => m.ensRotEligible(p.n, 14)).length;
+  assert.ok(nElig >= 2, "dílek 6 v 14 UTC musí mít alespoň 2 způsobilá města (má " + nElig + ")");
   const res = await w.scheduled({ scheduledTime: Date.UTC(2026, 10, 6, 14, 30) });
   assert.ok(res.ok, JSON.stringify(res));
   assert.strictEqual(ensCalls, 1, "429 stojí jediný subrequest na celé kolo");
   const rec = JSON.parse(kv.store.get(res.key).v);
   assert.strictEqual(rec.cd, "ens429", "důvod cooldownu v záznamu");
   Object.keys(rec.p).forEach((n) => {
-    assert.deepStrictEqual(rec.p[n].err, ["ens"], "jediná chyba je ens u " + n);
+    if (rec.p[n].ensT) {
+      assert.deepStrictEqual(rec.p[n].err, ["ens"], "cooldown postihl způsobilé město " + n);
+    } else {
+      assert.ok(!rec.p[n].err, "nezpůsobilé město bez chyb u " + n + ": " + JSON.stringify(rec.p[n].err));
+    }
   });
 });
 
