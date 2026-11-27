@@ -2831,8 +2831,25 @@ function gtNetArm(){
   if(gtNetTimer) return;
   gtNetTimer = setTimeout(function(){
     gtNetTimer = null;
+    /* KOLO 35b: pořadí zde rozhoduje. Původní gtPrune() PŘED podmínkou
+       smazalo expirované strážky dřív, než se podmínka stihla zeptat,
+       takže „pokud něco stále visí“ bylo po prune vždy prázdné a
+       časovač nikdy nepřekreslil: když se některé pozorování na
+       pomalém mobilním připojení nedotáhlo (žádný onload ani onerror),
+       panel zůstal viset v „ověřuji“ navždy (Dave 27. 11., mobil,
+       Líšeň: visel „čekám na: radar ČHMÚ“ i po mnoha minutách).
+       POZOR: nelze číst přes gtPendingLabels() — ta sama uvnitř
+       volá gtPrune() a smazala by to stejně. Registru se proto ptáme
+       napřímo, teprve potom se expirované smažou, a překreslení
+       proběhne vždy, když něco viselo — recomputeWhen pak strážky
+       už nevidí a verdikt se dopíše. */
+    var viselo = false;
+    for(var vk in gtPending){
+      if(!Object.prototype.hasOwnProperty.call(gtPending, vk)) continue;
+      viselo = true; break;
+    }
     gtPrune();
-    if(gtPendingLabels().length) recomputeWhen();
+    if(viselo) recomputeWhen();
   }, GT_MAX_PENDING_MS + 2000);
 }
 function resetForecastState(){
@@ -6502,6 +6519,21 @@ function scheduleChmiRetry(lat, lon, myId, attempt){
   }, CHMI_RETRY_DELAYS[attempt]);
 }
 
+/* KOLO 35b: tvrdý strop čekání na ČHMÚ. Všechny obrázky (legenda,
+   snímky, TAR členové) se načítají jako <img> a na utuhlém mobilním
+   připojení se stane, že nespustí onload ani onerror — chmiState
+   zůstane null a strážka visí. gtNetArm mezitím pojistně překreslí
+   verdikt (nepotvrzeno), tady ale navíc samotné ČHMÚ označíme chybou,
+   ať se spustí standardní dotahy (+20 s, +60 s) a obnovovací cyklus. */
+var bpChmiDeadline = null;
+function chmiDeadlineFire(myId){
+  bpChmiDeadline = null;
+  if(isStale(myId)) return;
+  if(chmiState !== null) return;   /* dořešilo se dřív: data i chyba */
+  chmiState = "error";
+  if(!chmiNote) chmiNote = "načítání trvá déle než 45 s";
+  if(gtPendingHas("chmi")){ gtSettle("chmi"); renderCompass(); recomputeWhen(); }
+}
 function loadChmi(lat, lon, myId, attempt){
   attempt = attempt || 0;
   chmiState = null; chmiNote = "";
@@ -6511,6 +6543,10 @@ function loadChmi(lat, lon, myId, attempt){
     chmiNote = "mimo dosah českého radaru";
     gtSettle("chmi");
     return;
+  }
+  if(typeof setTimeout === "function"){   /* node test harness bez DOM */
+    if(bpChmiDeadline != null) clearTimeout(bpChmiDeadline);
+    bpChmiDeadline = setTimeout(function(){ chmiDeadlineFire(myId); }, 45000);
   }
   loadChmiScale().then(function(){
     if(isStale(myId)) return;
