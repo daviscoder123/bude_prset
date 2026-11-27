@@ -1342,3 +1342,23 @@ test("/rv/img: 404 upstreamu se šíří jako 404 (appka pak ví, že snímek ch
     encodeURIComponent("/v2/radar/2c66a8ce20eb/256/7/69/43/0/0_1.png")));
   assert.strictEqual(r.status, 404);
 });
+
+/* Kolo 36: maska pokrytí RainVieweru (/v2/coverage) — appka ji na sítích
+   blokujících cizí domény (kolo 13) dřív četla jen přímo a vždy selhala;
+   nově má fallback přes /rv/img, takže Worker musí tvar masky přijmout.
+   Whitelist zůstává úzký: dlaždice radaru + maska, nic víc. */
+test("kolo 36: /rv/img přijme masku pokrytí /v2/coverage, cizí cesty odmítne", async () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const w = await workerWith({ fetchImpl: async () => new Response(png, { status: 200 }) });
+  const r = await w.fetch(new Request("https://w.example/rv/img?u=" + encodeURIComponent("/v2/coverage/0/256/5/17/9/0/0_0.png")));
+  assert.strictEqual(r.status, 200, "maska pokrytí projde");
+  assert.strictEqual(r.headers.get("access-control-allow-origin"), "*", "CORS pro čtení do canvasu");
+  const tile = await w.fetch(new Request("https://w.example/rv/img?u=" + encodeURIComponent("/v2/radar/2c66a8ce20eb/256/7/69/43/0/0_1.png")));
+  assert.strictEqual(tile.status, 200, "dlaždice radaru stále projde");
+  const bad = await w.fetch(new Request("https://w.example/rv/img?u=" + encodeURIComponent("/v2/coverage/0/256/5/17/9/2/1_1.png")));
+  assert.strictEqual(bad.status, 400, "maska má jen schéma 0 a tvar 0_0.png");
+  const trav = await w.fetch(new Request("https://w.example/rv/img?u=" + encodeURIComponent("/v2/coverage/../../secret.png")));
+  assert.strictEqual(trav.status, 400, "traversal odmítnut");
+  const alien = await w.fetch(new Request("https://w.example/rv/img?u=" + encodeURIComponent("/v3/whatever.png")));
+  assert.strictEqual(alien.status, 400, "cizí cesta odmítnuta (žádná otevřená proxy)");
+});

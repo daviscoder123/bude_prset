@@ -930,10 +930,13 @@ test('kolo 11: radarová dlaždice má timeout, visící request nezasekne řet�
   const seg=script.slice(i,i+2200);
   assert.ok(seg.includes('RV_TILE_TIMEOUT_MS'),'časovač dlaždice');
   assert.ok(seg.includes('clearTimeout'),'vyčištění časovače po úspěchu');
-  assert.ok(/setTimeout\(function\(\)\{[\s\S]{0,600}resolve\(null\);[\s\S]{0,200}\}, RV_TILE_TIMEOUT_MS\);/.test(seg),
+  /* kolo 36: timeout je parametrizovaný (timeoutMs || RV_TILE_TIMEOUT_MS) —
+     přímá noha 4 s, noha přes Worker plných 12 s; pořád resolvoval null, nikdy reject */
+  assert.ok(/setTimeout\(function\(\)\{[\s\S]{0,600}resolve\(null\);[\s\S]{0,200}\}, timeoutMs \|\| RV_TILE_TIMEOUT_MS\);/.test(seg),
     'timeout resolvoval null (snímek se vynechá), nikdy reject');
-  const icov=script.indexOf('function readCoverage');
-  assert.ok(script.slice(icov,icov+2200).includes('RV_TILE_TIMEOUT_MS'),
+  const icov=script.indexOf('function readCoverageBase');
+  assert.notEqual(icov,-1,'kolo 36: čtení masky vytaženo do readCoverageBase');
+  assert.ok(script.slice(icov,icov+2400).includes('timeoutMs || RV_TILE_TIMEOUT_MS'),
     'maska pokrytí má tentýž časovač (resolve „error“)');
 });
 test('kolo 11: selhání radaru se samovolně dotáhne (retry max 2)',()=>{
@@ -1132,7 +1135,7 @@ test('kolo 12c: ČHMÚ potvrzuje „prší právě teď“ samo (čerstvé ECHO)
    předpověďmi. */
 test('kolo 13: maps.json po selhání přímé cesty jede přes Worker /rv/maps',async()=>{
   const calls=[];
-  const c=context(['rvMapsJson','cachedJsonNoOffline','cachedJson','fetchT','pruneCache'],{
+  const c=context(['rvMapsJson','cachedJsonNoOffline','cachedJson','fetchT','pruneCache','rvBlockHint','rvBlockHintSet','rvBlockHintClear'],{
     CACHE:{},CACHE_MAX:200,OFFLINE_KEY:'bpOffline',
     fetch:(url)=>{
       calls.push(url);
@@ -1143,7 +1146,7 @@ test('kolo 13: maps.json po selhání přímé cesty jede přes Worker /rv/maps'
       return Promise.resolve({ok:false,status:404});
     },
     AbortController:FakeAbortController,setTimeout,clearTimeout,
-    BP_PROXY:'https://w.example'
+    BP_PROXY:'https://w.example',RV_DIRECT_TIMEOUT_MS:4000
   });
   const j=await c.rvMapsJson();
   assert.equal(j.viaProxy,true,'data doručil Worker');
@@ -1158,11 +1161,11 @@ test('kolo 13: maps.json po selhání přímé cesty jede přes Worker /rv/maps'
     'jen přímý retry, proxy leg drží CACHE');
 });
 test('kolo 13: obě nohy selžou-li, zůstává offline záloha jako dřív',async()=>{
-  const c=context(['rvMapsJson','cachedJsonNoOffline','cachedJson','fetchT','pruneCache'],{
+  const c=context(['rvMapsJson','cachedJsonNoOffline','cachedJson','fetchT','pruneCache','rvBlockHint','rvBlockHintSet','rvBlockHintClear'],{
     CACHE:{},CACHE_MAX:200,OFFLINE_KEY:'bpOffline',
     fetch:()=>Promise.reject(new TypeError('Failed to fetch')),
     AbortController:FakeAbortController,setTimeout,clearTimeout,
-    BP_PROXY:'https://w.example',
+    BP_PROXY:'https://w.example',RV_DIRECT_TIMEOUT_MS:4000,
     localStorage:{getItem:()=>JSON.stringify({'https://api.rainviewer.com/public/weather-maps.json':{t:1,d:{version:'2.0',backup:true}}}),setItem:()=>{}},
     offlineStale:()=>{}
   });
@@ -1215,7 +1218,7 @@ test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
     'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
   assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
     'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
-  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
+  assert.ok(html.includes('>v36<'),'aktuální verze: v36 (kolo 36)');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
@@ -1668,7 +1671,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
+  assert.ok(html.includes('>v36<'),'aktuální verze: v36 (kolo 36)');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1718,7 +1721,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
+  assert.ok(html.includes('>v36<'),'aktuální verze: v36 (kolo 36)');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
@@ -1837,7 +1840,7 @@ test('kolo 23: pojistka proti visícímu dotazu na oprávnění (3 s)',()=>{
     'havárie init() se vypíše na clonu, ne němá smrt skriptu');
   assert.ok(script.includes('geoPermTxt()'),
     'nápovědy clony nesou stav oprávnění (diagnostika z mobilu)');
-  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
+  assert.ok(html.includes('>v36<'),'aktuální verze: v36 (kolo 36)');
 });
 
 test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spustí žádost',async()=>{
@@ -1889,7 +1892,7 @@ test('kolo 24: start aplikace — init() až po všech deklaracích, load() null
     'init() běží až po deklaraci vyhledávacího pole (na konci skriptu)');
   assert.ok(script.slice(initCall).includes('catch'),
     'pojistka havárie z kola 23 (chyba na clonu) zůstává');
-  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
+  assert.ok(html.includes('>v36<'),'aktuální verze: v36 (kolo 36)');
 });
 
 test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
@@ -1923,7 +1926,7 @@ test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
     'statické HTML startuje s viditelnou clonou — úvod bez bliknutí');
   assert.ok(html.includes('@keyframes riseIn') && html.includes('.compass{animation:riseIn'),
     'panely vplouvají animací riseIn');
-  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
+  assert.ok(html.includes('>v36<'),'aktuální verze: v36 (kolo 36)');
 });
 
 test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit/ČHMÚ',()=>{
@@ -1954,7 +1957,7 @@ test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit
     'volba pohledu se pamatuje v localStorage, nikam se neposílá');
   assert.ok(script.includes('function humanDur('),
     'lidský formát trvání existuje jako sdílený pomocník');
-  assert.ok(html.includes('.radseg') && html.includes('>v35b<'),
+  assert.ok(html.includes('.radseg') && html.includes('>v36<'),
     'CSS segmentu je v šabloně, verze v34');
 });
 
@@ -1981,7 +1984,7 @@ test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
   assert.ok(rc.includes('Odsud déšť nečekej') && rc.includes('Intenzitu dopředu neodhadnu')
     && rc.includes('skoro stojí'),
     'vysvětlení v úzkém panelu jsou zkrácená (málo místa = kratší text)');
-  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
+  assert.ok(html.includes('>v36<'),'aktuální verze: v36 (kolo 36)');
 });
 
 test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start mobilu)',()=>{
@@ -2002,7 +2005,7 @@ test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start 
   const rc=fn('renderCompassBase');
   assert.ok(rc.includes('radViewCur === "chmu" && chmiReady && chmiCells'),
     'zdroj tvrdí ČHMÚ jen tehdy, když kompas opravdu kreslí jeho pole (jinak kompozit)');
-  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
+  assert.ok(html.includes('>v36<'),'aktuální verze: v36 (kolo 36)');
 });
 
 test('kolo 29: široké rozpětí se hlásí jako časy dne, příčina se jmenuje',()=>{
@@ -2031,7 +2034,7 @@ test('kolo 29: široké rozpětí se hlásí jako časy dne, příčina se jmenu
     'mobilní solo panel mluví tentýmž jazykem (časy, ne „za 2 h 44 min“)');
   assert.ok(rs.includes('if(!winBig && W.lo != null'),
     'dodatek „mezi X. a Y. minutou“ se u časového okna neduplikuje');
-  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
+  assert.ok(html.includes('>v36<'),'aktuální verze: v36 (kolo 36)');
 });
 
 /* ==================== KOLO 30: VERDIKT ČEKÁ JEN NA POZOROVÁNÍ ==================== */
@@ -2099,7 +2102,7 @@ test('kolo 30: strukturální — čekání na pozorování, pojistná překresl
   assert.ok(script.includes('var GT_OBS'),
     'množina pozorovacích klíčů je pojmenovaná');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v21'),'service worker bump');
+  assert.ok(swSrc.includes('bude-prset-v22'),'service worker bump (kolo 36: v22)');
 });
 
 test('kolo 31: pohled ČHMÚ mluví daty národního radaru (Dave, 20. 11.)',()=>{
@@ -2168,10 +2171,10 @@ test('kolo 31: strukturální — přepínač radaru přepisuje i popisek',()=>{
   assert.ok(!nc.includes('Prolet')&&!nc.includes('Prolétne')
     &&!nc.includes('missKm')&&!nc.includes('speedKmh'),
     'chmiNarrative nepoužívá kompozitní geometrii');
-  assert.ok(html.includes('.radseg')&&html.includes('>v35b<'),
+  assert.ok(html.includes('.radseg')&&html.includes('>v36<'),
     'přepínač zůstává, verze v34');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v21'),'service worker bump');
+  assert.ok(swSrc.includes('bude-prset-v22'),'service worker bump (kolo 36: v22)');
 });
 
 test('kolo 32: popisek ČHMÚ je uživatelsky přívětivý (Dave, 20. 11.)',()=>{
@@ -2253,7 +2256,7 @@ test('kolo 33: úzký layout dostává stručné odpovědi (Dave, PC, 20. 11.)',
   assert.ok(script.includes('if(was !== NARROW.matches){ renderCompass();'),
     'přepnutí široký/úzký překreslí i kompas');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v21'),'service worker bump v19');
+  assert.ok(swSrc.includes('bude-prset-v22'),'service worker bump v19 → v22 (kolo 36)');
 });
 
 test('kolo 34: přepínač ČHMÚ se hlásí i při suchu, dekorace PNG nejsou echo (Dave, 24. 11.)',()=>{
@@ -2350,9 +2353,9 @@ test('kolo 34: přepínač ČHMÚ se hlásí i při suchu, dekorace PNG nejsou e
   const rf=fn('chmiFieldFromPatch');
   assert.ok(rf.includes('chmiEchoColor(p)'),
     'čtení pole počítá jen barvy ze škály legendy');
-  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
+  assert.ok(html.includes('>v36<'),'aktuální verze: v36 (kolo 36)');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v21'),'service worker v20');
+  assert.ok(swSrc.includes('bude-prset-v22'),'service worker v22 (kolo 36)');
 });
 
 /* ===== Kolo 35b: pojistná síť gtNetArm a strop čekání na ČHMÚ =====
@@ -2422,4 +2425,241 @@ test('kolo 35b: loadChmi strop čekání vyzbrojuje jen s DOM setTimeout a čist
   assert.ok(load.includes('chmiDeadlineFire(myId)'),'strop volá pojistku');
   assert.ok(load.includes('clearTimeout(bpChmiDeadline)'),'re-arm čistí předchozí strop');
   assert.ok(load.includes('typeof setTimeout === "function"'),'bez DOM (testy) se strop nevyzbrojuje');
+});
+
+/* ===== KOLO 36: radar na prvním spuštění =====
+   Dave (27. 11., opakovaně): „Proč se na první spuštění nezapne radar.
+   Chci, aby první spuštění bylo bezproblémové." Kolo 13 změřilo, že
+   jeho mobilní síť přímé dotazy na cizí domény nechá viset; fallback
+   na Worker ale nastartoval až po 10 s (maps) a 12 s (každá dlaždice),
+   takže kompozit na první spuštění fakticky neexistoval. Fix: přímá
+   noha se vzdá za 4 s, Worker dodá, appka si to zapamatuje
+   (sessionStorage bpRvBlock) a další spuštění v relaci jede na Worker
+   rovnou; maska pokrytí dostává fallback přes Worker taky; celé rameno
+   má tvrdý strop 20 s (radarDeadlineFire), aby verdikt nikdy nevisel. */
+test('kolo 36: přímé nohy RainVieweru se vzdávají za 4 s, Worker za 12 s',()=>{
+  const i=script.indexOf('var RV_DIRECT_TIMEOUT_MS');
+  assert.notEqual(i,-1,'konstanta existuje');
+  assert.ok(script.slice(i,i+40).includes('4000'),'RV_DIRECT_TIMEOUT_MS = 4 s');
+  const rm=fn('rvMapsJson');
+  assert.ok(rm.includes('300000, RV_DIRECT_TIMEOUT_MS'),'přímé maps mají 4 s');
+  const rp=fn('readTilePatch');
+  assert.ok(rp.includes('RV_DIRECT_TIMEOUT_MS'),'dlaždice: přímý pokus 4 s');
+  assert.ok(rp.includes('rvBlockHint()'),'nápověda blokující sítě rozhoduje o pořadí nohou');
+  const rc=fn('readCoverage');
+  assert.ok(rc.includes('RV_DIRECT_TIMEOUT_MS') && rc.includes('RV_TILE_TIMEOUT_MS'),
+    'maska: přímá 4 s, přes Worker 12 s');
+  assert.ok(rc.includes('/v2/coverage/0/256/'),'maska staví svou cestu');
+  assert.ok(rc.includes('encodeURIComponent(path)'),'maska přes Worker se kóruje');
+});
+test('kolo 36: rvMapsJson — Worker doručil po selhání přímé nohy → nápověda se zapamatuje',async()=>{
+  const store={};
+  const sessionStorage={getItem:k=>Object.prototype.hasOwnProperty.call(store,k)?store[k]:null,
+                       setItem:(k,v)=>{store[k]=String(v);},removeItem:k=>{delete store[k];}};
+  const c=context(['rvMapsJson','cachedJsonNoOffline','cachedJson','fetchT','pruneCache',
+                   'rvBlockHint','rvBlockHintSet','rvBlockHintClear'],{
+    CACHE:{},CACHE_MAX:200,OFFLINE_KEY:'bpOffline',
+    fetch:(url)=>{
+      if(url==='https://api.rainviewer.com/public/weather-maps.json')
+        return Promise.reject(new TypeError('Failed to fetch'));
+      if(url==='https://w.example/rv/maps')
+        return Promise.resolve({ok:true,json:()=>Promise.resolve({version:'2.0',viaProxy:true})});
+      return Promise.resolve({ok:false,status:404});
+    },
+    AbortController:FakeAbortController,setTimeout,clearTimeout,
+    BP_PROXY:'https://w.example',sessionStorage,RV_DIRECT_TIMEOUT_MS:4000
+  });
+  const j=await c.rvMapsJson();
+  assert.equal(j.viaProxy,true,'doručil Worker');
+  assert.equal(store.bpRvBlock,'1','selhání přímé nohy + úspěch Workera = nápověda nastavena');
+  /* nápověda platí → další běh jede na Worker rovnou (CACHE je prázdná,
+     protože proxy noha se ptala pod jiným klíčem než přímá) */
+  const c2=context(['rvMapsJson','cachedJsonNoOffline','cachedJson','fetchT','pruneCache',
+                    'rvBlockHint','rvBlockHintSet','rvBlockHintClear'],{
+    CACHE:{},CACHE_MAX:200,OFFLINE_KEY:'bpOffline',
+    fetch:(url)=>{
+      if(url==='https://w.example/rv/maps')
+        return Promise.resolve({ok:true,json:()=>Promise.resolve({version:'2.0',first:true})});
+      throw Error('přímá cesta se smí zkusit až po selhání Workera');
+    },
+    AbortController:FakeAbortController,setTimeout,clearTimeout,
+    BP_PROXY:'https://w.example',sessionStorage,RV_DIRECT_TIMEOUT_MS:4000
+  });
+  const j2=await c2.rvMapsJson();
+  assert.equal(j2.first,true,'Worker první, přímá cesta se ani nezkusila');
+  /* samooprava: Worker selže, přímá cesta ale dodá → nápověda se smaže */
+  const c3=context(['rvMapsJson','cachedJsonNoOffline','cachedJson','fetchT','pruneCache',
+                    'rvBlockHint','rvBlockHintSet','rvBlockHintClear'],{
+    CACHE:{},CACHE_MAX:200,OFFLINE_KEY:'bpOffline',
+    fetch:(url)=>{
+      if(url==='https://w.example/rv/maps')
+        return Promise.reject(new TypeError('Failed to fetch'));
+      if(url==='https://api.rainviewer.com/public/weather-maps.json')
+        return Promise.resolve({ok:true,json:()=>Promise.resolve({version:'2.0',direct:true})});
+      return Promise.resolve({ok:false,status:404});
+    },
+    AbortController:FakeAbortController,setTimeout,clearTimeout,
+    BP_PROXY:'https://w.example',sessionStorage,RV_DIRECT_TIMEOUT_MS:4000
+  });
+  store.bpRvBlock='1';
+  const j3=await c3.rvMapsJson();
+  assert.equal(j3.direct,true,'přímá záloha doručila');
+  assert.equal(Object.prototype.hasOwnProperty.call(store,'bpRvBlock'),false,
+    'přímý úspěch po selhání Workera nápovědu smazal');
+});
+test('kolo 36: readTilePatch — selhání přímé dlaždice nastaví nápovědu, úspěch ji smaže',async()=>{
+  const store={bpRvBlock:'1'};
+  const sessionStorage={getItem:k=>Object.prototype.hasOwnProperty.call(store,k)?store[k]:null,
+                       setItem:(k,v)=>{store[k]=String(v);},removeItem:k=>{delete store[k];}};
+  const calls=[];
+  const mkBase=(impl)=>function(url,px,py,r,tmo){ calls.push([url,tmo]); return Promise.resolve(impl()); };
+  const c=context(['readTilePatch','rvIsTileUrl','rvProxyTileUrl',
+                    'rvBlockHint','rvBlockHintSet','rvBlockHintClear'],{
+    PATCH_CACHE:new Map(),meterAdd:()=>{},BP_PROXY:'https://w.example',sessionStorage,
+    RV_DIRECT_TIMEOUT_MS:4000,RV_TILE_TIMEOUT_MS:12000,
+    readTilePatchBase:mkBase(()=>null)   /* přímá i Worker noha selžou */
+  });
+  /* readTilePatchBase se v kontextu přepíše stubem, ale jen jedna pro obě nohy:
+     pro test pořadí stačí rozlišovat podle URL ve volání */
+  const url='https://tilecache.rainviewer.com/v2/radar/2c66a8ce20eb/256/7/69/43/0/0_1.png';
+  /* nápověda nastavena → Worker první, přímá jako záloha (obě visí → null) */
+  let v=await c.readTilePatch(url,10,10,3);
+  assert.equal(v,null);
+  assert.equal(calls[0][0],'https://w.example/rv/img?u='+encodeURIComponent('/v2/radar/2c66a8ce20eb/256/7/69/43/0/0_1.png'),
+    'první pokus přes Worker');
+  assert.equal(calls[0][1],undefined,'Worker noha bez zkráceného timeoutu (12 s default)');
+  assert.equal(calls[1][0],url,'druhý pokus přímý (záloha Workera)');
+  assert.equal(calls[1][1],4000,'přímý pokus se vzdá za 4 s');
+  /* nápověda pryč → přímá první; selže-li a Worker dodá, nápověda se zapamatuje */
+  delete store.bpRvBlock;
+  calls.length=0;
+  const c2=context(['readTilePatch','rvIsTileUrl','rvProxyTileUrl',
+                    'rvBlockHint','rvBlockHintSet','rvBlockHintClear'],{
+    PATCH_CACHE:new Map(),meterAdd:()=>{},BP_PROXY:'https://w.example',sessionStorage,
+    RV_DIRECT_TIMEOUT_MS:4000,RV_TILE_TIMEOUT_MS:12000,
+    readTilePatchBase:function(url2,px,py,r,tmo){
+      calls.push([url2,tmo]);
+      return Promise.resolve(url2.indexOf('/rv/img?')>=0?{n:7}:null);  /* Worker dodá, přímá ne */
+    }
+  });
+  const url2='https://tilecache.rainviewer.com/v2/radar/aa11/256/6/33/21/0/0_1.png';
+  v=await c2.readTilePatch(url2,5,5,3);
+  assert.deepEqual(v,{n:7},'doručila Worker noha');
+  assert.equal(calls[0][0],url2,'bez nápovědy jde přímá dlaždice první');
+  assert.equal(calls[0][1],4000,'přímý pokus 4 s');
+  assert.equal(calls[1][0].indexOf('/rv/img?')>=0,true,'pak Worker');
+  assert.equal(store.bpRvBlock,'1','Worker doručil → nápověda nastavena');
+  /* samooprava: nápověda platí, Worker selže, přímá noha ale dodá →
+     síť zase pouští přímo, nápověda se smaže (načtení příště jede přímou cestou) */
+  calls.length=0;
+  const c3=context(['readTilePatch','rvIsTileUrl','rvProxyTileUrl',
+                    'rvBlockHint','rvBlockHintSet','rvBlockHintClear'],{
+    PATCH_CACHE:new Map(),meterAdd:()=>{},BP_PROXY:'https://w.example',sessionStorage,
+    RV_DIRECT_TIMEOUT_MS:4000,RV_TILE_TIMEOUT_MS:12000,
+    readTilePatchBase:function(url2,px,py,r,tmo){
+      calls.push([url2,tmo]);
+      return Promise.resolve(url2.indexOf('/rv/img?')>=0?null:{n:9});  /* Worker selže, přímá dodá */
+    }
+  });
+  const url3='https://tilecache.rainviewer.com/v2/radar/bb22/256/6/33/22/0/0_1.png';
+  v=await c3.readTilePatch(url3,5,5,3);
+  assert.deepEqual(v,{n:9});
+  assert.equal(calls.length,2,'Worker první, po jeho selhání přímá záloha');
+  assert.ok(calls[0][0].indexOf('/rv/img?')>=0,'první noha přes Worker');
+  assert.equal(calls[1][0],url3,'druhá noha přímá');
+  assert.equal(calls[1][1],4000,'přímá záloha 4 s');
+  assert.equal(Object.prototype.hasOwnProperty.call(store,'bpRvBlock'),false,
+    'přímý úspěch po selhání Workera nápovědu smazal (samooprava)');
+  /* a další běh bez nápovědy jede přímou cestou first (pokrývá c2 výše) */
+});
+test('kolo 36: readCoverage — maska pokrytí jede po selhání přes Worker',async()=>{
+  const calls=[];
+  const res=[];
+  const store={};
+  const sessionStorage={getItem:k=>Object.prototype.hasOwnProperty.call(store,k)?store[k]:null,
+                       setItem:(k,v)=>{store[k]=String(v);},removeItem:k=>{delete store[k];}};
+  const c=context(['readCoverage','tileCoords','rvBlockHint','rvBlockHintClear'],{
+    BP_PROXY:'https://w.example',sessionStorage,
+    RV_DIRECT_TIMEOUT_MS:4000,RV_TILE_TIMEOUT_MS:12000,
+    readCoverageBase:function(url,tc,tmo){ calls.push([url,tmo]); return Promise.resolve(res.shift()); }
+  });
+  /* přímá noha selže → Worker dodá */
+  res.push('error','ok');
+  let cov=await c.readCoverage('https://tilecache.rainviewer.com',50.1,14.4);
+  assert.equal(cov,'ok');
+  assert.equal(calls.length,2,'dvě nohy');
+  assert.ok(calls[0][0].startsWith('https://tilecache.rainviewer.com/v2/coverage/'),'první přímá');
+  assert.equal(calls[0][1],4000,'přímá 4 s');
+  assert.ok(calls[1][0].startsWith('https://w.example/rv/img?u='),'druhá přes Worker');
+  assert.equal(calls[1][1],12000,'Worker 12 s');
+  /* obě selžou → error jako dřív (verdikt nechytá) */
+  calls.length=0; res.push('error','error');
+  cov=await c.readCoverage('https://tilecache.rainviewer.com',50.1,14.4);
+  assert.equal(cov,'error');
+  /* maska „none“ z přímé nohy se do Workeru neposílá — není co fallbackovat */
+  calls.length=0; res.push('none');
+  cov=await c.readCoverage('https://tilecache.rainviewer.com',50.1,14.4);
+  assert.equal(cov,'none');
+  assert.equal(calls.length,1,'výsledek z přímé nohy se nezahltí další nohou');
+  /* nápověda → Worker první; jeho selhání a přímý úspěch nápovědu smaže */
+  store.bpRvBlock='1';
+  calls.length=0; res.push('error','ok');
+  cov=await c.readCoverage('https://tilecache.rainviewer.com',50.1,14.4);
+  assert.equal(cov,'ok','přímá záloha dodala');
+  assert.ok(calls[0][0].startsWith('https://w.example/rv/img?u='),'s nápovědou Worker první');
+  assert.ok(calls[1][0].startsWith('https://tilecache.rainviewer.com/v2/coverage/'),'pak přímá');
+  assert.equal(calls[1][1],4000,'přímá záloha 4 s');
+  assert.equal(Object.prototype.hasOwnProperty.call(store,'bpRvBlock'),false,
+    'přímý úspěch nápovědu smazal (samooprava)');
+});
+test('kolo 36: radarDeadlineFire — strop 20 s odblokuje verdikt a rozjed dotahy',()=>{
+  const events=[];
+  const c=context(['radarDeadlineFire'],{
+    isStale:()=>false,radarState:null,radarCompass:{},radarField:{},
+    gtPendingHas:k=>k==='radar',
+    gtSettle:k=>events.push('settle:'+k),
+    renderCompass:()=>events.push('compass'),
+    recomputeWhen:()=>events.push('recompute'),
+    scheduleRadarRetry:(lat,lon,id,att)=>events.push('retry:'+att),
+    bpRadarDeadline:1
+  });
+  c.radarDeadlineFire(7,50.1,14.4,0);
+  assert.equal(c.radarState,'error','zavěšené rameno = chyba');
+  assert.deepEqual(events,['settle:radar','compass','recompute','retry:0'],
+    'strážka uvolněna, UI překresleno, dotah naplánován');
+  /* dořešeno dřív (data) → notouch */
+  const c2=context(['radarDeadlineFire'],{
+    isStale:()=>false,radarState:{nowMm:0.2},radarCompass:null,radarField:null,
+    gtPendingHas:()=>{throw Error('nesmí se ptát');},gtSettle:()=>{},
+    renderCompass:()=>{},recomputeWhen:()=>{},scheduleRadarRetry:()=>{}
+  });
+  c2.radarDeadlineFire(7,50.1,14.4,0);
+  assert.equal(c2.radarState.nowMm,0.2,'data zůstala nedotčena');
+  /* jiná lokalita mezitím → notouch */
+  const c3=context(['radarDeadlineFire'],{
+    isStale:()=>true,radarState:null,radarCompass:null,radarField:null,
+    gtPendingHas:()=>{throw Error('nesmí se ptát');},gtSettle:()=>{},
+    renderCompass:()=>{},recomputeWhen:()=>{},scheduleRadarRetry:()=>{}
+  });
+  c3.radarDeadlineFire(8,50.1,14.4,0);
+  assert.equal(c3.radarState,null,'zastaralý pokrok se nevyhodnocuje');
+});
+test('kolo 36: loadRadar vyzbrojuje strop ramene na každý pokus',()=>{
+  const load=fn('loadRadar');
+  assert.ok(load.includes('RV_ARM_DEADLINE_MS'),'strop 20 s se vyzbrojuje');
+  assert.ok(load.includes('radarDeadlineFire(myId, lat, lon, attempt || 0)'),'pojistka dostává kontext');
+  assert.ok(load.includes('clearTimeout(bpRadarDeadline)'),'re-arm čistí předchozí strop');
+  assert.ok(load.includes('typeof setTimeout === \"function\"'),'bez DOM (testy) se strop nevyzbrojuje');
+  const i=script.indexOf('var RV_ARM_DEADLINE_MS');
+  assert.ok(script.slice(i,i+30).includes('20000'),'RV_ARM_DEADLINE_MS = 20 s');
+});
+test('kolo 36: nowcast RainVieweru vypnutý na straně zdroje není selhání',()=>{
+  /* maps.json bez radar.nowcast (měřeno 27. 11.: prázdné pole) → „off“,
+     ne „error“; blend hlas nepočítá, diagnostika nelže o výpadku. */
+  const i=script.indexOf('rvNowcast = "off"');
+  assert.ok(i>-1,'prázdný nowcast = „off“');
+  assert.ok(script.includes('rvNowcast !== "error" && rvNowcast !== "off"'),
+    'řada pro blend se staví jen z reálných dat');
+  assert.ok(script.includes('vypnuto na straně zdroje'),
+    'diagnostika říká, co se stalo');
 });
