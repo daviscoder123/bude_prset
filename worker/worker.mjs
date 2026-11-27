@@ -128,6 +128,13 @@ var CHMI_PATH_RE = /^\/meteorology\/weather\/radar\/[A-Za-z0-9_.\/-]+$/;
    aby Worker nebyl otevřenou png proxy. */
 var RV_TILE_HOST = "https://tilecache.rainviewer.com";
 var RV_TILE_PATH_RE = /^\/v2\/radar\/[0-9a-z]{6,32}\/256\/[0-9]{1,2}\/[0-9]{1,3}\/[0-9]{1,3}\/[0-9]{1,2}\/[0-9]_[0-9]\.png$/;
+/* KOLO 36: maska pokrytí (/v2/coverage) — appka ji dřív četla jen přímo;
+   na mobilní síti blokující cizí domény (kolo 13) proto vždy skončila
+   „error“ a kompas nepoznal „radar sem nedosahuje“. Nyní má appka fallback
+   přes Worker, takže whitelist přijímá i přesně tento tvar masky
+   (readCoverage: /v2/coverage/0/256/<z>/<x>/<y>/0/0_0.png). Stále žádná
+   otevřená proxy: jen dlaždice radaru a maska, nic jiného. */
+var RV_COVER_PATH_RE = /^\/v2\/coverage\/0\/256\/[0-9]{1,2}\/[0-9]{1,3}\/[0-9]{1,3}\/0\/0_0\.png$/;
 var CHMI_FCT_LEADS = ["10", "20", "30", "40", "50", "60"];
 var CHMI_TAR_TTL = 240;        /* archiv se rodí po 5 minutách */
 
@@ -1208,8 +1215,8 @@ export function createWorker(deps) {
     }
     if (u.pathname === "/rv/img") {
       var rvu = u.searchParams.get("u") || "";
-      if (rvu.indexOf("..") >= 0 || !RV_TILE_PATH_RE.test(rvu)) {
-        return json(400, { error: "cesta musí být dlaždice /v2/radar/<hash>/256/<z>/<x>/<y>/<schéma>/<smooth>_<sníh>.png" });
+      if (rvu.indexOf("..") >= 0 || !(RV_TILE_PATH_RE.test(rvu) || RV_COVER_PATH_RE.test(rvu))) {
+        return json(400, { error: "cesta musí být dlaždice /v2/radar/<hash>/256/<z>/<x>/<y>/<schéma>/<smooth>_<sníh>.png nebo maska /v2/coverage/0/256/<z>/<x>/<y>/0/0_0.png" });
       }
       var rvTileUrl = RV_TILE_HOST + rvu;
       /* Snímek pod neměnným hashem je neměnný — dlouhá cache je tady

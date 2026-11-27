@@ -739,7 +739,7 @@ html.compact table{border-spacing:1.5px}
 
 <div id="offlineBar">Jsi offline — zobrazená data můžou být stará</div>
 <div id="status" class="show"><div><span class="pulse">●</span><br>Zjišťuji tvou polohu…</div></div>
-<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v35b</div>
+<div id="bpVer" style="position:fixed;right:7px;bottom:calc(5px + env(safe-area-inset-bottom,0px));z-index:9999;pointer-events:none;font-family:var(--mono);font-size:9px;opacity:.42">v36</div>
 
 <script>
 "use strict";
@@ -1672,10 +1672,10 @@ function omUrl(host, path, qs){
   return BP_PROXY ? BP_PROXY + "/om" + path + "?" + qs
                   : "https://" + host + path + "?" + qs;
 }
-function cachedJson(url, ttlMs, noOffline){   /* noOffline: kolo 13, viz cachedJsonNoOffline */
+function cachedJson(url, ttlMs, noOffline, timeoutMs){   /* noOffline: kolo 13, viz cachedJsonNoOffline; timeoutMs: kolo 36, přímé nohy RainViewer se vzdávají za 4 s */
   var c = CACHE[url];
   if(c && (Date.now()-c.t) < ttlMs) return Promise.resolve(c.d);
-  return fetchT(url).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+  return fetchT(url, null, timeoutMs).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
     .then(function(j){
       CACHE[url] = {t:Date.now(), ttl:ttlMs, d:j}; pruneCache();
       /* offlineStore v izolovaných testovacích kontextech (vm) neexistuje —
@@ -1701,8 +1701,8 @@ function cachedJson(url, ttlMs, noOffline){   /* noOffline: kolo 13, viz cachedJ
    zkusit — jinak by appka naDaveově mobilu servírovala týdny starý
    seznam snímků místo živého dotazu přes Worker. Ostatní volající
    se chovají identicky jako dřív (parametr undefined = stará cesta). */
-function cachedJsonNoOffline(url, ttlMs){
-  return cachedJson(url, ttlMs, true);
+function cachedJsonNoOffline(url, ttlMs, timeoutMs){
+  return cachedJson(url, ttlMs, true, timeoutMs);
 }
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -1782,6 +1782,32 @@ var RV_OPTS = "/0/0_1.png";
    Po 12 s se visícímu požadavku odmlčí, dlaždice se počítá za chybějící
    a řetězec jede dál (viz readTilePatchBase a scheduleRadarRetry). */
 var RV_TILE_TIMEOUT_MS = 12000;
+/* KOLO 36 (Dave 27. 11., opakovaně: „proč se na první spuštění nezapne
+   radar"): kolo 13 (19. 11.) změřilo, že mobilní síť přímé dotazy na
+   cizí domény (api/tilecache.rainviewer.com) nechá VISÍT, zatímco totéž
+   přes Worker jede. Dopad na PRVNÍ spuštění: přímá maps.json čekala
+   10 s (fetchT) a KAŽDÁ dlaždice 12 s (RV_TILE_TIMEOUT_MS), než se
+   vůbec spustil fallback na Worker — kompozit tedy na takové síti
+   „neexistoval" první čtvrthodinu a Dave viděl prázdný kompas.
+   Fix je dvoudílný:
+   · RV_DIRECT_TIMEOUT_MS — přímý pokus se vzdá za 4 s (na zdravé síti
+     odpovídá dlaždice za desetiny sekund, takže se nic nemění);
+     12 s zůstává pro nohu přes Worker, která se smí zdržet déle.
+   · nápověda bpRvBlock (sessionStorage) — když přímá noha selže a
+     Worker dodá, appka si to zapamatuje do konce relace prohlížeče
+     a další spuštění v téže relaci jede na Worker rovnou (i opětovné
+     načtení stránky). Nová relace na zdravé síti začíná čistým štítem;
+     úspěšný přímý pokus nápovědu smaže (síť se mohla spravit). */
+var RV_DIRECT_TIMEOUT_MS = 4000;
+function rvBlockHint(){
+  try{ return sessionStorage.getItem("bpRvBlock") === "1"; }catch(e){ return false; }
+}
+function rvBlockHintSet(){
+  try{ sessionStorage.setItem("bpRvBlock", "1"); }catch(e){}   /* bez sessionStorage: jen se nezapamatuje */
+}
+function rvBlockHintClear(){
+  try{ sessionStorage.removeItem("bpRvBlock"); }catch(e){}
+}
 
 function tileCoords(lat, lon, z){
   var n = Math.pow(2, z);
@@ -1809,13 +1835,30 @@ function rvTile(host, path, tc){
    nasazené; dokud nemá, vrátí 404 a appka zůstane u starého chování —
    verdikt stejně drží pozemní pravda z kola 12c. Maps se záměrně ptají
    přes cachedJsonNoOffline: offline záloha nesmí vypadnout za živým
-   Workerem. (Maska pokrytí readCoverage záměrně zůstává přímá — její
-   selhání jen degraduje radarCoverage na „error", verdikt nechytá.) */
+   Workerem. (KOLO 36: maska pokrytí readCoverage už přímá nezůstává — po
+   selhání se zkusí i přes Worker, viz níže; selhání obou nohou
+   stále jen degraduje radarCoverage na „error", verdikt nechytá.) */
 function rvMapsJson(){
-  return cachedJsonNoOffline("https://api.rainviewer.com/public/weather-maps.json", 300000)
+  /* KOLO 36: v této relaci už přímá cesta selhala (nápověda z kola 36)?
+     Worker je první volba; přímý pokus zůstává jako jeho záloha. */
+  if(BP_PROXY && rvBlockHint()){
+    return cachedJsonNoOffline(BP_PROXY + "/rv/maps", 300000)
+      .catch(function(e){
+        return cachedJsonNoOffline("https://api.rainviewer.com/public/weather-maps.json", 300000, RV_DIRECT_TIMEOUT_MS)
+          .then(function(j){ rvBlockHintClear(); return j; })   /* síť zase pouští přímo: štít dolů */
+          .catch(function(e2){ throw e; });
+      })
+      .catch(function(){
+        /* poslední šance je offline záloha — původní chování cachedJson */
+        return cachedJson("https://api.rainviewer.com/public/weather-maps.json", 300000);
+      });
+  }
+  return cachedJsonNoOffline("https://api.rainviewer.com/public/weather-maps.json", 300000, RV_DIRECT_TIMEOUT_MS)
+    .then(function(j){ rvBlockHintClear(); return j; })   /* síť zase pouští: štít dolů */
     .catch(function(e){
       if(!BP_PROXY) throw e;
       return cachedJsonNoOffline(BP_PROXY + "/rv/maps", 300000)
+        .then(function(j){ rvBlockHintSet(); return j; }) /* Worker doručil: příště rovnou */
         .catch(function(e2){ throw e; });
     })
     .catch(function(){
@@ -1839,15 +1882,20 @@ function rvProxyTileUrl(url){
    Tím padá dřívější odhad "když v okruhu 1000 km není ani jeden odraz,
    radar tam nejspíš není", který na skutečně jasné noci nad velkým
    regionem lhal. Maska se mění zřídka — cache na 24 hodin. */
-function readCoverage(host, lat, lon){
-  var tc = tileCoords(lat, lon, 5);
-  var url = host + "/v2/coverage/0/256/" + tc.z + "/" + tc.tx + "/" + tc.ty + "/0/0_0.png";
+/* KOLO 36: samotné čtení masky (jedna URL, jeden timeout) je vytaženo
+   do readCoverageBase, aby ji readCoverage mohl zkoušet na dvou nohách —
+   přímo a přes Worker. Dopad na první spuštění: na síti, která cizí
+   domény blokuje (kolo 13), dřív maska vždy skončila „error", protože
+   fallback neexistoval; kompas se pak o „radar sem nedosahuje" dozvěděl
+   jen z keřů IMERG. Worker navíc cestu /v2/coverage/ teď přijímá. */
+function readCoverageBase(url, tc, timeoutMs){
   return new Promise(function(resolve){
     var img = new Image();
     img.crossOrigin = "anonymous";
     /* KOLO 11: maska pokrytí dřív při odmlčení CDN taky visela donekonečna;
-       po RV_TILE_TIMEOUT_MS se prostě přizná "error" (radar pak zkusí
-       znovu, viz scheduleRadarRetry). */
+       po timeoutu se prostě přizná "error" (radar pak zkusí
+       znovu, viz scheduleRadarRetry). KOLO 36: přímá noha dostává
+       RV_DIRECT_TIMEOUT_MS, noha přes Worker plných RV_TILE_TIMEOUT_MS. */
     var settled = false;
     var tm = setTimeout(function(){
       if(settled) return;
@@ -1855,7 +1903,7 @@ function readCoverage(host, lat, lon){
       img.onload = img.onerror = null;
       try{ img.src = ""; }catch(e){}
       resolve("error");
-    }, RV_TILE_TIMEOUT_MS);
+    }, timeoutMs || RV_TILE_TIMEOUT_MS);
     img.onload = function(){
       if(settled) return;
       settled = true;
@@ -1881,6 +1929,28 @@ function readCoverage(host, lat, lon){
       resolve("error");
     };
     img.src = url;
+  });
+}
+function readCoverage(host, lat, lon){
+  var tc = tileCoords(lat, lon, 5);
+  var path = "/v2/coverage/0/256/" + tc.z + "/" + tc.tx + "/" + tc.ty + "/0/0_0.png";
+  var proxied = BP_PROXY ? (BP_PROXY + "/rv/img?u=" + encodeURIComponent(path)) : null;
+  /* KOLO 36: nápověda blokující sítě → Worker rovnou, přímá cesta jako záloha;
+     její úspěch nápovědu smaže (síť se mohla spravit). */
+  if(proxied && rvBlockHint()){
+    return readCoverageBase(proxied, tc, RV_TILE_TIMEOUT_MS).then(function(cov){
+      if(cov !== "error") return cov;
+      return readCoverageBase(host + path, tc, RV_DIRECT_TIMEOUT_MS).then(function(cov2){
+        if(cov2 !== "error") rvBlockHintClear();
+        return cov2;
+      });
+    });
+  }
+  return readCoverageBase(host + path, tc, RV_DIRECT_TIMEOUT_MS).then(function(cov){
+    if(cov === "error" && proxied){
+      return readCoverageBase(proxied, tc, RV_TILE_TIMEOUT_MS);
+    }
+    return cov;
   });
 }
 
@@ -4539,6 +4609,7 @@ var ensNote     = "";
 function bpDiag(){
   function st(v){
     if(v === "error") return "SELHALO";
+    if(v === "off") return "vypnuto na straně zdroje";   /* kolo 36: např. RainViewer bez nowcastu */
     if(v == null) return "nenačteno";
     if(Array.isArray(v)) return "ok (" + v.length + " bodů)";
     return "ok";
@@ -4938,6 +5009,29 @@ function loadMetar(lat, lon, myId, attempt){
    (renderCompassBase + sourceCaveat). */
 var bpRadarRetryT = null;          /* běžící dotah — max jeden na appku */
 var RV_RETRY_DELAYS = [20000, 60000];   /* dva pokusy: +20 s, +60 s */
+/* KOLO 36: strop celého radarového ramene. Každá dlaždice i maps.json
+   mají vlastní timeout, ale mezi nimi běží korelace ve web workeru,
+   nowcast, mřížka — a na pomalém mobilu se sečtou. Když radarState
+   po 20 s od startu loadRadar stále neexistuje (ani data, ani chyba),
+   rameno se prohlásí za spadlé: verdikt se odblokuje (gtSettle),
+   kompas přizná výpadek a standardní dotahy (kolo 11) se rozjedou.
+   Měřený běh na blokující síti s novými 4s timeouty: kompozit hotov
+   za ~5 s od prvního spuštění, za ~2 s když platí nápověda bpRvBlock. */
+var RV_ARM_DEADLINE_MS = 20000;
+var bpRadarDeadline = null;
+function radarDeadlineFire(myId, lat, lon, attempt){
+  bpRadarDeadline = null;
+  if(isStale(myId)) return;                    /* mezitím se změnila lokalita */
+  if(typeof radarState === "undefined" || radarState !== null) return;   /* dořešilo se dřív */
+  radarState = "error";
+  radarCompass = null; radarField = null;
+  if(gtPendingHas("radar")){
+    gtSettle("radar");
+    renderCompass();
+    recomputeWhen();
+  }
+  scheduleRadarRetry(lat, lon, myId, attempt || 0);
+}
 function scheduleRadarRetry(lat, lon, myId, attempt){
   /* kolo 15b: známá chyba končí „ověřuji“ hned — dotahy běží potichu */
   if(gtPendingHas("radar")){ gtSettle("radar"); renderCompass(); recomputeWhen(); }
@@ -4962,6 +5056,10 @@ function loadRadar(lat, lon, myId, attempt){
   if(myId == null) myId = reqId;
   attempt = attempt || 0;
   if(attempt === 0) gtStart("radar");   /* kolo 15: kompozit běží → verdikt neříká „nepotvrzeno“. Kolo 15b: registr drží jen první pokus — dotahy (kolo 11) nesmí verdikt na „ověřuji“ vracet znovu a znovu */
+  if(typeof setTimeout === "function"){   /* node test harness bez DOM */
+    if(bpRadarDeadline != null) clearTimeout(bpRadarDeadline);
+    bpRadarDeadline = setTimeout(function(){ radarDeadlineFire(myId, lat, lon, attempt || 0); }, RV_ARM_DEADLINE_MS);
+  }
   radarState = null;
   radarCoverage = null;
   rvNowcast = null;
@@ -5224,7 +5322,14 @@ function loadRadar(lat, lon, myId, attempt){
           rvNowcast = ok.length ? ok : "error";
           recomputeWhen();
         }).catch(function(){ if(!isStale(myId)) rvNowcast = "error"; });
-      } else { rvNowcast = "error"; }
+      } else {
+        /* KOLO 36 (měřeno 27. 11.): RainViewer v maps.json přestal
+           vydávat snímky radar.nowcast (prázdné pole, přímý dotaz 200).
+           To není selhání sítě, ale stav produktu na straně zdroje —
+           „off“ místo „error“, ať diagnostika nelže o výpadku; blend
+           se chová stejně jako u error (hlas nepočítá). */
+        rvNowcast = "off";
+      }
 
       /* ---- POHYB POLE: hrubý zoom + jemný zoom ----
          Na zoomu 8 nešlo změřit rychlost nad 33 km/h, což je pomaleji
@@ -6677,7 +6782,7 @@ function blendWeights(dt, cc){
 }
 /* Načte čtvercový výřez kolem bodu (poloměr r px, krok 1).
    Vrací dBZ, sněhový příznak a rovnou i přepočtenou intenzitu v mm/h. */
-function readTilePatchBase(url, px, py, r){
+function readTilePatchBase(url, px, py, r, timeoutMs){
   return new Promise(function(resolve){
     var img = new Image();
     img.crossOrigin = "anonymous";
@@ -6692,7 +6797,7 @@ function readTilePatchBase(url, px, py, r){
       img.onload = img.onerror = null;
       try{ img.src = ""; }catch(e){}   /* zruší i síťový požadavek, kde jde */
       resolve(null);
-    }, RV_TILE_TIMEOUT_MS);
+    }, timeoutMs || RV_TILE_TIMEOUT_MS);
     img.onload = function(){
       if(settled) return;
       settled = true;
@@ -6754,13 +6859,33 @@ function readTilePatch(url, px, py, r){
      schéma-0 PNG; fallback se nepouští pro cizí hosty ani opakovaně
      (proxovaná URL rainviewer.com neobsahuje, rvIsTileUrl ji odmítne).
      Prázdný BP_PROXY = chování beze změny. Worker bez kola 13 vrátí
-     404, což zde skončí stejně null — a řetězec jede dál jako dřív. */
-  var p = readTilePatchBase(url, px, py, r).then(function(v){
-    if(v === null && BP_PROXY && rvIsTileUrl(url)){
-      return readTilePatchBase(rvProxyTileUrl(url), px, py, r);
-    }
-    return v;
-  }).then(function(v){
+     404, což zde skončí stejně null — a řetězec jede dál jako dřív.
+     KOLO 36: přímý pokus se vzdá za RV_DIRECT_TIMEOUT_MS (4 s), ne 12 s
+     — na síti blokující cizí domény dorazí fallback za sekundy místo
+     po dvanácti. Když Worker doručí a přímá cesta selhala, zapamatuje
+     se to (rvBlockHintSet) a další spuštění v této relaci jede na
+     Worker rovnou. Úspěšný přímý pokus naopak nápovědu smaže. */
+  var proxied = (BP_PROXY && rvIsTileUrl(url)) ? rvProxyTileUrl(url) : null;
+  var p;
+  if(proxied && rvBlockHint()){
+    p = readTilePatchBase(proxied, px, py, r).then(function(v){
+      if(v !== null) return v;
+      return readTilePatchBase(url, px, py, r, RV_DIRECT_TIMEOUT_MS).then(function(v2){
+        if(v2 !== null) rvBlockHintClear();   /* síť zase pouští přímo: štít dolů */
+        return v2;
+      });
+    });
+  } else {
+    p = readTilePatchBase(url, px, py, r, RV_DIRECT_TIMEOUT_MS).then(function(v){
+      if(v !== null){ rvBlockHintClear(); return v; }
+      if(!proxied) return v;
+      return readTilePatchBase(proxied, px, py, r).then(function(v2){
+        if(v2 !== null) rvBlockHintSet();
+        return v2;
+      });
+    });
+  }
+  p = p.then(function(v){
     if(v === null) PATCH_CACHE.delete(key);
     return v;
   }, function(){ PATCH_CACHE.delete(key); return null; });
@@ -9490,7 +9615,7 @@ function buildBlendTimeline(now, altSeries){
     gridSeries = gridNowcast.filter(function(g){ return g && g.hits >= 3 && g.med != null; })
       .map(function(g){ return {t:g.t, mmh:g.med}; });
   }
-  var rvSeries = (rvNowcast && rvNowcast !== "error") ? rvNowcast : null;
+  var rvSeries = (rvNowcast && rvNowcast !== "error" && rvNowcast !== "off") ? rvNowcast : null;
   var mnSeries = (metnoNow && metnoNow !== "off" && metnoNow !== "error") ? metnoNow : null;
   var rgSeries = (regioNowcast && regioNowcast !== "off" && regioNowcast !== "error") ? regioNowcast : null;
   var ncSeries = wmsncSeries(now);      /* DWD RADVOR / KNMI radar_forecast */
