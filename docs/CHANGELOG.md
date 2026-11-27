@@ -672,6 +672,56 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 36 — radar na prvním spuštění: rychlé přímé nohy, pamět blokující sítě, strop ramene (27. 11.)
+
+Dave 27. 11. (mobil, opakovaně): „Proč se na první spuštění nezapne
+radar. Chci, aby první spuštění bylo bezproblémové." Kolikrát se po
+vylepšení něco rozbilo. Analýza řetězce proti měření kola 13 (síť
+mobilního operátora nechává přímé dotazy na cizí domény viset,
+přes Worker vše jede):
+
+1. **Proč radar „neexistoval" prvých ~15 s.** Přímý pokus o maps.json
+   čekal 10 s (fetchT) a KAŽDÁ dlaždice 12 s (RV_TILE_TIMEOUT_MS),
+   než se vůbec spustil fallback na Worker. Na blokující síti tedy
+   první spuštění reálně zaplatilo 12 s na každé noze paralelně a
+   kompas mezitím neměl co kreslit.
+2. **Přímá noha 4 s (RV_DIRECT_TIMEOUT_MS).** Na zdravé síti dlaždice
+   odpovídá za desetiny sekund, takže se nic nemění; na blokující
+   síti dorazí fallback za sekundy. Noha přes Worker si drží plných
+   12 s.
+3. **Pamět blokující sítě (sessionStorage bpRvBlock).** Když přímá
+   noha selže a Worker dodá, appka si to zapamatuje do konce relace
+   prohlížeče; další spuštění (i opětovné načtení stránky) jede na
+   Worker rovnou, přímá cesta zůstává jako jeho záloha. Nová relace
+   na zdravé síti začíná čistě; úspěšný přímý pokus nápovědu smaže.
+   Platí pro maps.json, dlaždice i masku pokrytí.
+4. **Maska pokrytí přes Worker.** readCoverage dřív visela na přímé
+   cestě záměrně bez fallbacku; na Daveově síti proto radarCoverage
+   vždy skončila „error" a kompas se o „radar sem nedosahuje"
+   nedozvěděl. Nově se po selhání přímé nohy zkusí /rv/img; Worker
+   (kolo 36) přijímá kromě dlaždic radaru i přesný tvar masky
+   /v2/coverage/0/256/<z>/<x>/<y>/0/0_0.png. Whitelist zůstává
+   úzký, žádná otevřená proxy.
+5. **Strop celého radarového ramene (RV_ARM_DEADLINE_MS = 20 s).**
+   Po vzoru chmiDeadlineFire (kolo 35b): když radarState po 20 s
+   neexistuje ani jako data ani jako chyba, rameno se prohlásí za
+   spadlé, strážka „radar" se uvolní, kompas přizná výpadek a
+   standardní dotahy (kolo 11, +20 s a +60 s) se rozjedou. Verdikt
+   na radar nikdy nečeká déle než 20 s.
+6. **Nowcast RainVieweru „off".** Měřeno 27. 11.: maps.json nese
+   radar.nowcast prázdný (produkt vypnutý na straně zdroje, dotaz
+   200). Stav se nově hlásí jako „off" (vypnuto na straně zdroje),
+   ne jako selhání; blend hlas nepočítá jako u error, diagnostika
+   nelže o výpadku.
+
+Testy: 180/180 (nové 8: struktura 4s/12s timeoutů a nápovědy;
+rvMapsJson s nápovědou Worker-první a se zapamatováním selhání;
+readTilePatch tři scénáře pořadí nohou; readCoverage dvě nohy a
+propustnost výsledku; radarDeadlineFire tři stavy; vyzbrojení
+stropu v loadRadar; „off" nowcastu; Worker přijme masku a odmítne
+cizí cesty). Aktualizovány strukturní testy kol 11 a 13 na novou 
+podobu timeoutů. Verze v36, service worker v22.
+
 ## Kolo 35b — oprava pojistné sítě „ověřuji“ a stropu čekání na ČHMÚ (27. 11.)
 
 Dave 27. 11. 17:00, mobil, Líšeň: verdikt visel ve stavu „Ověřuji /

@@ -315,6 +315,38 @@ hodin“ a uvádí sněhovou čáru. Pozadí k sněhu přidává řídké tlumen
 (`soonSnow`), na mobilu s poloviční hustotou; `prefers-reduced-motion`
 je respektuje stejně jako déšť.
 
+## 11. Radar na prvním spuštění (kolo 36)
+
+Opakovaná stížnost (Dave, mobil): „Proč se na první spuštění nezapne
+radar." Kolo 13 změřilo, že mobilní síť operátora přímé dotazy na cizí
+domény (api/tilecache.rainviewer.com) nechá viset, zatímco totéž přes
+Worker jede. Fallback na Worker ale startoval až po 10 s (maps.json)
+a 12 s (každá dlaždice), takže kompozit na první spuštění fakticky
+neexistoval. Kolo 36 řeší řetězec systémově:
+
+- **Rychlá přímá noha (4 s).** `RV_DIRECT_TIMEOUT_MS` — přímé pokusy
+  o maps.json, dlaždice i masku pokrytí se vzdají za 4 s; noha přes
+  Worker si drží plných 12 s. Na zdravé síti se nic nemění (dlaždice
+  odpovídá za desetiny sekund), na blokující síti dorazí záloha
+  za sekundy.
+- **Pamět blokující sítě (`sessionStorage bpRvBlock`).** Selže-li
+  přímá noha a Worker dodá, appka si to zapamatuje do konce relace
+  a další spuštění jede na Worker rovnou (přímá cesta jako jeho
+  záloha). Nová relace začíná čistě; úspěšný přímý pokus nápovědu
+  smaže (síť se mohla spravit).
+- **Maska pokrytí přes Worker.** `readCoverage` nově zkusí po selhání
+  přímé nohy `/rv/img`; Worker přijímá kromě dlaždic radaru i přesný
+  tvar masky `/v2/coverage/0/256/<z>/<x>/<y>/0/0_0.png`. Whitelist
+  zůstává úzký, žádná otevřená proxy.
+- **Strop ramene (`RV_ARM_DEADLINE_MS` = 20 s).** Po vzoru pojistky
+  ČHMÚ (kolo 35b) `radarDeadlineFire` prohlásí zavěšené rameno za
+  spadlé, uvolní strážku „radar", překreslí kompas a rozjed dotahy
+  (+20 s, +60 s). Verdikt na radar nikdy nečeká déle než 20 s.
+- **Nowcast RainVieweru „off".** Prázdné pole `radar.nowcast` v
+  maps.json (měřeno 27. 11.) je stav produktu na straně zdroje, ne
+  selhání sítě: diagnostika říká „vypnuto na straně zdroje", blend
+  hlas nepočítá stejně jako u error.
+
 ---
 
 Historii jednotlivých „kol" vylepšení shrnuje [CHANGELOG](CHANGELOG.md).

@@ -46,7 +46,7 @@ Záznamy se ukládají do KV pod `raw/{YYYYMMDDHH}:{mm}`, TTL 14 dní.
 | `GET /chmi/img?u=<path>` | ČHMÚ radarový PNG přes proxy (CORS `*`, whitelist) |
 | `GET /chmi/fct?base=YYYYMMDD.HHMM&lead=10..60` | ČHMÚ předpověď z TAR archivu |
 | `GET /rv/maps` | passthrough maps.json z api.rainviewer.com (kolo 13) |
-| `GET /rv/img?u=<path>` | passthrough radarové dlaždice z tilecache.rainviewer.com (kolo 13) |
+| `GET /rv/img?u=<path>` | passthrough radarové dlaždice a masky pokrytí z tilecache.rainviewer.com (kola 13, 36) |
 | `GET /healthz` | diagnostika (proxy + kolektor + chmi) |
 | `GET /analysis` | HTML dashboard: náhled + download JSON |
 | `GET /analysis/page?h=YYYYMMDDHH` | JSON: všech 12 dílků dané hodiny |
@@ -186,11 +186,14 @@ selhání přímé cesty zkouší:
   `https://api.rainviewer.com/public/weather-maps.json`, cache 60 s.
 - **`GET /rv/img?u=<path>`** — passthrough dlaždice z
   `https://tilecache.rainviewer.com`, cache 3600 s (snímek pod
-  neměnným hashem se nemění). Whitelist přijímá PŘESNĚ tvar, který
-  posílá appka (`rvTile`), tedy
-  `/v2/radar/<hash>/256/<z>/<x>/<y>/<schéma>/<smooth>_<sníh>.png` —
-  nic jiného (maska pokrytí, jiné velikosti, cesta ven) Worker
-  neprotáhne, není to otevřená png proxy.
+  neměnným hashem se nemění). Whitelist přijímá PŘESNĚ tvary, které
+  posílá appka: dlaždici (`rvTile`, kolo 13)
+  `/v2/radar/<hash>/256/<z>/<x>/<y>/<schéma>/<smooth>_<sníh>.png`
+  a od kola 36 i masku pokrytí (`readCoverage`)
+  `/v2/coverage/0/256/<z>/<x>/<y>/0/0_0.png` — appka ji na sítích
+  blokujících cizí domény dřív četla jen přímo a vždy selhala.
+  Nic jiného (jiné velikosti, cesta ven) Worker neprotáhne,
+  není to otevřená png proxy.
 
 ### Nasazení kola 13 (v příkazové řádce)
 
@@ -204,4 +207,8 @@ dále `curl <URL>/rv/maps` vrátí maps.json a
 vrátí image/png (hash vemte z `/rv/maps`, pole `radar.past[].path`).
 
 Bez nasazení kola 13 appka funguje jako dřív: `/rv/*` vrátí 404,
-fallback se vzdá a verdikt drží pozemní pravda (kolo 12c).
+fallback se vzdá a verdikt drží pozemní pravda (kolo 12c). Bez
+nasazení kola 36 se mění jen maska pokrytí: její fallback přes
+`/rv/img` dostane 400 a maska skončí „error“ jako dřív (verdikt
+nechytá); zbytek kola 36 (4s přímé nohy, nápověda bpRvBlock, strop
+ramene, „off“ nowcastu) je čistě v aplikaci a Worker nevyžaduje.
