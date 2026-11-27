@@ -1215,7 +1215,7 @@ test('kolo 22: rozklikávací radar ČHMÚ je pryč, panel je jako dřív',()=>{
     'kompozitové větve (chyba, svědci, normál) kreslí přímo, bez prefixu tlačítka');
   assert.ok(script.includes('chmiPotvrzuje') && script.includes('chmiNowWet'),
     'hlasování ČHMÚ ve verdiktu zůstává (datová noha, ne panel)');
-  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
+  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
 });
 
 /* ==================== KOLO 15: VERDIKT NEPŘEDJÍMÁ MĚŘENÍ ==================== */
@@ -1668,7 +1668,7 @@ test('kolo 20: Wi-Fi hledání lokace odstraněno, verze je v rozhraní vidět',
   assert.ok(!ap.includes('enableHighAccuracy:false'),
     'žádný dotaz na polohu z Wi-Fi/vysílačů — pouze přesné GPS');
   assert.ok(html.includes('id="bpVer"'),'označení verze je v rozhraní');
-  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
+  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
 });
 
 test('kolo 20: behaviorálně — první dotaz žádá vysokou přesnost hned (žádné Wi-Fi)',async()=>{
@@ -1718,7 +1718,7 @@ test('kolo 21: žádost o polohu startuje z dotyku, ne sama od sebe (iOS)',()=>{
     'úspěšný fix se zapamatuje — další starty jsou automatické');
   assert.ok(fn('init').includes('geoStart'),
     'init žádá o polohu přes geoStart, ne acquirePosition');
-  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
+  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
   assert.ok(script.includes('btnGeoTry'),'clona má tlačítko „Povolit polohu“');
   assert.ok(script.includes('btnGeoManual'),'clona má vždy cestu „Napiš obec ručně“');
 });
@@ -1837,7 +1837,7 @@ test('kolo 23: pojistka proti visícímu dotazu na oprávnění (3 s)',()=>{
     'havárie init() se vypíše na clonu, ne němá smrt skriptu');
   assert.ok(script.includes('geoPermTxt()'),
     'nápovědy clony nesou stav oprávnění (diagnostika z mobilu)');
-  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
+  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
 });
 
 test('kolo 23: behaviorálně — WebKit nechá dotaz viset: pojistka 3 s spustí žádost',async()=>{
@@ -1889,7 +1889,7 @@ test('kolo 24: start aplikace — init() až po všech deklaracích, load() null
     'init() běží až po deklaraci vyhledávacího pole (na konci skriptu)');
   assert.ok(script.slice(initCall).includes('catch'),
     'pojistka havárie z kola 23 (chyba na clonu) zůstává');
-  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
+  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
 });
 
 test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
@@ -1923,7 +1923,7 @@ test('kolo 25: radar ČHMÚ v pohledu, přechody plynulé bez skoků',()=>{
     'statické HTML startuje s viditelnou clonou — úvod bez bliknutí');
   assert.ok(html.includes('@keyframes riseIn') && html.includes('.compass{animation:riseIn'),
     'panely vplouvají animací riseIn');
-  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
+  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
 });
 
 test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit/ČHMÚ',()=>{
@@ -1954,7 +1954,7 @@ test('kolo 26: panel Kdy říká čas od modelů, radar má přepínač Kompozit
     'volba pohledu se pamatuje v localStorage, nikam se neposílá');
   assert.ok(script.includes('function humanDur('),
     'lidský formát trvání existuje jako sdílený pomocník');
-  assert.ok(html.includes('.radseg') && html.includes('>v34<'),
+  assert.ok(html.includes('.radseg') && html.includes('>v35b<'),
     'CSS segmentu je v šabloně, verze v34');
 });
 
@@ -1981,7 +1981,7 @@ test('kolo 27: panel Radar vede do sloupce, cifernák vždy vycentrovaný',()=>{
   assert.ok(rc.includes('Odsud déšť nečekej') && rc.includes('Intenzitu dopředu neodhadnu')
     && rc.includes('skoro stojí'),
     'vysvětlení v úzkém panelu jsou zkrácená (málo místa = kratší text)');
-  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
+  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
 });
 
 test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start mobilu)',()=>{
@@ -2002,7 +2002,7 @@ test('kolo 28: přepínač se ukáže hned, když dorazí ČHMÚ (rychlý start 
   const rc=fn('renderCompassBase');
   assert.ok(rc.includes('radViewCur === "chmu" && chmiReady && chmiCells'),
     'zdroj tvrdí ČHMÚ jen tehdy, když kompas opravdu kreslí jeho pole (jinak kompozit)');
-  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
+  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
 });
 
 test('kolo 29: široké rozpětí se hlásí jako časy dne, příčina se jmenuje',()=>{
@@ -2031,7 +2031,7 @@ test('kolo 29: široké rozpětí se hlásí jako časy dne, příčina se jmenu
     'mobilní solo panel mluví tentýmž jazykem (časy, ne „za 2 h 44 min“)');
   assert.ok(rs.includes('if(!winBig && W.lo != null'),
     'dodatek „mezi X. a Y. minutou“ se u časového okna neduplikuje');
-  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
+  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
 });
 
 /* ==================== KOLO 30: VERDIKT ČEKÁ JEN NA POZOROVÁNÍ ==================== */
@@ -2099,7 +2099,7 @@ test('kolo 30: strukturální — čekání na pozorování, pojistná překresl
   assert.ok(script.includes('var GT_OBS'),
     'množina pozorovacích klíčů je pojmenovaná');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v20'),'service worker bump');
+  assert.ok(swSrc.includes('bude-prset-v21'),'service worker bump');
 });
 
 test('kolo 31: pohled ČHMÚ mluví daty národního radaru (Dave, 20. 11.)',()=>{
@@ -2168,10 +2168,10 @@ test('kolo 31: strukturální — přepínač radaru přepisuje i popisek',()=>{
   assert.ok(!nc.includes('Prolet')&&!nc.includes('Prolétne')
     &&!nc.includes('missKm')&&!nc.includes('speedKmh'),
     'chmiNarrative nepoužívá kompozitní geometrii');
-  assert.ok(html.includes('.radseg')&&html.includes('>v34<'),
+  assert.ok(html.includes('.radseg')&&html.includes('>v35b<'),
     'přepínač zůstává, verze v34');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v20'),'service worker bump');
+  assert.ok(swSrc.includes('bude-prset-v21'),'service worker bump');
 });
 
 test('kolo 32: popisek ČHMÚ je uživatelsky přívětivý (Dave, 20. 11.)',()=>{
@@ -2253,7 +2253,7 @@ test('kolo 33: úzký layout dostává stručné odpovědi (Dave, PC, 20. 11.)',
   assert.ok(script.includes('if(was !== NARROW.matches){ renderCompass();'),
     'přepnutí široký/úzký překreslí i kompas');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v20'),'service worker bump v19');
+  assert.ok(swSrc.includes('bude-prset-v21'),'service worker bump v19');
 });
 
 test('kolo 34: přepínač ČHMÚ se hlásí i při suchu, dekorace PNG nejsou echo (Dave, 24. 11.)',()=>{
@@ -2350,7 +2350,76 @@ test('kolo 34: přepínač ČHMÚ se hlásí i při suchu, dekorace PNG nejsou e
   const rf=fn('chmiFieldFromPatch');
   assert.ok(rf.includes('chmiEchoColor(p)'),
     'čtení pole počítá jen barvy ze škály legendy');
-  assert.ok(html.includes('>v34<'),'aktuální verze: v34');
+  assert.ok(html.includes('>v35b<'),'aktuální verze: v35b (kolo 35b)');
   const swSrc = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-  assert.ok(swSrc.includes('bude-prset-v20'),'service worker v20');
+  assert.ok(swSrc.includes('bude-prset-v21'),'service worker v20');
+});
+
+/* ===== Kolo 35b: pojistná síť gtNetArm a strop čekání na ČHMÚ =====
+   Dave 27. 11., mobil, Líšeň: verdikt visel v „ověřuji“ („čekám na:
+   radar ČHMÚ“) i po mnoha minutách. Příčina: gtNetArm držel pořadí
+   gtPrune() → podmínka, takže expirované strážky smazal dřív, než se
+   zeptal, a mrtvý časovač pak nikdy nepřekreslil. Druhá pojistka:
+   chmiDeadlineFire označí zavěšené ČHMÚ chybou po 45 s, ať se spustí
+   standardní dotahy. */
+test('kolo 35b: gtNetArm překreslí, i když strážky mezitím expirovaly (pořadí prune/podmínka)',()=>{
+  const timers=[];
+  let recomputes=0;
+  const c=context(['gtStart','gtSettle','gtPendingLabels','gtPrune','gtNetArm'],{
+    gtPending:{},gtNetTimer:null,GT_MAX_PENDING_MS:90000,
+    GT_LABELS:{chmi:'radar ČHMÚ',radar:'radarový kompozit'},
+    GT_OBS:{chmi:1,radar:1},
+    setTimeout:(f,ms)=>{timers.push({f,ms});return timers.length;},
+    recomputeWhen:()=>{recomputes++;}
+  });
+  c.gtStart('chmi');
+  assert.equal(timers.length,1,'časovač se vyzbrojil při prvním gtStart');
+  assert.equal(timers[0].ms,92000,'GT_MAX_PENDING_MS + 2 s');
+  /* strážka visí od započetí → nyní je jí 95 s, tj. expirovaná */
+  c.gtPending.chmi=Date.now()-95000;
+  timers[0].f();
+  assert.equal(recomputes,1,'expirovaná strážka PŘED prune visela → recompute proběhl');
+  assert.equal(c.gtPendingLabels().length,0,'po prune registr prázdný');
+  assert.equal(c.gtNetTimer,null,'časovač se po výstřelu zasekl (není vyzbrojený)');
+  /* druhé kolo: nic nevisí → žádný zbytečný recompute */
+  const before=recomputes;
+  timers.length=0;
+  c.gtNetArm();
+  assert.equal(timers.length,1);
+  timers[0].f();
+  assert.equal(recomputes,before,'bez visících strážek se nepřekresluje');
+});
+test('kolo 35b: chmiDeadlineFire zavěšené ČHMÚ označí chybou a strážku uvolní',()=>{
+  const events=[];
+  const c=context(['chmiDeadlineFire'],{
+    isStale:()=>false,chmiState:null,chmiNote:'',
+    gtPendingHas:k=>k==='chmi',gtSettle:k=>events.push('settle:'+k),
+    renderCompass:()=>events.push('compass'),recomputeWhen:()=>events.push('recompute'),
+    bpChmiDeadline:1
+  });
+  c.chmiDeadlineFire(7);
+  assert.equal(c.chmiState,'error');
+  assert.match(c.chmiNote,/45 s/);
+  assert.deepEqual(events,['settle:chmi','compass','recompute']);
+  /* už dořešené (data i chyba) → notouch */
+  const c2=context(['chmiDeadlineFire'],{
+    isStale:()=>false,chmiState:{nowWet:true},chmiNote:'x',
+    gtPendingHas:()=>{throw Error('nesmí se ptát');},gtSettle:()=>{throw Error('nesmí settle');},
+    renderCompass:()=>{},recomputeWhen:()=>{}
+  });
+  c2.chmiDeadlineFire(7);
+  assert.equal(c2.chmiState.nowWet,true,'data zůstala nedotčena');
+  /* zastaralé načítání (jiná lokalita) → notouch */
+  const c3=context(['chmiDeadlineFire'],{
+    isStale:()=>true,chmiState:null,chmiNote:'',
+    gtPendingHas:()=>{throw Error('nesmí se ptát');},gtSettle:()=>{},renderCompass:()=>{},recomputeWhen:()=>{}
+  });
+  c3.chmiDeadlineFire(8);
+  assert.equal(c3.chmiState,null,'zastaralý pokrok se nevyhodnocuje');
+});
+test('kolo 35b: loadChmi strop čekání vyzbrojuje jen s DOM setTimeout a čistí předchozí',()=>{
+  const load=fn('loadChmi');
+  assert.ok(load.includes('chmiDeadlineFire(myId)'),'strop volá pojistku');
+  assert.ok(load.includes('clearTimeout(bpChmiDeadline)'),'re-arm čistí předchozí strop');
+  assert.ok(load.includes('typeof setTimeout === "function"'),'bez DOM (testy) se strop nevyzbrojuje');
 });

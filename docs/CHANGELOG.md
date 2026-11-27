@@ -672,6 +672,42 @@ Testy: 1 nový strukturní (kolo 22), 3 testy kola 14 odstraněny
 (funkce přepínače už neexistují), kolo 15 strukturní test upraven.
 Celkem 149/149. Build 500 799 B.
 
+## Kolo 35b — oprava pojistné sítě „ověřuji“ a stropu čekání na ČHMÚ (27. 11.)
+
+Dave 27. 11. 17:00, mobil, Líšeň: verdikt visel ve stavu „Ověřuji /
+čekám na: radar ČHMÚ“ i po mnoha minutách, přestože všechna data
+dorazila (radarový kompozit hlásil srážky nad obcí, celý řetěz ČHMÚ
+přes Worker odpovídal 200). Dvoufázová analýza:
+
+1. **Pojistná síť gtNetArm (kolo 30) byla mrtvá.** Časovač po
+   92 s volal gtPrune() PŘED podmínkou „pokud něco stále visí“, takže
+   expirované strážky smazal dřív, než se zeptal, podmínka byla vždy
+   prázdná a překreslení nikdy neproběhlo. Náprava: registr se nově
+   ptá napřímo (bez gtPrune — pozor, gtPendingLabels() interně prune
+   volá také, takže nestačilo jen prohodit řádky), potom se
+   expirované smažou a recomputeWhen proběhne vždy, když něco viselo.
+   Verdikt se tak dopíše nejpozději ~92 s od startu, i kdyby se
+   žádné pozorování nedotáhlo.
+2. **Strop čekání na ČHMÚ (45 s).** Obrázky ČHMÚ (legenda, snímky,
+   TAR členové) se načítají jako <img>; na utuhlém mobilním
+   připojení se stane, že nespustí onload ani onerror a modul visí.
+   Nová pojistka chmiDeadlineFire po 45 s označí zavěšené ČHMÚ
+   chybou, uvolní strážku a spustí standardní dotahy (+20 s, +60 s).
+   Dořešené stavy (data i chyba) a zastaralá načítání nedotčená.
+
+Testy: 172/172 (nové 3: pořadí prune/podmínka včetně expirované
+strážky a klidu bez visících strážek; chmiDeadlineFire všechny tři
+stavy; source kontrola vyzbrojení stropu). Chyba byla latentní od
+kola 30, kolo 35 ji nezpůsobilo ani neztížilo.
+
+Souběžně diagnostikováno (beze změny kódu): Open-Meteo ensemble
+vrací pro IP Workera 429 trvale od 26. 11. 17:00 UTC (bezplatná
+kvóta 10 000 volání/den se počítá per IP, Cloudflare Worker sdílí
+výstupní IP s cizím provozem). Ensemble není strážka, verdikt to
+neblokuje; aplikace ensemble kaskádovitě postrádá bez dopadu na
+zbývající zdroje. Sběrač ens chyby eviduje (err „ens“), sběrná
+řada fc/met/rv pokračuje.
+
 ## Kolo 35 — měřená implementace 14denní analýzy přesnosti: hory, ocas za oknem, D2 polygon, rotace měst (26. 11.)
 
 První kolo postavené přímo na datech: 12.–26. 11. 2026 sběrač nasbíral
